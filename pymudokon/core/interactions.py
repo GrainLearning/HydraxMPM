@@ -39,18 +39,14 @@ class InteractionsContainer(NamedTuple):
     For example, for a 2D linear element, stencil size 4 is used,
     3D linear element stencil size 8, and 2D quadratic element stencil size of 9.
 
-    Note particle-node pair interactions are stored in a shape of (number of particles,stencil_size,dim),
-    except for the hash array which is (number of particles*stencil_size).
-    This is to reduce overhead in calculations during transfer schemes.
-
     Attributes:
         intr_dist_array (Union[jnp.array, jnp.float32]:
             Distance between particle-node pair interactions.
             in the node's local coordinate system.
-            Shape is `(number of particles,stencil_size,dim)`.
+            Shape is `(number of particless*stencil_size,dim,1)`.
         intr_bins_array (Union[jnp.array, jnp.int32]):
             Node-grid bins of the particle-node pair interactions.
-            Shape is `(number of particles,stencil_size,dim)`.
+            Shape is `(number of particles*stencil_size,dim,1)`.
         intr_hash_array (Union[jnp.array, jnp.int32]):
             Cartesian hash of particle-node pair interactions.
             Shape is `(number of particles*stencil_size)`.
@@ -87,9 +83,9 @@ def init(
     stencil_size, dim = stencil_array.shape
     return InteractionsContainer(
         intr_dist_array=jnp.zeros(
-            (num_particles, stencil_size, dim), dtype=jnp.float32
+            (num_particles*stencil_size, dim,1), dtype=jnp.float32
         ),
-        intr_bins_array=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.int32),
+        intr_bins_array=jnp.zeros((num_particles*stencil_size, dim,1), dtype=jnp.int32),
         intr_hashes_array=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
         stencil_array=stencil_array,
     )
@@ -171,6 +167,9 @@ def get_interactions(
 
     Top level function to get the particle-node pair interactions.
 
+    Arrays are reshaped to `(num_particles*stencil_size,dim,1)` and `(num_particles*stencil_size,1,1)`
+    to be consistent during the transfer of information from particles to nodes.
+    
     Args:
         interactions_state (InteractionsContainer):
             interactions state for the particle and node pairs.
@@ -183,6 +182,8 @@ def get_interactions(
         InteractionsContainer:
             Updated interactions state for the particle and node pairs.
     """
+    stencil_size, dim = interactions_state.stencil_array.shape
+    
     intr_dist_array, intr_bins_array, intr_hashes_array = jax.vmap(
         vmap_interactions,
         in_axes=(0, None, None, None, None),
@@ -196,7 +197,7 @@ def get_interactions(
     )
 
     return interactions_state._replace(
-        intr_dist_array=intr_dist_array,
-        intr_bins_array=intr_bins_array,
+        intr_dist_array=intr_dist_array.reshape(-1, dim, 1),
+        intr_bins_array=intr_bins_array.reshape(-1, dim, 1),
         intr_hashes_array=intr_hashes_array.reshape(-1),
     )

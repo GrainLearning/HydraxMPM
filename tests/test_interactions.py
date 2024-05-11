@@ -33,9 +33,9 @@ class TestInteractions(unittest.TestCase):
 
         assert isinstance(interactions_state, pm.interactions.InteractionsContainer)
 
-        np.testing.assert_allclose(interactions_state.intr_dist_array, jnp.zeros((2, 4, 2), dtype=jnp.float32))
+        np.testing.assert_allclose(interactions_state.intr_dist_array, jnp.zeros((8, 2, 1), dtype=jnp.float32))
 
-        np.testing.assert_allclose(interactions_state.intr_bins_array, jnp.zeros((2, 4, 2), dtype=jnp.int32))
+        np.testing.assert_allclose(interactions_state.intr_bins_array, jnp.zeros((8, 2, 1), dtype=jnp.int32))
 
         np.testing.assert_allclose(interactions_state.intr_hashes_array, jnp.zeros((8), dtype=jnp.int32))
 
@@ -106,28 +106,28 @@ class TestInteractions(unittest.TestCase):
 
         interactions_state = pm.core.interactions.get_interactions(interactions_state, particles_state, nodes_state)
 
-        np.testing.assert_allclose(interactions_state.intr_dist_array.shape, (3, 4, 2))
+        np.testing.assert_allclose(interactions_state.intr_dist_array.shape, (12, 2, 1))
 
         np.testing.assert_allclose(
             interactions_state.intr_dist_array,
             jnp.array(
                 [
-                    [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]],
-                    [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]],
-                    [[0.6, 0.8], [-0.4, 0.8], [0.6, -0.2], [-0.4, -0.2]],
+                    [[0.5], [0.5]], [[-0.5], [0.5]], [[0.5], [-0.5]], [[-0.5], [-0.5]],
+                    [[0.5], [0.5]], [[-0.5], [0.5]], [[0.5], [-0.5]], [[-0.5], [-0.5]],
+                    [[0.6], [0.8]], [[-0.4], [0.8]], [[0.6], [-0.2]], [[-0.4], [-0.2]],
                 ]
             ),
         )
 
-        np.testing.assert_allclose(interactions_state.intr_bins_array.shape, (3, 4, 2))
+        np.testing.assert_allclose(interactions_state.intr_bins_array.shape, (12, 2, 1))
 
         np.testing.assert_allclose(
             interactions_state.intr_bins_array,
             jnp.array(
                 [
-                    [[0, 0], [1, 0], [0, 1], [1, 1]],
-                    [[0, 0], [1, 0], [0, 1], [1, 1]],
-                    [[1, 0], [2, 0], [1, 1], [2, 1]],
+                    [[0], [0]], [[1], [0]], [[0], [1]], [[1], [1]],
+                    [[0], [0]], [[1], [0]], [[0], [1]], [[1], [1]],
+                    [[1], [0]], [[2], [0]], [[1], [1]], [[2], [1]],
                 ]
             ),
         )

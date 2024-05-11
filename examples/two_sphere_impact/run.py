@@ -77,49 +77,49 @@ vel1 = np.ones(circles[0].shape) * 0.1
 vel2 = np.ones(circles[1].shape) * -0.1
 vels = np.vstack((vel1, vel2))
 
-
-
-
-particles = pm.particles.init(
+particles_state = pm.particles.init(
     positions=jnp.array(pos),
     velocities=jnp.array(vels),
     density=1000
 )
 
-particles = pm.particles.calculate_volume(particles, cell_size, particles_per_cell=4)
+particles_state = pm.particles.calculate_volume(
+    particles_state, cell_size, particles_per_cell=4)
 
-particles = particles._replace(
-    masses_array=1000 * particles.volumes_array,
+particles_state = particles_state._replace(
+    masses_array=1000 * particles_state.volumes_array,
 )
 
-nodes = pm.nodes.init(
+nodes_state= pm.nodes.init(
     origin=jnp.array([0.0, 0.0]),
     end=jnp.array([1.0, 1.0]),
     node_spacing=cell_size,
     particles_per_cell=4
 )
-material = pm.linearelastic_mat.init(
+material_state = pm.linearelastic_mat.init(
         E=1000.0, nu=0.3, num_particles=len(pos), dim=2
 )
 
-usl = pm.usl.init(
-    particles=particles, nodes=nodes, materials=material, alpha=alpha, dt=dt
+usl_state = pm.usl.init(
+    particles_state=particles_state,
+    nodes_state=nodes_state,
+    material_state=material_state,
+    alpha=alpha,
+    dt=dt
 )
-
 
 import pyvista as pv
 
-
 def some_callback(package):
-    usl,step = package # unused intentionally
+    usl_state,step = package # unused intentionally
 
     print(f"[JAX] output {step}/{total_steps}")
-    points = usl.particles.positions_array
-    velocities = usl.particles.velocities_array
+    points = usl_state.particles_state.positions_array
+    velocities = usl_state.particles_state.velocities_array
     points_3d = jnp.pad(points, [(0, 0), (0, 1)], mode='constant').__array__()
 
     velocities_3d = jnp.pad(velocities, [(0, 0), (0, 1)], mode='constant').__array__()
-
+    # print(velocities_3d)
     # # Create a PolyData object from the points
     cloud = pv.PolyData(points_3d)
 
@@ -128,10 +128,8 @@ def some_callback(package):
 
     cloud.save(f"./output/particles{step}.vtp")
 
-
-
-usl = pm.usl.solve(
-    usl,
+usl_state = pm.usl.solve(
+    usl_state,
     num_steps=total_steps,
     output_step=output_steps,
     output_function=some_callback

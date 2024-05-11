@@ -80,23 +80,24 @@ def vmap_linear_shapefunction(
     abs_intr_dist = jnp.abs(intr_dist)
     basis = jnp.where(abs_intr_dist < 1.0, 1.0 - abs_intr_dist, 0.0)
     dbasis = jnp.where(abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0)
-    N0 = basis[:, 0]
-    N1 = basis[:, 1]
-    dN0 = dbasis[:, 0]
-    dN1 = dbasis[:, 1]
+    N0 = basis[0,:]
+    N1 = basis[1,:]
+    dN0 = dbasis[0,:]
+    dN1 = dbasis[1,:]
 
     shapef_array = jnp.expand_dims(N0 * N1, axis=1)
 
     shapef_grad_array = jnp.array([dN0 * N1, N0 * dN1])
 
     # shapes of returned array are
-    # (num_particles, stencil_size, 1)
-    # and (num_particles, stencil_size, dim)
-    return shapef_array, shapef_grad_array.T
+    # (num_particles*stencil_size, 1, 1)
+    # and (num_particles*stencil_size, dim,1)
+    # respectively
+    return shapef_array, shapef_grad_array
 
 
 def calculate_shapefunction(
-    shapefunction_state: ShapeFunctionContainer,
+    shapefunctions_state: ShapeFunctionContainer,
     nodes_state: NodesContainer,
     interactions_state: InteractionsContainer,
 ) -> ShapeFunctionContainer:
@@ -114,8 +115,9 @@ def calculate_shapefunction(
     Returns:
         ShapeFunctionContainer: _description_
     """
+
     shapef_array, shapef_grad_array = jax.vmap(vmap_linear_shapefunction, in_axes=(0, None), out_axes=(0, 0))(
         interactions_state.intr_dist_array, nodes_state.inv_node_spacing
     )
 
-    return shapefunction_state._replace(shapef_array=shapef_array, shapef_grad_array=shapef_grad_array)
+    return shapefunctions_state._replace(shapef_array=shapef_array, shapef_grad_array=shapef_grad_array)

@@ -1,3 +1,8 @@
+# Project specific
+poetry.lock
+output_vid.avi
+frames.*
+particles*.vtp
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

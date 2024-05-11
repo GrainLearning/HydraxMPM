@@ -58,27 +58,23 @@ class TestShapeFunctions(unittest.TestCase):
 
         shapef_array, shapef_grad_array = jax.vmap(
             pm.linear_shp.vmap_linear_shapefunction, in_axes=(0, None), out_axes=(0, 0)
-        )(intr_dist_array, inv_node_spacing)
+        )(intr_dist_array.reshape(-1,2,1), inv_node_spacing)
 
-        np.testing.assert_allclose(shapef_array.shape, (2, 4, 1))
+
+        np.testing.assert_allclose(shapef_array.shape, (8, 1, 1))
 
         np.testing.assert_allclose(
             shapef_array,
-            jnp.array([[[0.25], [0.25], [0.25], [0.25]], [[0.08], [0.12], [0.32], [0.48]]]),
+            jnp.array([[[0.25]], [[0.25]], [[0.25]], [[0.25]], [[0.08]], [[0.12]], [[0.32]], [[0.48]]]),
         )
 
-        np.testing.assert_allclose(shapef_grad_array.shape, (2, 4, 2))
+        np.testing.assert_allclose(shapef_grad_array.shape, (8, 2, 1))
 
         np.testing.assert_allclose(
             shapef_grad_array,
             [
-                [[-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0], [1.0, 1.0]],
-                [
-                    [-0.39999998, -0.79999995],
-                    [0.39999998, -1.2],
-                    [-1.6, 0.79999995],
-                    [1.6, 1.2],
-                ],
+                [[-1.0], [-1.0]], [[1.0], [-1.0]], [[-1.0], [1.0]], [[1.0], [1.0]],
+                [[-0.4], [-0.8]],[[0.4], [-1.2]],[[-1.6], [0.8]],[[1.6], [1.2]],
             ],
         )
 
@@ -110,26 +106,21 @@ class TestShapeFunctions(unittest.TestCase):
             shapefunction_state, nodes_state, interactions_state
         )
 
-        np.testing.assert_allclose(shapefunction_state.shapef_array.shape, (2, 4, 1))
+        np.testing.assert_allclose(shapefunction_state.shapef_array.shape, (8, 1, 1))
 
         np.testing.assert_allclose(
             shapefunction_state.shapef_array,
-            jnp.array([[[0.25], [0.25], [0.25], [0.25]], [[0.08], [0.12], [0.32], [0.48]]]),
+            jnp.array([[[0.25]], [[0.25]], [[0.25]], [[0.25]], [[0.08]], [[0.12]], [[0.32]], [[0.48]]]),
         )
 
-        np.testing.assert_allclose(shapefunction_state.shapef_grad_array.shape, (2, 4, 2))
+        np.testing.assert_allclose(shapefunction_state.shapef_grad_array.shape, (8, 2, 1))
 
         np.testing.assert_allclose(
             shapefunction_state.shapef_grad_array,
             [
-                [[-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0], [1.0, 1.0]],
-                [
-                    [-0.39999998, -0.79999995],
-                    [0.39999998, -1.2],
-                    [-1.6, 0.79999995],
-                    [1.6, 1.2],
-                ],
-            ],
+                [[-1.0], [-1.0]], [[1.0], [-1.0]], [[-1.0], [1.0]], [[1.0], [1.0]],
+                [[-0.4], [-0.8]],[[0.4], [-1.2]],[[-1.6], [0.8]],[[1.6], [1.2]],
+            ]
         )
 
 

@@ -36,6 +36,7 @@ class LinearElasticContainer(NamedTuple):
             Elastic strain tensors.
             Shape is `(number of particles,3,3)`.
     """
+
     # TODO we can replace this with incremental form / or hyperelastic form
     E: Union[jnp.array, jnp.float32]
     nu: Union[jnp.array, jnp.float32]
@@ -44,7 +45,8 @@ class LinearElasticContainer(NamedTuple):
 
     # arrays
     eps_e: Union[jnp.array, jnp.float32]
-    
+
+
 def init(
     E: jnp.float32, nu: jnp.float32, num_particles, dim: jnp.int16 = 3
 ) -> LinearElasticContainer:
@@ -70,8 +72,7 @@ def init(
     G = E / (2.0 * (1.0 + nu))
     K = E / (3.0 * (1.0 - 2.0 * nu))
     eps_e = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
-    return LinearElasticContainer(
-        E=E, nu=nu, G=G, K=K, eps_e=eps_e)
+    return LinearElasticContainer(E=E, nu=nu, G=G, K=K, eps_e=eps_e)
 
 
 def vmap_update(
@@ -134,16 +135,21 @@ def vmap_update(
 
 
 def update_stress(
-    particles: ParticlesContainer, material: LinearElasticContainer, dt: jnp.float32
+    particles_state: ParticlesContainer,
+    material_state: LinearElasticContainer,
+    dt: jnp.float32
 ) -> Tuple[ParticlesContainer, LinearElasticContainer]:
     """Update stress and strain for all particles.
 
     Called by the MPM solver (e.g., see :func:`~usl.update`).
 
     Args:
-        particles (ParticlesContainer): _description_
-        material (LinearElasticContainer): _description_
-        dt (jnp.float32): _description_
+        particles_state (ParticlesContainer):
+            State of the particles prior to the update.
+        material_state (LinearElasticContainer):
+            State of the material prior to the update.
+        dt (jnp.float32):
+            Time step.
 
     Returns:
         Tuple[ParticlesContainer, LinearElasticContainer]:
@@ -155,12 +161,14 @@ def update_stress(
         >>> particles_state, material_state = \
             pm.materials.linearelastic.update_stress(particles_state, material_state, 0.001)
     """
-    stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None, None))(
-        material.eps_e, particles.velgrad_array, material.G, material.K, 0.001
+    stress, eps_e = jax.vmap(vmap_update,
+                            in_axes=(0, 0, None, None, None),
+                            out_axes =(0,0))(
+        material_state.eps_e, particles_state.velgrad_array, material_state.G, material_state.K, 0.001
     )
 
-    material = material._replace(eps_e=eps_e)
+    material_state = material_state._replace(eps_e=eps_e)
 
-    particles = particles._replace(stresses_array=stress)
+    particles_state = particles_state._replace(stresses_array=stress)
 
-    return particles, material
+    return particles_state, material_state
