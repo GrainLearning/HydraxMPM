@@ -23,40 +23,40 @@ class TestNodes(unittest.TestCase):
     @staticmethod
     def test_init():
         """Unit test to initialize the NodesContainer class."""
-        nodes_state = pm.nodes.init(
+        nodes = pm.nodes.init(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
             particles_per_cell=1,
         )
 
-        assert isinstance(nodes_state, pm.core.nodes.NodesContainer)
+        assert isinstance(nodes, pm.core.nodes.NodesContainer)
 
-        assert nodes_state.num_nodes_total == 9
+        assert nodes.num_nodes_total == 9
 
-        np.testing.assert_allclose(nodes_state.masses_array, jnp.zeros(9))
+        np.testing.assert_allclose(nodes.masses_array, jnp.zeros(9))
 
-        np.testing.assert_allclose(nodes_state.moments_nt_array, jnp.zeros((9, 2)))
+        np.testing.assert_allclose(nodes.moments_nt_array, jnp.zeros((9, 2)))
 
-        np.testing.assert_allclose(nodes_state.moments_array, jnp.zeros((9, 2)))
+        np.testing.assert_allclose(nodes.moments_array, jnp.zeros((9, 2)))
 
     @staticmethod
     def test_refresh():
         """Unit test to refresh/reset the state of the nodes."""
-        nodes_state = pm.core.nodes.init(
+        nodes = pm.core.nodes.init(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
             particles_per_cell=1,
         )
 
-        nodes_state = nodes_state._replace(masses_array=jnp.ones(9).astype(jnp.float32))
+        nodes = nodes._replace(masses_array=jnp.ones(9).astype(jnp.float32))
 
-        np.testing.assert_allclose(nodes_state.masses_array, jnp.ones(9))
+        np.testing.assert_allclose(nodes.masses_array, jnp.ones(9))
 
-        nodes_state = pm.core.nodes.refresh(nodes_state)
+        nodes = pm.core.nodes.refresh(nodes)
 
-        np.testing.assert_allclose(nodes_state.masses_array, jnp.zeros(9))
+        np.testing.assert_allclose(nodes.masses_array, jnp.zeros(9))
 
 
 if __name__ == "__main__":

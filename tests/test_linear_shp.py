@@ -25,14 +25,14 @@ class TestShapeFunctions(unittest.TestCase):
     def test_init():
         """Unit test to test initialization."""
         # 2D linear element stencil size of 4
-        shapefunction_state = pm.linear_shp.init(num_particles=2, stencil_size=4, dim=2)
+        shapefunction = pm.linear_shp.init(num_particles=2, stencil_size=4, dim=2)
 
-        assert isinstance(shapefunction_state, pm.shapefunctions.linear_shp.ShapeFunctionContainer)
+        assert isinstance(shapefunction, pm.shapefunctions.linear_shp.ShapeFunctionContainer)
 
-        np.testing.assert_allclose(shapefunction_state.shapef_array, jnp.zeros((2, 4), dtype=jnp.float32))
+        np.testing.assert_allclose(shapefunction.shapef_array, jnp.zeros((2, 4), dtype=jnp.float32))
 
         np.testing.assert_allclose(
-            shapefunction_state.shapef_grad_array,
+            shapefunction.shapef_grad_array,
             jnp.zeros((2, 4, 2), dtype=jnp.float32),
         )
 
@@ -81,9 +81,9 @@ class TestShapeFunctions(unittest.TestCase):
     @staticmethod
     def test_calculate_shapefunction():
         """Test the linear shape function for top level container input."""
-        particles_state = pm.core.particles.init(positions=jnp.array([[0.25, 0.25], [0.8, 0.4]]))
+        particles = pm.core.particles.init(positions=jnp.array([[0.25, 0.25], [0.8, 0.4]]))
 
-        nodes_state = pm.core.nodes.init(
+        nodes = pm.core.nodes.init(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
@@ -92,31 +92,31 @@ class TestShapeFunctions(unittest.TestCase):
 
         stencil_array = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-        interactions_state = pm.core.interactions.init(
+        interactions = pm.core.interactions.init(
             stencil_array=stencil_array, num_particles=3
         )  # unused intentionally
 
-        interactions_state = pm.core.interactions.get_interactions(interactions_state, particles_state, nodes_state)
+        interactions = pm.core.interactions.get_interactions(interactions, particles, nodes)
 
-        shapefunction_state = pm.linear_shp.init( # noqa: F841
+        shapefunction = pm.linear_shp.init( # noqa: F841
             num_particles=2, stencil_size=4, dim=2
         )
 
-        shapefunction_state = pm.linear_shp.calculate_shapefunction(
-            shapefunction_state, nodes_state, interactions_state
+        shapefunction = pm.linear_shp.calculate_shapefunction(
+            shapefunction, nodes, interactions
         )
 
-        np.testing.assert_allclose(shapefunction_state.shapef_array.shape, (8, 1, 1))
+        np.testing.assert_allclose(shapefunction.shapef_array.shape, (8, 1, 1))
 
         np.testing.assert_allclose(
-            shapefunction_state.shapef_array,
+            shapefunction.shapef_array,
             jnp.array([[[0.25]], [[0.25]], [[0.25]], [[0.25]], [[0.08]], [[0.12]], [[0.32]], [[0.48]]]),
         )
 
-        np.testing.assert_allclose(shapefunction_state.shapef_grad_array.shape, (8, 2, 1))
+        np.testing.assert_allclose(shapefunction.shapef_grad_array.shape, (8, 2, 1))
 
         np.testing.assert_allclose(
-            shapefunction_state.shapef_grad_array,
+            shapefunction.shapef_grad_array,
             [
                 [[-1.0], [-1.0]], [[1.0], [-1.0]], [[-1.0], [1.0]], [[1.0], [1.0]],
                 [[-0.4], [-0.8]],[[0.4], [-1.2]],[[-1.6], [0.8]],[[1.6], [1.2]],

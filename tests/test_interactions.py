@@ -29,15 +29,15 @@ class TestInteractions(unittest.TestCase):
         # 2D linear element stencil size of 4
         stencil_array = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-        interactions_state = pm.core.interactions.init(stencil_array=stencil_array, num_particles=2)
+        interactions = pm.core.interactions.init(stencil_array=stencil_array, num_particles=2)
 
-        assert isinstance(interactions_state, pm.interactions.InteractionsContainer)
+        assert isinstance(interactions, pm.interactions.InteractionsContainer)
 
-        np.testing.assert_allclose(interactions_state.intr_dist_array, jnp.zeros((8, 2, 1), dtype=jnp.float32))
+        np.testing.assert_allclose(interactions.intr_dist_array, jnp.zeros((8, 2, 1), dtype=jnp.float32))
 
-        np.testing.assert_allclose(interactions_state.intr_bins_array, jnp.zeros((8, 2, 1), dtype=jnp.int32))
+        np.testing.assert_allclose(interactions.intr_bins_array, jnp.zeros((8, 2, 1), dtype=jnp.int32))
 
-        np.testing.assert_allclose(interactions_state.intr_hashes_array, jnp.zeros((8), dtype=jnp.int32))
+        np.testing.assert_allclose(interactions.intr_hashes_array, jnp.zeros((8), dtype=jnp.int32))
 
     @staticmethod
     def test_vmap_interactions():
@@ -90,8 +90,8 @@ class TestInteractions(unittest.TestCase):
     @staticmethod
     def test_get_interactions():
         """Unit test to get the particle-node pair interactions (top-level)."""
-        particles_state = pm.core.particles.init(positions=jnp.array([[0.25, 0.25], [0.25, 0.25], [0.8, 0.4]]))
-        nodes_state = pm.core.nodes.init(
+        particles = pm.core.particles.init(positions=jnp.array([[0.25, 0.25], [0.25, 0.25], [0.8, 0.4]]))
+        nodes = pm.core.nodes.init(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
@@ -100,16 +100,16 @@ class TestInteractions(unittest.TestCase):
 
         stencil_array = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-        interactions_state = pm.core.interactions.init(
+        interactions = pm.core.interactions.init(
             stencil_array=stencil_array, num_particles=3
         )  # unused intentionally
 
-        interactions_state = pm.core.interactions.get_interactions(interactions_state, particles_state, nodes_state)
+        interactions = pm.core.interactions.get_interactions(interactions, particles, nodes)
 
-        np.testing.assert_allclose(interactions_state.intr_dist_array.shape, (12, 2, 1))
+        np.testing.assert_allclose(interactions.intr_dist_array.shape, (12, 2, 1))
 
         np.testing.assert_allclose(
-            interactions_state.intr_dist_array,
+            interactions.intr_dist_array,
             jnp.array(
                 [
                     [[0.5], [0.5]], [[-0.5], [0.5]], [[0.5], [-0.5]], [[-0.5], [-0.5]],
@@ -119,10 +119,10 @@ class TestInteractions(unittest.TestCase):
             ),
         )
 
-        np.testing.assert_allclose(interactions_state.intr_bins_array.shape, (12, 2, 1))
+        np.testing.assert_allclose(interactions.intr_bins_array.shape, (12, 2, 1))
 
         np.testing.assert_allclose(
-            interactions_state.intr_bins_array,
+            interactions.intr_bins_array,
             jnp.array(
                 [
                     [[0], [0]], [[1], [0]], [[0], [1]], [[1], [1]],
@@ -133,9 +133,9 @@ class TestInteractions(unittest.TestCase):
         )
 
         # hashes must be reshaped to (num_particles * stencil_size,)
-        np.testing.assert_allclose(interactions_state.intr_hashes_array.shape, (12,))
+        np.testing.assert_allclose(interactions.intr_hashes_array.shape, (12,))
         np.testing.assert_allclose(
-            interactions_state.intr_hashes_array, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 1, 2, 4, 5])
+            interactions.intr_hashes_array, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 1, 2, 4, 5])
         )
 
 

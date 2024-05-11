@@ -31,27 +31,27 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_init():
         """Test the initialization of the isotropic linear elastic material."""
-        material_state = pm.linearelastic_mat.init(E=1000.0, nu=0.2, num_particles=2, dim=3)
+        material = pm.linearelastic_mat.init(E=1000.0, nu=0.2, num_particles=2, dim=3)
 
-        assert isinstance(material_state, pm.linearelastic_mat.LinearElasticContainer)
-        np.testing.assert_allclose(material_state.E, 1000.0)
-        np.testing.assert_allclose(material_state.nu, 0.2)
-        np.testing.assert_allclose(material_state.G, 416.666667)
-        np.testing.assert_allclose(material_state.K, 555.5555555555557)
+        assert isinstance(material, pm.linearelastic_mat.LinearElasticContainer)
+        np.testing.assert_allclose(material.E, 1000.0)
+        np.testing.assert_allclose(material.nu, 0.2)
+        np.testing.assert_allclose(material.G, 416.666667)
+        np.testing.assert_allclose(material.K, 555.5555555555557)
         np.testing.assert_allclose(
-            material_state.eps_e, jnp.zeros((2, 3, 3), dtype=jnp.float32)
+            material.eps_e, jnp.zeros((2, 3, 3), dtype=jnp.float32)
         )
 
     @staticmethod
     def test_vmap_update():
         """Test the vectorized update of the isotropic linear elastic material."""
-        material_state = pm.linearelastic_mat.init(E=1000.0, nu=0.2, num_particles=2, dim=2)
+        material = pm.linearelastic_mat.init(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
         vel_grad = jnp.stack([jnp.eye(2), jnp.eye(2)])
 
         stress, eps_e = jax.vmap(
             pm.linearelastic_mat.vmap_update, in_axes=(0, 0, None, None, None), out_axes=(0, 0)
-        )(material_state.eps_e, vel_grad, material_state.G, material_state.K, 0.001)
+        )(material.eps_e, vel_grad, material.G, material.K, 0.001)
 
         np.testing.assert_allclose(
             stress,
@@ -83,24 +83,24 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_update_stress():
         """Test the update of stress and strain for all particles."""
-        particles_state = pm.particles.init(
+        particles = pm.particles.init(
             positions=jnp.array([[0.0, 0.0], [1.0, 1.0]])
         )
 
-        particles_state = particles_state._replace(
+        particles = particles._replace(
             velgrad_array = jnp.stack([jnp.eye(2), jnp.eye(2)])
         )
 
-        material_state = pm.linearelastic_mat.init(
+        material = pm.linearelastic_mat.init(
             E=1000.0, nu=0.2, num_particles=2, dim=2
             )
 
-        particle_state, material_state = pm.linearelastic_mat.update_stress(
-            particles_state, material_state, 0.001
+        particle, material = pm.linearelastic_mat.update_stress(
+            particles, material, 0.001
         )
 
         np.testing.assert_allclose(
-            particle_state.stresses_array,
+            particle.stresses_array,
             jnp.array(
                 [
                     [
@@ -117,7 +117,7 @@ class TestLinearElastic(unittest.TestCase):
             ),
         )
         np.testing.assert_allclose(
-            material_state.eps_e,
+            material.eps_e,
             jnp.array(
                 [
                     [[0.001, 0.0], [0.0, 0.001]],
