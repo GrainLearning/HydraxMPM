@@ -19,8 +19,7 @@ class TestUSL(unittest.TestCase):
             particles_per_cell=2,
         )
 
-        shapefunctions = pm.LinearShapeFunction.register(
-            2,4,2)
+        shapefunctions = pm.LinearShapeFunction.register(2,2)
         
         material = pm.LinearIsotropicElastic.register(
             E=1000.0, nu=0.2, num_particles=2, dim=2
@@ -61,12 +60,12 @@ class TestUSL(unittest.TestCase):
         stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
         shapefunctions = pm.LinearShapeFunction.register(
-            2,4,2)
+            2,2)
 
-        interactions = pm.Interactions.register(stencil, 2)
+        interactions = pm.Interactions.register(4, 2, 2)
         
         interactions = interactions.get_interactions(
-            particles, nodes
+            particles, nodes, shapefunctions
         )
 
         shapefunctions = shapefunctions.calculate_shapefunction(
@@ -112,14 +111,12 @@ class TestUSL(unittest.TestCase):
             particles_per_cell=1,
         )
 
-        stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        shapefunctions = pm.LinearShapeFunction.register(2,2)
 
-        shapefunctions = pm.LinearShapeFunction.register(2,4,2)
-
-        interactions = pm.Interactions.register(stencil, 2)
+        interactions = pm.Interactions.register(4,2, 2)
         
         interactions = interactions.get_interactions(
-            particles, nodes
+            particles, nodes, shapefunctions
         )
 
         shapefunctions = shapefunctions.calculate_shapefunction(
@@ -177,7 +174,7 @@ class TestUSL(unittest.TestCase):
 
         material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
         
-        shapefunctions = pm.LinearShapeFunction.register(2,4,2)
+        shapefunctions = pm.LinearShapeFunction.register(2,2)
         
         usl = pm.USL.register(
             particles=particles,
@@ -207,7 +204,7 @@ class TestUSL(unittest.TestCase):
 
         material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
-        shapefunctions = pm.LinearShapeFunction.register(2,4,2)
+        shapefunctions = pm.LinearShapeFunction.register(2,2)
         
         usl = pm.USL.register(
             particles=particles,

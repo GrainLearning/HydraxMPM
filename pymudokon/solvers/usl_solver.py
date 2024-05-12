@@ -23,7 +23,7 @@ def p2g(
     interactions: Interactions,
     dt: jnp.float32,
 ) -> Nodes:
-    stencil_size, dim = interactions.stencil.shape
+    stencil_size, dim = shapefunctions.stencil.shape
 
     shapef = shapefunctions.shapef
 
@@ -65,21 +65,18 @@ def p2g(
     # node (reshape and) gather interactions
     nodes_masses = nodes.masses.at[
         interactions.intr_hashes,
-    ].add(scaled_mass.reshape(-1),
-          mode="drop")
+    ].add(scaled_mass.reshape(-1),mode="drop")
 
     nodes_moments = nodes.moments.at[
         interactions.intr_hashes
-    ].add(scaled_moments.reshape(-1, 2),
-          mode="drop"
-          )
+    ].add(scaled_moments.reshape(-1, 2), mode="drop")
 
     nodes_forces = (
         jnp.zeros_like(nodes.moments_nt)
         .at[interactions.intr_hashes]
         .add(scaled_total_forces.reshape(-1, 2),
-             mode="drop"
-             )
+            mode="drop"
+            )
     )
 
     # integrate nodes
@@ -101,7 +98,7 @@ def g2p(
     dt: jnp.float32,
 ):
     num_particles, dim = particles.positions.shape
-
+    stencil_size  = shapefunctions.stencil.shape[0]
     # Prepare shape functions
     
     shapef = shapefunctions.shapef
@@ -149,11 +146,11 @@ def g2p(
     intr_scaledgrad_vels_nt = jax.lax.batch_matmul(intr_vels_nt, shapef_grad_T)
 
     # Sum interactions to particles
-    particle_delta_vel_inc = jnp.sum(intr_scaled_delta_vels.reshape(-1, 4, 2), axis=1)
+    particle_delta_vel_inc = jnp.sum(intr_scaled_delta_vels.reshape(-1, stencil_size, 2), axis=1)
 
-    particle_vel_inc = jnp.sum(intr_scaled_vels_nt.reshape(-1, 4, 2), axis=1)
+    particle_vel_inc = jnp.sum(intr_scaled_vels_nt.reshape(-1, stencil_size, 2), axis=1)
     
-    particle_velgrads = jnp.sum(intr_scaledgrad_vels_nt.reshape(-1, 4, 2, 2), axis=1)
+    particle_velgrads = jnp.sum(intr_scaledgrad_vels_nt.reshape(-1, stencil_size, 2, 2), axis=1)
 
     # Update particle quantities
     particles_velocities = (1.0 - alpha) * particle_vel_inc + alpha * (
@@ -199,11 +196,8 @@ class USL(BaseSolver):
         dt: jnp.float32 =0.00001,
     ) -> Self:
         num_particles, dim = particles.positions.shape
-
-        # TODO - generalize this for other shape functions and dimensions
-        stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
-
-        interactions = Interactions.register(stencil, num_particles)
+        stencil_size = shapefunctions.stencil.shape[0]
+        interactions = Interactions.register(stencil_size, num_particles, dim)
 
         return cls(
             particles=particles,
@@ -225,7 +219,8 @@ class USL(BaseSolver):
 
         interactions = self.interactions.get_interactions(
             particles=particles,
-            nodes=nodes
+            nodes=nodes,
+            shapefunctions = self.shapefunctions
         )
 
         shapefunctions = self.shapefunctions.calculate_shapefunction(

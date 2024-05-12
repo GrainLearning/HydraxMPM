@@ -21,6 +21,7 @@ from typing_extensions import Self
 from .base import Base
 from .nodes import Nodes
 from .particles import Particles
+from ..shapefunctions.base_shp import BaseShapeFunction
 
 
 def vmap_interactions(
@@ -107,18 +108,15 @@ class Interactions(Base):
             Node-grid bins of the particle-node  interactions `(num_particles*stencil_size,dim,1)`, type int32.
         intr_hash (Array):
             Cartesian hash of particle-node pair interactions `(num_particles*stencil_size)`, type int32.
-        stencil (Array):
-            Stencil containing relative displacements of neighboring nodes for particle-node pair interactions.
     """
 
     # arrays
     intr_dist: Array
     intr_bins: Array
     intr_hashes: Array
-    stencil: Array
 
     @classmethod
-    def register(cls: Self, stencil: Array, num_particles: jnp.int16) -> Self:
+    def register(cls: Self, stencil_size: jnp.int16, num_particles: jnp.int16, dim: jnp.int16) -> Self:
         """Initialize the node-particle pair interactions.
 
         Args:
@@ -131,17 +129,17 @@ class Interactions(Base):
                 It is a window/box around each particle with the relative position of the particle to the node.
                 Stencil array is normally, the same for each particle/node pair.
                 Expected shape is `(stencil_size,dim)`.
+            dim (jnp.int16):
+                Dimension of the problem
 
         Returns:
             Interactions:
                 Updated interactions state for the particle and node pairs.
         """
-        stencil_size, dim = stencil.shape
         return cls(
             intr_dist=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
             intr_bins=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.int32),
             intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            stencil=stencil,
         )
 
     @jax.jit
@@ -149,6 +147,7 @@ class Interactions(Base):
         self: Self,
         particles: Particles,
         nodes: Nodes,
+        shapefunctions: BaseShapeFunction,
     ) -> Self:
         """Get the particle-node pair interactions.
 
@@ -169,7 +168,7 @@ class Interactions(Base):
             Interactions:
                 Updated interactions state for the particle and node pairs.
         """
-        stencil_size, dim = self.stencil.shape
+        stencil_size, dim = shapefunctions.stencil.shape
 
         intr_dist, intr_bins, intr_hashes = jax.vmap(
             vmap_interactions,
@@ -177,7 +176,7 @@ class Interactions(Base):
             out_axes=(0, 0, 0),
         )(
             particles.positions,
-            self.stencil,
+            shapefunctions.stencil,
             nodes.origin,
             nodes.inv_node_spacing,
             nodes.grid_size,

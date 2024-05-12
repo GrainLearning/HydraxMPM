@@ -17,7 +17,8 @@ class TestInteractions(unittest.TestCase):
         # 2D linear element stencil size of 4
         stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-        interactions = pm.Interactions.register(stencil=stencil, num_particles=2)
+        stencil_size, dim = stencil.shape
+        interactions = pm.Interactions.register(stencil_size=stencil_size, num_particles=2, dim=dim)
 
         assert isinstance(interactions, pm.Interactions)
 
@@ -85,14 +86,14 @@ class TestInteractions(unittest.TestCase):
             node_spacing=0.5,
             particles_per_cell=1,
         )
-
-        stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        
+        shapefunctions = pm.LinearShapeFunction.register(num_particles=3, dim=2)
 
         interactions = pm.Interactions.register(
-            stencil=stencil, num_particles=3
+            stencil_size=4, num_particles=3, dim=2
         )  # unused intentionally
 
-        interactions = interactions.get_interactions(particles, nodes)
+        interactions = interactions.get_interactions(particles, nodes, shapefunctions)
 
         np.testing.assert_allclose(interactions.intr_dist.shape, (12, 2, 1))
 

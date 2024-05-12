@@ -1,5 +1,5 @@
 """State and functions for managing the Material Point Method (MPM) background grid nodes."""
-
+# TODO add test for node species
 import dataclasses
 
 import jax
@@ -40,6 +40,10 @@ class Nodes(Base):
             Array of the moments of the nodes.
         moments_nt (Array):
             Array of the forward step moments of the nodes.
+        species (Array):
+            Node types.
+            e.g, for cubic shape functions there are 4 possibilities:
+            1 is boundary, 2 is left side boundary + 1, 3 middle boundary, 4 right side boundary + 1.
     """
 
     origin: Array
@@ -55,6 +59,7 @@ class Nodes(Base):
     masses: Array
     moments: Array
     moments_nt: Array
+    species: Array
 
     @classmethod
     def register(
@@ -95,7 +100,7 @@ class Nodes(Base):
         """
         inv_node_spacing = 1.0 / node_spacing
 
-        grid_size = (end - origin) / node_spacing + 1
+        grid_size = ((end - origin) / node_spacing + 1).astype(jnp.int32)
         num_nodes_total = jnp.prod(grid_size).astype(jnp.int32)
 
         _dim = origin.shape[0]
@@ -112,6 +117,7 @@ class Nodes(Base):
             masses=jnp.zeros((num_nodes_total)).astype(jnp.float32),
             moments=jnp.zeros((num_nodes_total, _dim)).astype(jnp.float32),
             moments_nt=jnp.zeros((num_nodes_total, _dim)).astype(jnp.float32),
+            species=jnp.zeros(num_nodes_total).astype(jnp.int32),
         )
 
     @jax.jit
@@ -136,25 +142,3 @@ class Nodes(Base):
             moments=self.moments.at[:].set(0.0),
             moments_nt=self.moments_nt.at[:].set(0.0),
         )
-
-    # def tree_flatten(self):
-    #     """Tree flatten the pytree nodes."""
-        
-    #     children = dataclasses.asdict(self)
-    
-    
-    # @classmethod
-    # def tree_unflatten(cls, aux_data, children):
-    #     """Unflatten the pytree nodes."""
-    #     return cls(**aux_data.unflatten(children)), None
-    
-
-    # @classmethod
-    # def tree_unflatten(cls, aux_data, children):
-    #     obj = object.__new__(cls)
-    #     # print(type(obj))
-    #     return obj
-    #     # obj.data, obj.indices, obj.indptr = children
-    #     # aux_data = {"refresh", self.refresh}
-    #     # tree["refresh"] = self.refresh
-    #     # return (jax.tree_util.tree_flatten(children), aux_data)

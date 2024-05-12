@@ -16,7 +16,7 @@ class TestShapeFunctions(unittest.TestCase):
     def test_init():
         """Unit test to test initialization."""
         # 2D linear element stencil size of 4
-        shapefunction = pm.LinearShapeFunction.register(num_particles=2, stencil_size=4, dim=2)
+        shapefunction = pm.LinearShapeFunction.register(num_particles=2, dim=2)
 
         assert isinstance(shapefunction, pm.LinearShapeFunction)
 
@@ -86,15 +86,11 @@ class TestShapeFunctions(unittest.TestCase):
             particles_per_cell=1,
         )
 
-        stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        shapefunction = pm.LinearShapeFunction.register(num_particles=2, dim=2)
 
-        interactions = pm.Interactions.register(stencil=stencil, num_particles=3)  # unused intentionally
+        interactions = pm.Interactions.register(stencil_size=4, num_particles=3, dim=2)  # unused intentionally
 
-        interactions = interactions.get_interactions(particles, nodes)
-
-        shapefunction = pm.LinearShapeFunction.register(  # noqa: F841
-            num_particles=2, stencil_size=4, dim=2
-        )
+        interactions = interactions.get_interactions(particles, nodes,shapefunction)
 
         shapefunction = shapefunction.calculate_shapefunction(nodes, interactions)
 

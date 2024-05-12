@@ -99,7 +99,9 @@ material = pm.LinearIsotropicElastic.register(
         E=1000.0, nu=0.3, num_particles=len(pos), dim=2
 )
 
-shapefunctions = pm.LinearShapeFunction.register(len(pos),4,2)
+shapefunctions = pm.CubicShapeFunction.register(len(pos),2)
+
+# nodes = shapefunctions.set_species(nodes)
 
 usl = pm.USL.register(
     particles=particles,

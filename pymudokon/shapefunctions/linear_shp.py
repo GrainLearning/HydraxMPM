@@ -48,13 +48,44 @@ def vmap_linear_shapefunction(
     # (num_particles*stencil_size, 1, 1)
     # and (num_particles*stencil_size, dim,1)
     # respectively
-    return shapef, shapef_grad,basis
+    return shapef, shapef_grad
 
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
 class LinearShapeFunction(BaseShapeFunction):
     """Linear shape functions for the particle-node interactions."""
+
+    @classmethod
+    def register(cls: Self, num_particles: jnp.int32, dim: jnp.int16) -> Self:
+        """Initializes the shape function container.
+
+        Args:
+            cls (Self):
+                self type reference
+            num_particles (jnp.int32):
+                Number of particles
+            dim (jnp.int16):
+                Dimension of the problem
+
+        Returns:
+            BaseShapeFunction:
+                Container for shape functions and gradients
+        """
+        if dim == 1:
+            stencil = jnp.array([[0.0], [1.0]])
+        if dim == 2:
+            stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        if dim == 3:
+            stencil = jnp.array([[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]])
+        
+        stencil_size = stencil.shape[0]
+        
+        return cls(
+            shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
+            shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
+            stencil=stencil
+        )
 
     @jax.jit
     def calculate_shapefunction(
@@ -76,7 +107,7 @@ class LinearShapeFunction(BaseShapeFunction):
             ShapeFunction:
                 Updated shape function state for the particle and node pairs.
         """
-        shapef, shapef_grad, basis = jax.vmap(vmap_linear_shapefunction, in_axes=(0, None), out_axes=(0, 0,0))(
+        shapef, shapef_grad = jax.vmap(vmap_linear_shapefunction, in_axes=(0, None) )(
             interactions.intr_dist, nodes.inv_node_spacing
         )
         return self.replace(shapef=shapef, shapef_grad=shapef_grad)
