@@ -1,8 +1,10 @@
-from .core import (
-    interactions,
-    particles,
-    nodes
-)
-from .material import linearelastic_mat
-from .shapefunctions import linear_shp
-from .solvers import usl
+# from .core import interactions, nodes, particles
+
+from .core.particles import Particles
+from .core.nodes import Nodes
+from .core.interactions import Interactions
+from .shapefunctions.linear_shp import LinearShapeFunction
+from .material.linearelastic_mat import LinearIsotropicElastic
+from .solvers.usl_solver import USL
+
+# from .solvers import usl

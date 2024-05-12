@@ -16,8 +16,7 @@ import pymudokon as pm
 # global
 dt = 0.001
 particles_per_cell = 4
-# shape_function = "linear"
-# output_directory = "output"
+
 total_steps, output_steps, output_start = 3000, 100, 0
 
 # particles
@@ -72,38 +71,41 @@ circles = np.array(
 
 # concatenate the two circles into a single array
 pos = np.vstack(circles)
-
+print(pos.shape)
 vel1 = np.ones(circles[0].shape) * 0.1
 vel2 = np.ones(circles[1].shape) * -0.1
 vels = np.vstack((vel1, vel2))
 
-particles_state = pm.particles.init(
+particles = pm.Particles.register(
     positions=jnp.array(pos),
     velocities=jnp.array(vels),
-    density=1000
+    original_density=1000
 )
 
-particles_state = pm.particles.calculate_volume(
-    particles_state, cell_size, particles_per_cell=4)
+particles = particles.calculate_volume(cell_size, particles_per_cell=4)
 
-particles_state = particles_state._replace(
-    masses_array=1000 * particles_state.volumes_array,
+particles = particles.replace( # TODO make internal function to calculate densities
+    masses=1000 * particles.volumes,
 )
 
-nodes_state= pm.nodes.init(
+nodes= pm.Nodes.register(
     origin=jnp.array([0.0, 0.0]),
     end=jnp.array([1.0, 1.0]),
     node_spacing=cell_size,
     particles_per_cell=4
 )
-material_state = pm.linearelastic_mat.init(
+
+material = pm.LinearIsotropicElastic.register(
         E=1000.0, nu=0.3, num_particles=len(pos), dim=2
 )
 
-usl_state = pm.usl.init(
-    particles_state=particles_state,
-    nodes_state=nodes_state,
-    material_state=material_state,
+shapefunctions = pm.LinearShapeFunction.register(len(pos),4,2)
+
+usl = pm.USL.register(
+    particles=particles,
+    nodes=nodes,
+    materials=[material],
+    shapefunctions=shapefunctions,
     alpha=alpha,
     dt=dt
 )
@@ -111,16 +113,36 @@ usl_state = pm.usl.init(
 import pyvista as pv
 
 def some_callback(package):
-    usl_state,step = package # unused intentionally
+    usl,step = package # unused intentionally
 
-    print(f"[JAX] output {step}/{total_steps}")
-    points = usl_state.particles_state.positions_array
-    velocities = usl_state.particles_state.velocities_array
+    points = usl.particles.positions
+    velocities = usl.particles.velocities
+    
     points_3d = jnp.pad(points, [(0, 0), (0, 1)], mode='constant').__array__()
 
     velocities_3d = jnp.pad(velocities, [(0, 0), (0, 1)], mode='constant').__array__()
-    # print(velocities_3d)
-    # # Create a PolyData object from the points
+    
+    # id = 350
+    # print(
+    # f"point {usl.particles.positions[id]} \n"
+    # f"velocity {usl.particles.velocities[id]}"
+    # )
+    print(f"[JAX] output {step}/{total_steps} \n")
+    # print(
+    #     f"point {usl.particles.positions[id]} \n"
+    #     f"velocity {usl.particles.velocities[id]} \n"
+    #     f"stress {usl.particles.stresses[id]} \n"
+    # )
+    # print(velocities[350])
+    # # print()
+
+    # print(usl.nodes.num_nodes_total, usl.nodes.grid_size)
+    # print(f"hashes0 {usl.interactions.intr_hashes[350*4]} ")
+    # print(f"hashes1 {usl.interactions.intr_hashes[350*4 +1]} ")
+    # print(f"hashes2 {usl.interactions.intr_hashes[350*4 +2]} ")
+    # print(f"hashes3 {usl.interactions.intr_hashes[350*4 +3]} ")
+    # # print(velocities_3d)
+    # # # Create a PolyData object from the points
     cloud = pv.PolyData(points_3d)
 
     # # Add velocities as point data
@@ -128,8 +150,7 @@ def some_callback(package):
 
     cloud.save(f"./output/particles{step}.vtp")
 
-usl_state = pm.usl.solve(
-    usl_state,
+usl = usl.solve(
     num_steps=total_steps,
     output_step=output_steps,
     output_function=some_callback

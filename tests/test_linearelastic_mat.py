@@ -31,9 +31,9 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_init():
         """Test the initialization of the isotropic linear elastic material."""
-        material = pm.linearelastic_mat.init(E=1000.0, nu=0.2, num_particles=2, dim=3)
+        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=3)
 
-        assert isinstance(material, pm.linearelastic_mat.LinearElasticContainer)
+        assert isinstance(material, pm.LinearIsotropicElastic)
         np.testing.assert_allclose(material.E, 1000.0)
         np.testing.assert_allclose(material.nu, 0.2)
         np.testing.assert_allclose(material.G, 416.666667)
@@ -45,12 +45,12 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_vmap_update():
         """Test the vectorized update of the isotropic linear elastic material."""
-        material = pm.linearelastic_mat.init(E=1000.0, nu=0.2, num_particles=2, dim=2)
+        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
         vel_grad = jnp.stack([jnp.eye(2), jnp.eye(2)])
 
         stress, eps_e = jax.vmap(
-            pm.linearelastic_mat.vmap_update, in_axes=(0, 0, None, None, None), out_axes=(0, 0)
+            pm.material.linearelastic_mat.vmap_update, in_axes=(0, 0, None, None, None), out_axes=(0, 0)
         )(material.eps_e, vel_grad, material.G, material.K, 0.001)
 
         np.testing.assert_allclose(
@@ -83,24 +83,24 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_update_stress():
         """Test the update of stress and strain for all particles."""
-        particles = pm.particles.init(
+        particles = pm.Particles.register(
             positions=jnp.array([[0.0, 0.0], [1.0, 1.0]])
         )
 
-        particles = particles._replace(
-            velgrad_array = jnp.stack([jnp.eye(2), jnp.eye(2)])
+        particles = particles.replace(
+            velgrads = jnp.stack([jnp.eye(2), jnp.eye(2)])
         )
 
-        material = pm.linearelastic_mat.init(
+        material = pm.LinearIsotropicElastic.register(
             E=1000.0, nu=0.2, num_particles=2, dim=2
             )
 
-        particle, material = pm.linearelastic_mat.update_stress(
-            particles, material, 0.001
+        particle, material = material.update_stress(
+            particles, 0.001
         )
 
         np.testing.assert_allclose(
-            particle.stresses_array,
+            particle.stresses,
             jnp.array(
                 [
                     [
