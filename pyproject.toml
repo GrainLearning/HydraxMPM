@@ -13,7 +13,7 @@ python = "^3.10"
 numpy = "^1.26.4"
 pyvista = "^0.43.5"
 ruff = "^0.4.3"
-jax = {extras = ["cuda12"], version = "^0.4.27"}
+jax = {extras = ["cpu"], version = "^0.4.28"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.1.3"

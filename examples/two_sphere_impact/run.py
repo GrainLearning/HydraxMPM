@@ -17,7 +17,7 @@ import pymudokon as pm
 dt = 0.001
 particles_per_cell = 4
 
-total_steps, output_steps, output_start = 13000, 100, 0
+total_steps, output_steps, output_start = 3000, 100, 0
 
 # particles
 circle1_center = np.array([0.255, 0.255])
@@ -99,8 +99,10 @@ material = pm.LinearIsotropicElastic.register(
         E=1000.0, nu=0.3, num_particles=len(pos), dim=2
 )
 
-shapefunctions = pm.CubicShapeFunction.register(len(pos),2)
+shapefunctions = pm.LinearShapeFunction.register(len(pos),2)
 
+# Uncomment for Cubic shape function
+# shapefunctions = pm.CubicShapeFunction.register(len(pos),2)
 # nodes = shapefunctions.set_species(nodes)
 
 usl = pm.USL.register(
