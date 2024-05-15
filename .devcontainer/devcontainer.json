@@ -1,6 +1,9 @@
 {
     "name": "python dev",
     "image": "mcr.microsoft.com/devcontainers/python:3.12",
+    "mounts": [
+		"source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached"
+	],
     "customizations":{
         "vscode": {
             "extensions":[
@@ -13,7 +16,7 @@
                 "spywhere.guides",
                 "charliermarsh.ruff"
             ],
-            "settings": { 
+            "settings": {
                 "python.pythonPath": ".venv/bin/python",
                 "editor.rulers": [120],
                 "python.testing.unittestArgs": [

@@ -15,7 +15,7 @@ pyvista = "^0.43.5"
 ruff = "^0.4.3"
 jax = {extras = ["cpu"], version = "^0.4.28"}
 typing-extensions = "^4.11.0"
-pre-commit = "^3.7.1"
+
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.1.3"
