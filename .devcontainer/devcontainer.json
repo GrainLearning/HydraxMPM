@@ -1,6 +1,6 @@
 {
     "name": "python dev",
-    "image": "python:3.10",
+    "image": "ubuntu:22.04",
     "customizations":{
         "vscode": {
             "extensions":[
@@ -11,5 +11,6 @@
                 "python.defaultInterpreterPath": "/usr/local/bin/python"
             }
         }
-    }
+    },
+    
 }
