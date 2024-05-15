@@ -1,16 +1,35 @@
 {
     "name": "python dev",
-    "image": "ubuntu:22.04",
+    "image": "mcr.microsoft.com/devcontainers/python:3.12",
     "customizations":{
         "vscode": {
             "extensions":[
                 "ms-python.python",
-                "ms-python.vscode-pylance"
+                "ms-python.vscode-pylance",
+                "GitHub.copilot",
+                "oderwat.indent-rainbow",
+                "aaron-bond.better-comments",
+                "njpwerner.autodocstring",
+                "spywhere.guides",
+                "charliermarsh.ruff"
             ],
-            "settings": {
-                "python.defaultInterpreterPath": "/usr/local/bin/python"
+            "settings": { 
+                "python.pythonPath": ".venv/bin/python",
+                "editor.rulers": [120],
+                "python.testing.unittestArgs": [
+                    "-v",
+                    "-s",
+                    "./tests",
+                    "-p",
+                    "test_*.py"
+                ],
+                "python.testing.pytestEnabled": false,
+                "python.testing.unittestEnabled": true,
+                "editor.defaultFormatter": "charliermarsh.ruff",
+                "editor.formatOnSave": true
             }
         }
     },
-    
+    "postCreateCommand": "curl -sSL https://install.python-poetry.org | python3 - && poetry install",
+
 }

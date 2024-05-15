@@ -1,18 +1,19 @@
 import dataclasses
 from typing import Callable, List
-from typing_extensions import Self
 
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
+from ..core.base import Base
 from ..core.interactions import (
     Interactions,
 )
-from ..core.base import Base
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..material.base_mat import BaseMaterial
 from ..shapefunctions.base_shp import BaseShapeFunction
+
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -21,7 +22,7 @@ class BaseSolver(Base):
     nodes: Nodes
     shapefunctions: BaseShapeFunction
     materials: List[BaseMaterial]
-    forces: List[int] # TODO
+    forces: List[int]  # TODO
     interactions: Interactions
     dt: jnp.float32
 

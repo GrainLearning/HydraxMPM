@@ -6,9 +6,7 @@ Shape functions are calculated for the particle-node interactions.
 import dataclasses
 
 import jax
-import jax.numpy as jnp
 from jax import Array
-from typing_extensions import Self
 
 from ..core.base import Base
 

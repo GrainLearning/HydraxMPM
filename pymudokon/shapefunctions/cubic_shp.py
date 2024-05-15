@@ -1,4 +1,5 @@
 """Module for containing the cubic shape functions."""
+
 # TODO add test for cubic shape function
 # TODO add docstring for cubic shape function
 import dataclasses
@@ -16,7 +17,7 @@ from .base_shp import BaseShapeFunction
 
 def vmap_cubic_shapefunction(
     intr_dist: Array,
-    intr_species:Array,
+    intr_species: Array,
     inv_node_spacing: jnp.float32,
 ) -> Tuple[Array, Array]:
     """Vectorized linear shape function calculation.
@@ -33,79 +34,73 @@ def vmap_cubic_shapefunction(
         Tuple[Array, Array]:
             Shape function and its gradient.
     """
-    get_m2_lt_m1 = (intr_dist > -2.0) & (intr_dist < -1.0) 
+    get_m2_lt_m1 = (intr_dist > -2.0) & (intr_dist < -1.0)
     get_m1_lt_0 = (intr_dist >= -1.0) & (intr_dist < 0.0)
-    get_0_lt_1 = (intr_dist >= 0.0) & (intr_dist < 1.0) 
+    get_0_lt_1 = (intr_dist >= 0.0) & (intr_dist < 1.0)
     get_1_lt_2 = (intr_dist >= 1.0) & (intr_dist < 2.0)
-    
+
     middle = intr_species == 0
     boundary = intr_species == 3
     boundary_right = intr_species == 2
     boundary_left = intr_species == 1
 
     # boundary
-    basis = jnp.where(get_1_lt_2 & boundary, 
-                    ((-1.0 / 6.0 * intr_dist + 1.) * intr_dist - 2.) * intr_dist + 4.0 / 3.0, 0.0)
-    basis = jnp.where(get_0_lt_1 & boundary, 
-                   (1.0 / 6.0 * intr_dist * intr_dist - 1.0) * intr_dist + 1.0, basis)
-    basis = jnp.where(get_m1_lt_0 & boundary, 
-                    (-1.0 / 6.0 * intr_dist * intr_dist + 1.0) * intr_dist + 1.0, basis)
-    basis = jnp.where(get_m2_lt_m1 & boundary, 
-                    ((1.0 / 6.0 * intr_dist + 1.0) * intr_dist + 2.0) * intr_dist + 4.0 / 3.0,basis)
-    dbasis = jnp.where(get_1_lt_2 & boundary, 
-                    inv_node_spacing * ((-0.5 * intr_dist + 2.) * intr_dist - 2.), 0.0)
-    dbasis = jnp.where(get_0_lt_1 & boundary, 
-                inv_node_spacing * (0.5 * intr_dist * intr_dist - 1.),dbasis)
-    dbasis = jnp.where(get_m1_lt_0 & boundary, 
-                inv_node_spacing * (-0.5 * intr_dist * intr_dist + 1.), dbasis)
-    dbasis = jnp.where(get_m2_lt_m1 & boundary, 
-                inv_node_spacing * ((0.5 * intr_dist + 2.) * intr_dist + 2.), dbasis)
-    
+    basis = jnp.where(
+        get_1_lt_2 & boundary, ((-1.0 / 6.0 * intr_dist + 1.0) * intr_dist - 2.0) * intr_dist + 4.0 / 3.0, 0.0
+    )
+    basis = jnp.where(get_0_lt_1 & boundary, (1.0 / 6.0 * intr_dist * intr_dist - 1.0) * intr_dist + 1.0, basis)
+    basis = jnp.where(get_m1_lt_0 & boundary, (-1.0 / 6.0 * intr_dist * intr_dist + 1.0) * intr_dist + 1.0, basis)
+    basis = jnp.where(
+        get_m2_lt_m1 & boundary, ((1.0 / 6.0 * intr_dist + 1.0) * intr_dist + 2.0) * intr_dist + 4.0 / 3.0, basis
+    )
+    dbasis = jnp.where(get_1_lt_2 & boundary, inv_node_spacing * ((-0.5 * intr_dist + 2.0) * intr_dist - 2.0), 0.0)
+    dbasis = jnp.where(get_0_lt_1 & boundary, inv_node_spacing * (0.5 * intr_dist * intr_dist - 1.0), dbasis)
+    dbasis = jnp.where(get_m1_lt_0 & boundary, inv_node_spacing * (-0.5 * intr_dist * intr_dist + 1.0), dbasis)
+    dbasis = jnp.where(get_m2_lt_m1 & boundary, inv_node_spacing * ((0.5 * intr_dist + 2.0) * intr_dist + 2.0), dbasis)
+
     # middle
-    basis = jnp.where(get_1_lt_2 & middle, 
-                    ((-1.0 / 6.0 * intr_dist + 1.) * intr_dist - 2.) * intr_dist + 4.0 / 3.0,0.0)
-    basis = jnp.where(get_0_lt_1 & middle, 
-                    (0.5 * intr_dist - 1) * intr_dist * intr_dist + 2.0 / 3.0, basis)
-    basis = jnp.where(get_m1_lt_0 & middle, 
-                    (-0.5 * intr_dist - 1) * intr_dist * intr_dist + 2.0 / 3.0, basis)
-    basis = jnp.where(get_m2_lt_m1 & middle, 
-                    ((1.0 / 6.0 * intr_dist + 1.) * intr_dist + 2.) * intr_dist + 4.0 / 3.0, basis)
-    dbasis = jnp.where(get_1_lt_2 & middle, 
-                    inv_node_spacing * ((-0.5 * intr_dist + 2) * intr_dist - 2.), 0.0)
-    dbasis = jnp.where(get_0_lt_1 & middle, 
-                inv_node_spacing * (3.0 / 2.0 * intr_dist - 2.) * intr_dist, dbasis)
-    dbasis = jnp.where(get_m1_lt_0 & middle, 
-                inv_node_spacing * (-3.0 / 2.0 * intr_dist - 2.) * intr_dist, dbasis)
-    dbasis = jnp.where(get_m2_lt_m1 & middle, 
-                inv_node_spacing * ((0.5 * intr_dist + 2.) * intr_dist + 2.), dbasis)
+    basis = jnp.where(
+        get_1_lt_2 & middle, ((-1.0 / 6.0 * intr_dist + 1.0) * intr_dist - 2.0) * intr_dist + 4.0 / 3.0, 0.0
+    )
+    basis = jnp.where(get_0_lt_1 & middle, (0.5 * intr_dist - 1) * intr_dist * intr_dist + 2.0 / 3.0, basis)
+    basis = jnp.where(get_m1_lt_0 & middle, (-0.5 * intr_dist - 1) * intr_dist * intr_dist + 2.0 / 3.0, basis)
+    basis = jnp.where(
+        get_m2_lt_m1 & middle, ((1.0 / 6.0 * intr_dist + 1.0) * intr_dist + 2.0) * intr_dist + 4.0 / 3.0, basis
+    )
+    dbasis = jnp.where(get_1_lt_2 & middle, inv_node_spacing * ((-0.5 * intr_dist + 2) * intr_dist - 2.0), 0.0)
+    dbasis = jnp.where(get_0_lt_1 & middle, inv_node_spacing * (3.0 / 2.0 * intr_dist - 2.0) * intr_dist, dbasis)
+    dbasis = jnp.where(get_m1_lt_0 & middle, inv_node_spacing * (-3.0 / 2.0 * intr_dist - 2.0) * intr_dist, dbasis)
+    dbasis = jnp.where(get_m2_lt_m1 & middle, inv_node_spacing * ((0.5 * intr_dist + 2.0) * intr_dist + 2.0), dbasis)
 
     # right side of the boundary 0 + h
-    basis = jnp.where(get_1_lt_2 & boundary_right, 
-                   ((-1.0 / 6.0 * intr_dist + 1) * intr_dist - 2) * intr_dist + 4.0 / 3.0,0.0)
-    basis = jnp.where(get_0_lt_1 & boundary_right, 
-                    (0.5 * intr_dist - 1.) * intr_dist * intr_dist + 2.0 / 3.0, basis)
-    basis = jnp.where(get_m1_lt_0 & boundary_right, 
-                    (-1.0 / 3.0 * intr_dist - 1.) * intr_dist * intr_dist + 2.0 / 3.0,basis)
-    dbasis = jnp.where(get_1_lt_2 & boundary_right, 
-                    inv_node_spacing * ((-0.5 * intr_dist + 2) * intr_dist - 2.), 0.0)
-    dbasis = jnp.where(get_0_lt_1 & boundary_right, 
-                inv_node_spacing * (3.0 / 2.0 * intr_dist - 2.) * intr_dist, dbasis)
-    dbasis = jnp.where(get_m1_lt_0 & boundary_right, 
-                inv_node_spacing * (-intr_dist - 2) * intr_dist, dbasis)
+    basis = jnp.where(
+        get_1_lt_2 & boundary_right, ((-1.0 / 6.0 * intr_dist + 1) * intr_dist - 2) * intr_dist + 4.0 / 3.0, 0.0
+    )
+    basis = jnp.where(get_0_lt_1 & boundary_right, (0.5 * intr_dist - 1.0) * intr_dist * intr_dist + 2.0 / 3.0, basis)
+    basis = jnp.where(
+        get_m1_lt_0 & boundary_right, (-1.0 / 3.0 * intr_dist - 1.0) * intr_dist * intr_dist + 2.0 / 3.0, basis
+    )
+    dbasis = jnp.where(get_1_lt_2 & boundary_right, inv_node_spacing * ((-0.5 * intr_dist + 2) * intr_dist - 2.0), 0.0)
+    dbasis = jnp.where(
+        get_0_lt_1 & boundary_right, inv_node_spacing * (3.0 / 2.0 * intr_dist - 2.0) * intr_dist, dbasis
+    )
+    dbasis = jnp.where(get_m1_lt_0 & boundary_right, inv_node_spacing * (-intr_dist - 2) * intr_dist, dbasis)
 
     # left side of the boundary L - h
-    basis = jnp.where(get_0_lt_1 & boundary_left, 
-                   (1.0 / 3.0 * intr_dist - 1.) * intr_dist * intr_dist + 2.0 / 3.0, 0.0)
-    basis = jnp.where(get_m1_lt_0 & boundary_left, 
-                    (-0.5 * intr_dist - 1) * intr_dist * intr_dist + 2.0 / 3.0, basis)
-    basis = jnp.where(get_m2_lt_m1 & boundary_left, 
-                    ((1.0 / 6.0 * intr_dist + 1) * intr_dist + 2) * intr_dist + 4.0 / 3.0, basis)
-    dbasis = jnp.where(get_0_lt_1 & boundary_left, 
-                    inv_node_spacing * intr_dist * (intr_dist - 2), 0.0)
-    dbasis = jnp.where(get_m1_lt_0 & boundary_left, 
-                inv_node_spacing * (-3.0 / 2.0 * intr_dist - 2.) * intr_dist, dbasis)
-    dbasis = jnp.where(get_m2_lt_m1 & boundary_left, 
-                inv_node_spacing * ((0.5 * intr_dist + 2.) * intr_dist + 2.), dbasis)
+    basis = jnp.where(
+        get_0_lt_1 & boundary_left, (1.0 / 3.0 * intr_dist - 1.0) * intr_dist * intr_dist + 2.0 / 3.0, 0.0
+    )
+    basis = jnp.where(get_m1_lt_0 & boundary_left, (-0.5 * intr_dist - 1) * intr_dist * intr_dist + 2.0 / 3.0, basis)
+    basis = jnp.where(
+        get_m2_lt_m1 & boundary_left, ((1.0 / 6.0 * intr_dist + 1) * intr_dist + 2) * intr_dist + 4.0 / 3.0, basis
+    )
+    dbasis = jnp.where(get_0_lt_1 & boundary_left, inv_node_spacing * intr_dist * (intr_dist - 2), 0.0)
+    dbasis = jnp.where(
+        get_m1_lt_0 & boundary_left, inv_node_spacing * (-3.0 / 2.0 * intr_dist - 2.0) * intr_dist, dbasis
+    )
+    dbasis = jnp.where(
+        get_m2_lt_m1 & boundary_left, inv_node_spacing * ((0.5 * intr_dist + 2.0) * intr_dist + 2.0), dbasis
+    )
 
     N0 = basis[0, :]
     N1 = basis[1, :]
@@ -147,49 +142,123 @@ class CubicShapeFunction(BaseShapeFunction):
         if dim == 1:
             stencil = jnp.array([[-1], [0], [1], [2]])
         if dim == 2:
-            stencil = jnp.array([
-                [-1, -1], [0, -1], [1, -1], [2, -1], [-1, 0], [0, 0], [1, 0], [2, 0], 
-                [-1, 1], [0, 1], [1, 1], [2, 1], [-1, 2], [0, 2], [1, 2], [2, 2]
-            ])
+            stencil = jnp.array(
+                [
+                    [-1, -1],
+                    [0, -1],
+                    [1, -1],
+                    [2, -1],
+                    [-1, 0],
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                    [-1, 1],
+                    [0, 1],
+                    [1, 1],
+                    [2, 1],
+                    [-1, 2],
+                    [0, 2],
+                    [1, 2],
+                    [2, 2],
+                ]
+            )
 
         if dim == 3:
-            stencil = jnp.array([
-                [-1, -1, -1], [-1, -1, 0], [-1, -1, 1], [-1, -1, 2], [0, -1, -1], [0, -1, 0], [0, -1, 1], [0, -1, 2], 
-                [1, -1, -1], [1, -1, 0], [1, -1, 1], [1, -1, 2], [2, -1, -1], [2, -1, 0], [2, -1, 1], [2, -1, 2], 
-                [-1, 0, -1], [-1, 0, 0], [-1, 0, 1], [-1, 0, 2], [0, 0, -1], [0, 0, 0], [0, 0, 1], [0, 0, 2], 
-                [1, 0, -1], [1, 0, 0], [1, 0, 1], [1, 0, 2], [2, 0, -1], [2, 0, 0], [2, 0, 1], [2, 0, 2], 
-                [-1, 1, -1], [-1, 1, 0], [-1, 1, 1], [-1, 1, 2], [0, 1, -1], [0, 1, 0], [0, 1, 1], [0, 1, 2], 
-                [1, 1, -1], [1, 1, 0], [1, 1, 1], [1, 1, 2], [2, 1, -1], [2, 1, 0], [2, 1, 1], [2, 1, 2], 
-                [-1, 2, -1], [-1, 2, 0], [-1, 2, 1], [-1, 2, 2], [0, 2, -1], [0, 2, 0], [0, 2, 1], [0, 2, 2], 
-                [1, 2, -1], [1, 2, 0], [1, 2, 1], [1, 2, 2], [2, 2, -1], [2, 2, 0], [2, 2, 1], [2, 2, 2]
-            ])
+            stencil = jnp.array(
+                [
+                    [-1, -1, -1],
+                    [-1, -1, 0],
+                    [-1, -1, 1],
+                    [-1, -1, 2],
+                    [0, -1, -1],
+                    [0, -1, 0],
+                    [0, -1, 1],
+                    [0, -1, 2],
+                    [1, -1, -1],
+                    [1, -1, 0],
+                    [1, -1, 1],
+                    [1, -1, 2],
+                    [2, -1, -1],
+                    [2, -1, 0],
+                    [2, -1, 1],
+                    [2, -1, 2],
+                    [-1, 0, -1],
+                    [-1, 0, 0],
+                    [-1, 0, 1],
+                    [-1, 0, 2],
+                    [0, 0, -1],
+                    [0, 0, 0],
+                    [0, 0, 1],
+                    [0, 0, 2],
+                    [1, 0, -1],
+                    [1, 0, 0],
+                    [1, 0, 1],
+                    [1, 0, 2],
+                    [2, 0, -1],
+                    [2, 0, 0],
+                    [2, 0, 1],
+                    [2, 0, 2],
+                    [-1, 1, -1],
+                    [-1, 1, 0],
+                    [-1, 1, 1],
+                    [-1, 1, 2],
+                    [0, 1, -1],
+                    [0, 1, 0],
+                    [0, 1, 1],
+                    [0, 1, 2],
+                    [1, 1, -1],
+                    [1, 1, 0],
+                    [1, 1, 1],
+                    [1, 1, 2],
+                    [2, 1, -1],
+                    [2, 1, 0],
+                    [2, 1, 1],
+                    [2, 1, 2],
+                    [-1, 2, -1],
+                    [-1, 2, 0],
+                    [-1, 2, 1],
+                    [-1, 2, 2],
+                    [0, 2, -1],
+                    [0, 2, 0],
+                    [0, 2, 1],
+                    [0, 2, 2],
+                    [1, 2, -1],
+                    [1, 2, 0],
+                    [1, 2, 1],
+                    [1, 2, 2],
+                    [2, 2, -1],
+                    [2, 2, 0],
+                    [2, 2, 1],
+                    [2, 2, 2],
+                ]
+            )
 
         stencil_size = stencil.shape[0]
-        
+
         return cls(
             shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
             shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
-            stencil=stencil
+            stencil=stencil,
         )
 
-    def set_species(self:Self, nodes: Nodes):
+    def set_species(self: Self, nodes: Nodes):
         species = jnp.ones(nodes.grid_size).astype(jnp.int32)
         species = species.at[:].set(0)
 
         # TODO generalize for 3D
         # TODO document
-        species = species.at[:,0].set(1)
-        species = species.at[0,:].set(1)
-        species = species.at[-1,:].set(1)
-        species = species.at[:,-1].set(1)
+        species = species.at[:, 0].set(1)
+        species = species.at[0, :].set(1)
+        species = species.at[-1, :].set(1)
+        species = species.at[:, -1].set(1)
 
         # Boundary nodes +- 1
-        species = species.at[:,1].set(2)
-        species = species.at[1,:].set(2)
-        
-        species = species.at[:,-2].set(4)
-        species = species.at[-2,:].set(4)
-        
+        species = species.at[:, 1].set(2)
+        species = species.at[1, :].set(2)
+
+        species = species.at[:, -2].set(4)
+        species = species.at[-2, :].set(4)
+
         species = species.reshape(-1)
         return nodes.replace(species=species)
 
@@ -214,11 +283,9 @@ class CubicShapeFunction(BaseShapeFunction):
                 Updated shape function state for the particle and node pairs.
         """
 
-        intr_species = nodes.species.take(interactions.intr_hashes, axis=0).reshape(
-            -1,1,1
-        )
+        intr_species = nodes.species.take(interactions.intr_hashes, axis=0).reshape(-1, 1, 1)
 
-        shapef, shapef_grad = jax.vmap(vmap_cubic_shapefunction, in_axes=(0,0, None) )(
+        shapef, shapef_grad = jax.vmap(vmap_cubic_shapefunction, in_axes=(0, 0, None))(
             interactions.intr_dist, intr_species, nodes.inv_node_spacing
         )
         return self.replace(shapef=shapef, shapef_grad=shapef_grad)

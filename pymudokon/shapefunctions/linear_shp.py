@@ -34,7 +34,7 @@ def vmap_linear_shapefunction(
     abs_intr_dist = jnp.abs(intr_dist)
     basis = jnp.where(abs_intr_dist < 1.0, 1.0 - abs_intr_dist, 0.0)
     dbasis = jnp.where(abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0)
-    
+
     N0 = basis[0, :]
     N1 = basis[1, :]
     dN0 = dbasis[0, :]
@@ -77,14 +77,16 @@ class LinearShapeFunction(BaseShapeFunction):
         if dim == 2:
             stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
         if dim == 3:
-            stencil = jnp.array([[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]])
-        
+            stencil = jnp.array(
+                [[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]]
+            )
+
         stencil_size = stencil.shape[0]
-        
+
         return cls(
             shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
             shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
-            stencil=stencil
+            stencil=stencil,
         )
 
     @jax.jit
@@ -107,7 +109,7 @@ class LinearShapeFunction(BaseShapeFunction):
             ShapeFunction:
                 Updated shape function state for the particle and node pairs.
         """
-        shapef, shapef_grad = jax.vmap(vmap_linear_shapefunction, in_axes=(0, None) )(
+        shapef, shapef_grad = jax.vmap(vmap_linear_shapefunction, in_axes=(0, None))(
             interactions.intr_dist, nodes.inv_node_spacing
         )
         return self.replace(shapef=shapef, shapef_grad=shapef_grad)
