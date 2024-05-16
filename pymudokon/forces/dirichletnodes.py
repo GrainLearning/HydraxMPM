@@ -15,7 +15,7 @@ from ..shapefunctions.shapefunction import ShapeFunction
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class DirichletUserDefined(Base):
+class DirichletNodes(Base):
     """Dirichlet boundary conditions with user defined values.
 
     Attributes:

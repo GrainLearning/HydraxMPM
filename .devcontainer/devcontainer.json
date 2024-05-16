@@ -16,7 +16,9 @@
                 "spywhere.guides",
                 "charliermarsh.ruff",
                 "streetsidesoftware.code-spell-checker",
-                "ms-toolsai.jupyter"
+                "ms-toolsai.jupyter",
+                "littlefoxteam.vscode-python-test-adapter",
+                "VisualStudioExptTeam.vscodeintellicode"
             ],
             "settings": {
                 "python.pythonPath": ".venv/bin/python",
