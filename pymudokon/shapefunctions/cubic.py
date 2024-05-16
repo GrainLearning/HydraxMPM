@@ -282,8 +282,7 @@ class CubicShapeFunction(ShapeFunction):
             >>> shapefunctions = pm.CubicShapeFunction.register(2, 2)
             >>> nodes = shapefunctions.set_node_species(nodes)
         """
-        species = jnp.ones(nodes.grid_size).astype(jnp.int32)
-        species = species.at[:].set(0)
+        species = jnp.zeros(nodes.grid_size).astype(jnp.int32)
 
         # TODO generalize for 3D
         # TODO document

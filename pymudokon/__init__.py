@@ -9,6 +9,7 @@ from .core.interactions import Interactions
 from .core.nodes import Nodes
 from .core.particles import Particles
 from .forces.forces import Forces
+from .forces.dirichletbox import DirichletBox
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.material import Material
 from .shapefunctions.cubic import CubicShapeFunction
@@ -26,6 +27,7 @@ __all__ = [
     "LinearShapeFunction",
     "USL",
     "Forces",
+    "DirichletBox",
     "Solver",
     "Material",
     "Base",
