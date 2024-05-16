@@ -11,6 +11,12 @@ from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..shapefunctions.shapefunction import ShapeFunction
+from functools import partial
+
+
+# @jax.jit
+def apply_boundary_box(moments: Array, ids_grid: Array, boundary_types: Array):
+
 
 
 @jax.tree_util.register_pytree_node_class
@@ -41,40 +47,37 @@ class DirichletBox(Base):
 
         return cls(boundary_types, width)
 
-    @jax.jit(static_argnums=(0,))
+    @jax.jit
     def apply_on_nodes_moments(
         self: Self,
-        particles: Particles,
         nodes: Nodes,
-        shapefunctions: ShapeFunction,
-        interactions: Interactions,
-        dt: jnp.float32,
+        particles: Particles = None,
+        shapefunctions: ShapeFunction = None,
+        interactions: Interactions = None,
+        dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
         """Apply the force on the nodes."""
-        node_ids = jnp.arange(nodes.num_nodes)
 
-        node_ids = node_ids.reshape(nodes.grid_size)
+        # # TODO: Add support for 3D
+        # # find ids at x0,x1
+        x0 = nodes.ids_grid.at[0, :].get().reshape(-1)
+        x1 = nodes.ids_grid.at[-1, :].get().reshape(-1)
 
-        # TODO: Add support for 3D
-        # find ids at x0,x1
-        x0 = node_ids.at[0, :].reshape(-1)
-        x1 = node_ids.at[-1, :].reshape(-1)
-
-        # find ids at y0
-        y0 = node_ids.at[:, 0].reshape(-1)
-        y1 = node_ids.at[:, -1].reshape(-1)
+        # # # find ids at y0
+        y0 = nodes.ids_grid.at[:, 0].get().reshape(-1)
+        y1 = nodes.ids_grid.at[:, -1].get().reshape(-1)
 
         moments = nodes.moments
-        if self.boundary_types[0][0] == 1:
-            moments = nodes.moments.at[x0].set(0)
+        # if self.boundary_types[0][0] == 1:
+        #     moments = nodes.moments.at[x0].set(0)
 
-        if self.boundary_types[0][1] == 1:
-            moments = nodes.moments.at[x1].set(0)
+        # if self.boundary_types[0][1] == 1:
+        #     moments = nodes.moments.at[x1].set(0)
 
-        if self.boundary_types[1][0] == 1:
-            moments = nodes.moments.at[y0].set(0)
+        # if self.boundary_types[1][0] == 1:
+        #     moments = nodes.moments.at[y0].set(0)
 
-        if self.boundary_types[1][1] == 1:
-            moments = nodes.moments.at[y1].set(0)
+        # if self.boundary_types[1][1] == 1:
+        #     moments = nodes.moments.at[y1].set(0)
 
-        return nodes.replace(moments=moments), self
+        # return nodes.replace(moments=moments), self

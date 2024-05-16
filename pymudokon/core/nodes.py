@@ -61,6 +61,7 @@ class Nodes(Base):
     moments: Array
     moments_nt: Array
     species: Array
+    ids_grid: Array
 
     @classmethod
     def register(
@@ -119,6 +120,7 @@ class Nodes(Base):
             moments=jnp.zeros((num_nodes_total, _dim)).astype(jnp.float32),
             moments_nt=jnp.zeros((num_nodes_total, _dim)).astype(jnp.float32),
             species=jnp.zeros(num_nodes_total).astype(jnp.int32),
+            ids_grid=jnp.arange(num_nodes_total).reshape(grid_size),
         )
 
     @jax.jit
