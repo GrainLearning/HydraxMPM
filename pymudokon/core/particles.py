@@ -13,7 +13,7 @@ from .base import Base
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
 class Particles(Base):
-    """State for the MPM particles.
+    """State of the MPM particles.
 
     Attributes:
         original_density (jnp.float32):

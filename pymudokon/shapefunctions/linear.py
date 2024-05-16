@@ -10,7 +10,7 @@ from typing_extensions import Self
 
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
-from .base_shp import BaseShapeFunction
+from .shapefunction import ShapeFunction
 
 
 def vmap_linear_shapefunction(
@@ -53,7 +53,7 @@ def vmap_linear_shapefunction(
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class LinearShapeFunction(BaseShapeFunction):
+class LinearShapeFunction(ShapeFunction):
     """Linear shape functions for the particle-node interactions."""
 
     @classmethod
@@ -69,7 +69,7 @@ class LinearShapeFunction(BaseShapeFunction):
                 Dimension of the problem
 
         Returns:
-            BaseShapeFunction:
+            ShapeFunction:
                 Container for shape functions and gradients
         """
         if dim == 1:
@@ -106,7 +106,7 @@ class LinearShapeFunction(BaseShapeFunction):
                 Interactions state containing particle-node interactions' distances.
 
         Returns:
-            ShapeFunction:
+            LinearShapeFunction:
                 Updated shape function state for the particle and node pairs.
         """
         shapef, shapef_grad = jax.vmap(vmap_linear_shapefunction, in_axes=(0, None))(

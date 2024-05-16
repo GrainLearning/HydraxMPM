@@ -1,4 +1,4 @@
-"""Module for containing the baseclass for the shape functions.
+"""Module for containing the base class for the shape functions.
 
 Shape functions are calculated for the particle-node interactions.
 """
@@ -13,8 +13,8 @@ from ..core.base import Base
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class BaseShapeFunction(Base):
-    """BaseShapeFunctions state for the particle-node interactions.
+class ShapeFunction(Base):
+    """ShapeFunctions state for the particle-node interactions.
 
     Attributes:
         shapef (Array):

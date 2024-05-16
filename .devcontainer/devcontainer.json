@@ -14,7 +14,9 @@
                 "aaron-bond.better-comments",
                 "njpwerner.autodocstring",
                 "spywhere.guides",
-                "charliermarsh.ruff"
+                "charliermarsh.ruff",
+                "streetsidesoftware.code-spell-checker",
+                "ms-toolsai.jupyter"
             ],
             "settings": {
                 "python.pythonPath": ".venv/bin/python",

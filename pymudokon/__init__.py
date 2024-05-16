@@ -1,18 +1,33 @@
-# from .core import interactions, nodes, particles
+"""Pymudokon MPM library.
 
+Built with JAX.
+"""
+
+# base classes
+from .core.base import Base
 from .core.interactions import Interactions
 from .core.nodes import Nodes
 from .core.particles import Particles
-from .material.linearelastic_mat import LinearIsotropicElastic
-from .shapefunctions.cubic_shp import CubicShapeFunction
-from .shapefunctions.linear_shp import LinearShapeFunction
-from .solvers.usl_solver import USL
+from .forces.forces import Forces
+from .materials.linearelastic import LinearIsotropicElastic
+from .materials.material import Material
+from .shapefunctions.cubic import CubicShapeFunction
+from .shapefunctions.linear import LinearShapeFunction
+from .shapefunctions.shapefunction import ShapeFunction
+from .solvers.solver import Solver
+from .solvers.usl import USL
 
 __all__ = [
-    'Interactions',
-    'Nodes',
-    'Particles',
-    'LinearIsotropicElastic',
-    'CubicShapeFunction',
-    'LinearShapeFunction',
-    'USL']
+    "Interactions",
+    "Nodes",
+    "Particles",
+    "LinearIsotropicElastic",
+    "CubicShapeFunction",
+    "LinearShapeFunction",
+    "USL",
+    "Forces",
+    "Solver",
+    "Material",
+    "Base",
+    "ShapeFunction",
+]

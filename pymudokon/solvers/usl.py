@@ -1,3 +1,9 @@
+"""Implementation of the Explicit Update Stress Last (USL) Material Point Method (MPM).
+
+References:
+    - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
+"""
+
 import dataclasses
 from typing import List
 
@@ -10,23 +16,50 @@ from ..core.interactions import (
 )
 from ..core.nodes import Nodes
 from ..core.particles import Particles
-from ..material.base_mat import BaseMaterial
-from ..shapefunctions.base_shp import BaseShapeFunction
-from .base_solver import BaseSolver
+from ..forces.forces import Forces
+from ..materials.material import Material
+from ..shapefunctions.shapefunction import ShapeFunction
+from .solver import Solver
 
 
 @jax.jit
 def p2g(
     nodes: Nodes,
     particles: Particles,
-    shapefunctions: BaseShapeFunction,
+    shapefunctions: ShapeFunction,
     interactions: Interactions,
     dt: jnp.float32,
 ) -> Nodes:
+    """Particle to grid transfer.
+
+    The procedure is as follows:
+
+    - Prepare shape functions and and their gradients.
+    - Map out interactions for a particle and its stencil.
+    - Scale quantities with shape functions and gradients.
+    - Gather quantities to nodes.
+    - Integrate moments on nodes.
+
+    Args:
+        nodes (Nodes):
+            MPM background nodes.
+        particles (Particles):
+            Material points / particles
+        shapefunctions (ShapeFunction):
+            A shape function e.g. `LinearShapeFunction`
+        interactions (Interactions):
+            Interactions between particles and nodes.
+        dt (jnp.float32):
+            Time step.
+
+    Returns:
+        Nodes: Updated nodes
+    """
     stencil_size, dim = shapefunctions.stencil.shape
 
     shapef = shapefunctions.shapef
 
+    # padding is applied if we are in plane strain
     shapef_grad = jnp.pad(
         shapefunctions.shapef_grad,
         ((0, 0), (0, 1), (0, 0)),
@@ -43,14 +76,13 @@ def p2g(
 
     # scaled quantities with shape functions and gradients
     scaled_mass = intr_masses * shapef
-
     scaled_moments = jax.lax.batch_matmul(intr_velocities, scaled_mass)
     scaled_ext_forces = jax.lax.batch_matmul(intr_ext_forces, shapef)
     scaled_int_forces = jax.lax.batch_matmul(intr_stresses, shapef_grad)
     scaled_int_forces = jax.lax.batch_matmul(scaled_int_forces, -1.0 * intr_volumes)
     scaled_total_forces = scaled_int_forces[:, :2] + scaled_ext_forces  # unpad and add #TODO - generalize for 3D
 
-    # node (reshape and) gather interactions
+    # node (reshape) and gather interactions
     nodes_masses = nodes.masses.at[interactions.intr_hashes,].add(scaled_mass.reshape(-1), mode="drop")
 
     nodes_moments = nodes.moments.at[interactions.intr_hashes].add(scaled_moments.reshape(-1, 2), mode="drop")
@@ -61,7 +93,7 @@ def p2g(
         .add(scaled_total_forces.reshape(-1, 2), mode="drop")
     )
 
-    # integrate nodes
+    # integrate node moments
     nodes_moments_nt = nodes_moments + nodes_forces * dt
 
     return nodes.replace(
@@ -75,11 +107,40 @@ def p2g(
 def g2p(
     nodes: Nodes,
     particles: Particles,
-    shapefunctions: BaseShapeFunction,
+    shapefunctions: ShapeFunction,
     interactions: Interactions,
     alpha: jnp.float32,
     dt: jnp.float32,
-):
+) -> Particles:
+    """Grid to particle transfer.
+
+    Procedure is as follows:
+    - Prepare shape functions and their gradients.
+    - Calculate node velocities (by dividing moments with mass)
+    - Scatter node quantities to particle-node interactions.
+    - Calculate interaction velocities and velocity gradients.
+    - Sum interaction quantities to particles.
+    - Update particle quantities
+    (e.g., velocities, positions, volumes, velocity gradients, deformation gradients, etc.)
+
+
+    Args:
+        nodes (Nodes):
+            MPM background nodes.
+        particles (Particles):
+            Material points / particles
+        shapefunctions (ShapeFunction):
+            A shape function e.g. `LinearShapeFunction`.
+        interactions (Interactions):
+            Interactions between particles and nodes.
+        alpha (jnp.float32):
+            Flip & PIC ratio.
+        dt (jnp.float32):
+            Time step
+
+    Returns:
+        Particles: Updated particles
+    """
     num_particles, dim = particles.positions.shape
     stencil_size = shapefunctions.stencil.shape[0]
     # Prepare shape functions
@@ -89,6 +150,8 @@ def g2p(
     shapef_grad_T = jnp.transpose(shapef_grad, axes=(0, 2, 1))
 
     # Calculate the node velocities
+    # small masses may cause numerical instability
+    # so we set zero velocities at these nodes
     node_masses_reshaped = nodes.masses.reshape(-1, 1)
     nodes_velocities = nodes.moments / node_masses_reshaped
 
@@ -114,7 +177,7 @@ def g2p(
         -1, dim, 1
     )
 
-    # Calculate the interaction velocities
+    # Calculate the interaction velocities and velocity gradients
     intr_delta_vels = intr_vels_nt - intr_vels
 
     intr_scaled_delta_vels = intr_delta_vels * shapef
@@ -155,7 +218,15 @@ def g2p(
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class USL(BaseSolver):
+class USL(Solver):
+    """Explicit Update Stress Last (USL) MPM solver.
+
+    Inherits data from `Solver`.
+
+    Attributes:
+        alpha: Flip & PIC ratio.
+    """
+
     alpha: jnp.float32
 
     @classmethod
@@ -163,15 +234,63 @@ class USL(BaseSolver):
         cls: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: BaseShapeFunction,
-        materials: List[BaseMaterial],
-        forces: List[int] = None,
+        shapefunctions: ShapeFunction,
+        materials: List[Material],
+        forces: List[Forces] = None,
         alpha: jnp.float32 = 0.99,
         dt: jnp.float32 = 0.00001,
     ) -> Self:
+        """Register / construct a USL solver.
+
+        Args:
+            cls (Self):
+                self reference.
+            particles (Particles):
+                Particles in the simulation.
+            nodes (Nodes):
+                Nodes in the simulation.
+            shapefunctions (ShapeFunction):
+                Shape functions in the simulation, e.g., `LinearShapeFunction`.
+            materials (List[Material]):
+                List of materials in the simulation, e.g., `LinearIsotropicElastic`.
+            forces (List[Force], optional):
+                List of forces. Defaults to None.
+            alpha (jnp.float32, optional):
+                FLIP-PIC ratio. Defaults to 0.99.
+            dt (jnp.float32, optional):
+                Time step. Defaults to 0.00001.
+
+        Returns:
+            USL: Initialized USL solver.
+
+        Example:
+            >>> import pymudokon as pm
+            >>> particles = pm.Particles.register(positions=jnp.array([[1.0, 2.0], [0.3, 0.1]]))
+            >>> nodes = pm.Nodes.register(
+            ...     origin=jnp.array([0.0, 0.0]),
+            ...     end=jnp.array([1.0, 1.0]),
+            ...     node_spacing=0.5,
+            ...     particles_per_cell=2,
+            ... )
+            >>> shapefunctions = pm.LinearShapeFunction.register(2, 2)
+            >>> material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+            >>> usl = pm.USL.register(
+            ...     particles=particles,
+            ...     nodes=nodes,
+            ...     shapefunctions=shapefunctions,
+            ...     materials=[material],
+            ...     alpha=0.1,
+            ...     dt=0.001,
+            ... )
+        """
         num_particles, dim = particles.positions.shape
+
         stencil_size = shapefunctions.stencil.shape[0]
+
         interactions = Interactions.register(stencil_size, num_particles, dim)
+
+        if forces is None:
+            forces = []
 
         return cls(
             particles=particles,
@@ -186,6 +305,16 @@ class USL(BaseSolver):
 
     @jax.jit
     def update(self: Self) -> Self:
+        """Solve 1 iteration of USL MPM.
+
+        Args:
+            self (Self):
+                Current USL solver.
+
+        Returns:
+            Self:
+                Updated USL solver.
+        """
         nodes = self.nodes.refresh()
 
         particles = self.particles.refresh()
@@ -204,6 +333,15 @@ class USL(BaseSolver):
             dt=self.dt,
         )
 
+        # for loop is statically unrolled, may result in large compile times
+        # for many materials/forces
+        forces = []
+        for force in self.forces:
+            nodes, out_force = force.apply_on_nodes_moments(
+                particles=particles, nodes=nodes, shapefunctions=shapefunctions, interactions=interactions, dt=self.dt
+            )
+            forces.append(forces)
+
         particles = g2p(
             particles=particles,
             nodes=nodes,
@@ -213,13 +351,17 @@ class USL(BaseSolver):
             dt=self.dt,
         )
 
-        # for loop is statically unrolled
-        # may result in large compile times
-        # for many materials
         materials = []
         for mat in self.materials:
             particles, out_mat = mat.update_stress(particles=particles, dt=self.dt)
             materials.append(out_mat)
+
+        forces = []
+        for force in forces:
+            particles, out_force = force.apply_on_nodes_moments(
+                particles=particles, nodes=nodes, shapefunctions=shapefunctions, interactions=interactions, dt=self.dt
+            )
+            forces.append(forces)
 
         return self.replace(
             particles=particles,

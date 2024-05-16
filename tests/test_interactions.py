@@ -1,4 +1,5 @@
 """Unit tests for the Interactions state."""
+
 import unittest
 
 import jax
@@ -86,12 +87,10 @@ class TestInteractions(unittest.TestCase):
             node_spacing=0.5,
             particles_per_cell=1,
         )
-        
+
         shapefunctions = pm.LinearShapeFunction.register(num_particles=3, dim=2)
 
-        interactions = pm.Interactions.register(
-            stencil_size=4, num_particles=3, dim=2
-        )  # unused intentionally
+        interactions = pm.Interactions.register(stencil_size=4, num_particles=3, dim=2)  # unused intentionally
 
         interactions = interactions.get_interactions(particles, nodes, shapefunctions)
 
@@ -101,9 +100,18 @@ class TestInteractions(unittest.TestCase):
             interactions.intr_dist,
             jnp.array(
                 [
-                    [[0.5], [0.5]], [[-0.5], [0.5]], [[0.5], [-0.5]], [[-0.5], [-0.5]],
-                    [[0.5], [0.5]], [[-0.5], [0.5]], [[0.5], [-0.5]], [[-0.5], [-0.5]],
-                    [[0.6], [0.8]], [[-0.4], [0.8]], [[0.6], [-0.2]], [[-0.4], [-0.2]],
+                    [[0.5], [0.5]],
+                    [[-0.5], [0.5]],
+                    [[0.5], [-0.5]],
+                    [[-0.5], [-0.5]],
+                    [[0.5], [0.5]],
+                    [[-0.5], [0.5]],
+                    [[0.5], [-0.5]],
+                    [[-0.5], [-0.5]],
+                    [[0.6], [0.8]],
+                    [[-0.4], [0.8]],
+                    [[0.6], [-0.2]],
+                    [[-0.4], [-0.2]],
                 ]
             ),
         )
@@ -114,18 +122,25 @@ class TestInteractions(unittest.TestCase):
             interactions.intr_bins,
             jnp.array(
                 [
-                    [[0], [0]], [[1], [0]], [[0], [1]], [[1], [1]],
-                    [[0], [0]], [[1], [0]], [[0], [1]], [[1], [1]],
-                    [[1], [0]], [[2], [0]], [[1], [1]], [[2], [1]],
+                    [[0], [0]],
+                    [[1], [0]],
+                    [[0], [1]],
+                    [[1], [1]],
+                    [[0], [0]],
+                    [[1], [0]],
+                    [[0], [1]],
+                    [[1], [1]],
+                    [[1], [0]],
+                    [[2], [0]],
+                    [[1], [1]],
+                    [[2], [1]],
                 ]
             ),
         )
 
         # hashes must be reshaped to (num_particles * stencil_size,)
         np.testing.assert_allclose(interactions.intr_hashes.shape, (12,))
-        np.testing.assert_allclose(
-            interactions.intr_hashes, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 1, 2, 4, 5])
-        )
+        np.testing.assert_allclose(interactions.intr_hashes, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 1, 2, 4, 5]))
 
 
 if __name__ == "__main__":

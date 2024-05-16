@@ -1,3 +1,4 @@
+# ruff: noqa
 # trace generated using paraview version 5.12.0-RC2
 # import paraview
 # paraview.compatibility.major = 5

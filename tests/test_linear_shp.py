@@ -9,7 +9,7 @@ import numpy as np
 import pymudokon as pm
 
 
-class TestShapeFunctions(unittest.TestCase):
+class TestLinearShapeFunctions(unittest.TestCase):
     """Unit tests for linear shape functions."""
 
     @staticmethod
@@ -48,7 +48,7 @@ class TestShapeFunctions(unittest.TestCase):
         )(positions, stencil, origin, inv_node_spacing, grid_size)
 
         shapef, shapef_grad = jax.vmap(
-            pm.shapefunctions.linear_shp.vmap_linear_shapefunction, in_axes=(0, None), out_axes=(0, 0)
+            pm.shapefunctions.linear.vmap_linear_shapefunction, in_axes=(0, None), out_axes=(0, 0)
         )(intr_dist.reshape(-1, 2, 1), inv_node_spacing)
 
         np.testing.assert_allclose(shapef.shape, (8, 1, 1))
@@ -90,7 +90,7 @@ class TestShapeFunctions(unittest.TestCase):
 
         interactions = pm.Interactions.register(stencil_size=4, num_particles=3, dim=2)  # unused intentionally
 
-        interactions = interactions.get_interactions(particles, nodes,shapefunction)
+        interactions = interactions.get_interactions(particles, nodes, shapefunction)
 
         shapefunction = shapefunction.calculate_shapefunction(nodes, interactions)
 

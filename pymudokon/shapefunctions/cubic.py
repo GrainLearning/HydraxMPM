@@ -1,4 +1,9 @@
-"""Module for containing the cubic shape functions."""
+"""Module for containing the cubic shape functions.
+
+References:
+    - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
+    - [Gaussian Quadrature - Wikipedia](https://en.wikipedia.org/wiki/Gaussian_quadrature)
+"""
 
 # TODO add test for cubic shape function
 # TODO add docstring for cubic shape function
@@ -12,7 +17,7 @@ from typing_extensions import Self
 
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
-from .base_shp import BaseShapeFunction
+from .shapefunction import ShapeFunction
 
 
 def vmap_cubic_shapefunction(
@@ -20,13 +25,16 @@ def vmap_cubic_shapefunction(
     intr_species: Array,
     inv_node_spacing: jnp.float32,
 ) -> Tuple[Array, Array]:
-    """Vectorized linear shape function calculation.
+    """Vectorized cubic shape function calculation.
 
-    Calculate the shape function, and then its gradient
+    Calculate the shape function, and then its gradients.
 
     Args:
         intr_dist (Array):
             Particle-node pair interactions distance.
+        intr_species (Array):
+            Node type of the background grid. See
+            :meth:`pymudokon.core.nodes.Nodes.set_species` for details.
         inv_node_spacing (jnp.float32):
             Inverse node spacing.
 
@@ -120,12 +128,16 @@ def vmap_cubic_shapefunction(
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class CubicShapeFunction(BaseShapeFunction):
-    """Linear shape functions for the particle-node interactions."""
+class CubicShapeFunction(ShapeFunction):
+    """Cubic B-spline shape functions for the particle-node interactions."""
 
     @classmethod
     def register(cls: Self, num_particles: jnp.int32, dim: jnp.int16) -> Self:
-        """Initializes the shape function container.
+        """Initializes Cubic B-splines.
+
+        It is recommended that each background cell is populated by
+        2 (1D), 4 (2D), 8 (3D) material points. The optimal integration points are
+        at 0.2113, 0.7887 determined by Gauss quadrature rule.
 
         Args:
             cls (Self):
@@ -136,7 +148,7 @@ class CubicShapeFunction(BaseShapeFunction):
                 Dimension of the problem
 
         Returns:
-            BaseShapeFunction:
+            ShapeFunction:
                 Container for shape functions and gradients
         """
         if dim == 1:
@@ -241,7 +253,35 @@ class CubicShapeFunction(BaseShapeFunction):
             stencil=stencil,
         )
 
-    def set_species(self: Self, nodes: Nodes):
+    def set_nodes_species(self: Self, nodes: Nodes) -> Nodes:
+        """Set the node species to ensure connectivity is correct.
+
+        The background grid is divided into 4 regions. Each region is stored within
+        the `nodes.species` array. Each region corresponds to different elements.
+        Boundary nodes are open to ensure Dirichlet boundary conditions.
+
+        The regions are:
+        - Boundary nodes (flag 3)
+        - Middle nodes (flag 0)
+        - Right boundary nodes (flag 2)
+        - Left boundary nodes (flag 1)
+
+        Args:
+            self (Self):
+                self reference
+            nodes (Nodes):
+                Background grid nodes
+
+        Returns:
+            Nodes:
+                Updated shape function state
+
+        Example:
+            >>> import pymudokon as pm
+            >>> nodes = pm.Nodes.register(grid_size=4, node_spacing=0.5)
+            >>> shapefunctions = pm.CubicShapeFunction.register(2, 2)
+            >>> nodes = shapefunctions.set_node_species(nodes)
+        """
         species = jnp.ones(nodes.grid_size).astype(jnp.int32)
         species = species.at[:].set(0)
 
@@ -252,7 +292,7 @@ class CubicShapeFunction(BaseShapeFunction):
         species = species.at[-1, :].set(1)
         species = species.at[:, -1].set(1)
 
-        # Boundary nodes +- 1
+        # boundary nodes +- 1
         species = species.at[:, 1].set(2)
         species = species.at[1, :].set(2)
 
@@ -271,7 +311,7 @@ class CubicShapeFunction(BaseShapeFunction):
         """Top level function to calculate the shape functions.
 
         Args:
-            self (LinearShapeFunction):
+            self (CubicShapeFunction):
                 Shape function at previous state
             nodes (Nodes):
                 Nodes state containing grid size and inv_node_spacing
@@ -279,13 +319,28 @@ class CubicShapeFunction(BaseShapeFunction):
                 Interactions state containing particle-node interactions' distances.
 
         Returns:
-            ShapeFunction:
+            CubicShapeFunction:
                 Updated shape function state for the particle and node pairs.
         """
-
+        # get node species at state
         intr_species = nodes.species.take(interactions.intr_hashes, axis=0).reshape(-1, 1, 1)
 
         shapef, shapef_grad = jax.vmap(vmap_cubic_shapefunction, in_axes=(0, 0, None))(
             interactions.intr_dist, intr_species, nodes.inv_node_spacing
         )
         return self.replace(shapef=shapef, shapef_grad=shapef_grad)
+
+    def validate(self: Self, solver) -> Self:
+        """Verify the shape functions and gradients.
+
+        Args:
+            self (Self):
+                Self reference
+            solver (BaseSolver):
+                Solver class
+        Returns:
+            Self:
+                Updated solver class
+        """
+        # TODO check if 2,4,
+        raise NotImplementedError("This method is not yet implemented.")

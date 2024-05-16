@@ -1,7 +1,4 @@
-"""Unit tests for the ParticlesContainer class.
-
-Test and examples on how to use the ParticlesContainer class to to setup/update particle state.
-"""
+"""Unit tests for the Particles dataclass."""
 
 import unittest
 
@@ -12,11 +9,11 @@ import pymudokon as pm
 
 
 class TestParticles(unittest.TestCase):
-    """Unit tests for the ParticlesContainer and functions."""
+    """Unit tests for the Particles dataclass and functions."""
 
     @staticmethod
     def test_register():
-        """Unit test to initialize the ParticlesContainer class."""
+        """Unit test to initialize particles."""
         particles = pm.Particles.register(
             positions=jnp.array([[0.0, 0.0], [1.0, 1.0]]),
             velocities=jnp.array([[0.0, 0.0], [1.0, 2.0]]),
@@ -26,13 +23,9 @@ class TestParticles(unittest.TestCase):
 
         np.testing.assert_allclose(particles.masses, jnp.zeros(2))
 
-        np.testing.assert_allclose(
-            particles.positions, jnp.array([[0.0, 0.0], [1.0, 1.0]])
-        )
+        np.testing.assert_allclose(particles.positions, jnp.array([[0.0, 0.0], [1.0, 1.0]]))
 
-        np.testing.assert_allclose(
-            particles.velocities, jnp.array([[0.0, 0.0], [1.0, 2.0]])
-        )
+        np.testing.assert_allclose(particles.velocities, jnp.array([[0.0, 0.0], [1.0, 2.0]]))
 
     @staticmethod
     def test_calculate_volume():
@@ -40,19 +33,13 @@ class TestParticles(unittest.TestCase):
 
         Volume calculation is based on the background grid discretization.
         """
-        particles = pm.Particles.register(
-            positions=jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
-        )
+        particles = pm.Particles.register(positions=jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]))
         print(particles.positions)
 
-        particles = particles.calculate_volume(
-            node_spacing=0.5, particles_per_cell=1
-        )
+        particles = particles.calculate_volume(node_spacing=0.5, particles_per_cell=1)
 
         np.testing.assert_allclose(particles.volumes, jnp.array([0.125, 0.125]))
-        np.testing.assert_allclose(
-            particles.volumes_original, jnp.array([0.125, 0.125])
-        )
+        np.testing.assert_allclose(particles.volumes_original, jnp.array([0.125, 0.125]))
 
     @staticmethod
     def test_refresh():
@@ -62,11 +49,7 @@ class TestParticles(unittest.TestCase):
             velocities=jnp.array([[0.0, 0.0], [1.0, 2.0]]),
         )
 
-        particles = particles.replace(
-            velgrads=jnp.array(
-                [[[1.0, 0.0], [0.0, 1.0]], [[1.0, 0.0], [0.0, 1.0]]]
-            )
-        )
+        particles = particles.replace(velgrads=jnp.array([[[1.0, 0.0], [0.0, 1.0]], [[1.0, 0.0], [0.0, 1.0]]]))
         particles = particles.refresh()
 
         np.testing.assert_allclose(particles.velgrads, jnp.zeros((2, 2, 2)))

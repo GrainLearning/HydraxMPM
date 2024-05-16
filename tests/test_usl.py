@@ -1,3 +1,5 @@
+"""Unit tests for the USL Solver."""
+
 import unittest
 
 import jax.numpy as jnp
@@ -7,11 +9,12 @@ import pymudokon as pm
 
 
 class TestUSL(unittest.TestCase):
+    """Unit tests for the USL Solver dataclass and functions."""
+
     @staticmethod
     def test_init():
-        particles = pm.Particles.register(
-            positions=jnp.array([[1.0, 2.0], [0.3, 0.1]])
-        )
+        """Unit test to initialize usl solver."""
+        particles = pm.Particles.register(positions=jnp.array([[1.0, 2.0], [0.3, 0.1]]))
         nodes = pm.Nodes.register(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
@@ -19,16 +22,14 @@ class TestUSL(unittest.TestCase):
             particles_per_cell=2,
         )
 
-        shapefunctions = pm.LinearShapeFunction.register(2,2)
-        
-        material = pm.LinearIsotropicElastic.register(
-            E=1000.0, nu=0.2, num_particles=2, dim=2
-        )
+        shapefunctions = pm.LinearShapeFunction.register(2, 2)
+
+        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
         usl = pm.USL.register(
             particles=particles,
             nodes=nodes,
-            shapefunctions= shapefunctions,
+            shapefunctions=shapefunctions,
             materials=[material],
             alpha=0.1,
             dt=0.001,
@@ -38,6 +39,7 @@ class TestUSL(unittest.TestCase):
 
     @staticmethod
     def test_p2g():
+        """Unit test to perform particle-to-grid transfer."""
         particles = pm.Particles.register(
             positions=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
             velocities=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -57,22 +59,15 @@ class TestUSL(unittest.TestCase):
             stresses=jnp.stack([jnp.eye(3)] * 2),
         )
 
-        stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
-
-        shapefunctions = pm.LinearShapeFunction.register(
-            2,2)
+        shapefunctions = pm.LinearShapeFunction.register(2, 2)
 
         interactions = pm.Interactions.register(4, 2, 2)
-        
-        interactions = interactions.get_interactions(
-            particles, nodes, shapefunctions
-        )
 
-        shapefunctions = shapefunctions.calculate_shapefunction(
-            nodes, interactions
-        )
+        interactions = interactions.get_interactions(particles, nodes, shapefunctions)
 
-        nodes = pm.solvers.usl_solver.p2g(
+        shapefunctions = shapefunctions.calculate_shapefunction(nodes, interactions)
+
+        nodes = pm.solvers.usl.p2g(
             nodes=nodes,
             particles=particles,
             shapefunctions=shapefunctions,
@@ -83,15 +78,12 @@ class TestUSL(unittest.TestCase):
         expected_mass = jnp.array([0.27, 0.03, 0.09, 0.01])
         np.testing.assert_allclose(nodes.masses, expected_mass, rtol=1e-3)
 
-        expected_node_moments = jnp.array(
-            [[0.27, 0.27], [0.03, 0.03], [0.09, 0.09], [0.01, 0.01]]
-        )
-        np.testing.assert_allclose(
-            nodes.moments, expected_node_moments, rtol=1e-3
-        )
+        expected_node_moments = jnp.array([[0.27, 0.27], [0.03, 0.03], [0.09, 0.09], [0.01, 0.01]])
+        np.testing.assert_allclose(nodes.moments, expected_node_moments, rtol=1e-3)
 
     @staticmethod
     def test_g2p():
+        """Unit test to perform grid-to-particle transfer."""
         particles = pm.Particles.register(
             positions=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
             velocities=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -111,19 +103,15 @@ class TestUSL(unittest.TestCase):
             particles_per_cell=1,
         )
 
-        shapefunctions = pm.LinearShapeFunction.register(2,2)
+        shapefunctions = pm.LinearShapeFunction.register(2, 2)
 
-        interactions = pm.Interactions.register(4,2, 2)
-        
-        interactions = interactions.get_interactions(
-            particles, nodes, shapefunctions
-        )
+        interactions = pm.Interactions.register(4, 2, 2)
 
-        shapefunctions = shapefunctions.calculate_shapefunction(
-            nodes, interactions
-        )
+        interactions = interactions.get_interactions(particles, nodes, shapefunctions)
 
-        nodes = pm.solvers.usl_solver.p2g(
+        shapefunctions = shapefunctions.calculate_shapefunction(nodes, interactions)
+
+        nodes = pm.solvers.usl.p2g(
             nodes=nodes,
             particles=particles,
             shapefunctions=shapefunctions,
@@ -131,33 +119,41 @@ class TestUSL(unittest.TestCase):
             dt=0.1,
         )
 
-        particles = pm.solvers.usl_solver.g2p(
+        particles = pm.solvers.usl.g2p(
             particles=particles,
             nodes=nodes,
             shapefunctions=shapefunctions,
             interactions=interactions,
             alpha=0.99,
-            dt=0.1
+            dt=0.1,
         )
-        # TODO finish this test
 
-        # expected_particle_volumes = jnp.array([0.4402222222222, 0.4402222222222])
-        # expected_velocities = jnp.array([[1.0, 1.0], [1.0, 1.0]])
+        print(particles.positions)
+        expected_velocities = jnp.array([[1.0, 1.0], [1.0, 1.0]])
+        expected_velgrads = jnp.array(
+            [
+                [[-3.0555546e00, -2.9802322e-08], [-1.1175871e-08, -1.4666667e00]],
+                [[-3.0555546e00, -2.9802322e-08], [-1.1175871e-08, -1.4666667e00]],
+            ]
+        )
+        expected_F = jnp.array(
+            [
+                [[6.9444454e-01, -2.9802323e-09], [-1.1175871e-09, 8.5333335e-01]],
+                [[6.9444454e-01, -2.9802323e-09], [-1.1175871e-09, 8.5333335e-01]],
+            ]
+        )
+        expected_volumes = jnp.array([0.41481486, 0.23703706])
+        expected_positions = jnp.array([[0.2, 0.35], [0.2, 0.35]])
 
-        # print(f" volumes - got {particles.volumes}")
-        # print(f" volumes - expected {expected_particle_volumes}")
-        # print(f" velocities - got {particles.velocities}")
-        # print(f" positions - got {particles.positions}")
-
-
-        # print()
-        # np.testing.assert_allclose(
-        #     particles.volumes, expected_particle_volumes, rtol=1e-3
-        # )
-
+        np.testing.assert_allclose(particles.velocities, expected_velocities, rtol=1e-3)
+        np.testing.assert_allclose(particles.velgrads, expected_velgrads, rtol=1e-3)
+        np.testing.assert_allclose(particles.F, expected_F, rtol=1e-3)
+        np.testing.assert_allclose(particles.volumes, expected_volumes, rtol=1e-3)
+        np.testing.assert_allclose(particles.positions, expected_positions, rtol=1e-3)
 
     @staticmethod
     def test_update():
+        """Unit test to update the state of the USL solver."""
         particles = pm.Particles.register(
             positions=jnp.array([[0.1, 0.1], [0.7, 0.1]]),
             velocities=jnp.array([[1.0, 2.0], [0.3, 0.1]]),
@@ -172,22 +168,26 @@ class TestUSL(unittest.TestCase):
             particles_per_cell=2,
         )
 
-        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
-        
-        shapefunctions = pm.LinearShapeFunction.register(2,2)
-        
+        shapefunctions = pm.LinearShapeFunction.register(2, 2)
+
+        material = pm.Material()
+        force = pm.Forces()
+
         usl = pm.USL.register(
             particles=particles,
             nodes=nodes,
             materials=[material],
+            forces=[force],
             shapefunctions=shapefunctions,
             alpha=0.1,
-            dt=0.001)
+            dt=0.001,
+        )
 
         usl = usl.update()
 
     @staticmethod
     def test_solve():
+        """Unit test to solve the USL solver."""
         particles = pm.Particles.register(
             positions=jnp.array([[0.1, 0.1], [0.5, 0.1]]),
             velocities=jnp.array([[0.1, 0.1], [0.2, 0.2]]),
@@ -204,14 +204,11 @@ class TestUSL(unittest.TestCase):
 
         material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
-        shapefunctions = pm.LinearShapeFunction.register(2,2)
-        
+        shapefunctions = pm.LinearShapeFunction.register(2, 2)
+
         usl = pm.USL.register(
-            particles=particles,
-            nodes=nodes,
-            materials=[material],
-            shapefunctions=shapefunctions,
-            alpha=0.9, dt=0.001)
+            particles=particles, nodes=nodes, materials=[material], shapefunctions=shapefunctions, alpha=0.9, dt=0.001
+        )
 
         def some_callback(package):
             usl, step = package  # unused intentionally

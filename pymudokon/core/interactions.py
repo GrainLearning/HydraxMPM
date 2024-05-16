@@ -18,10 +18,10 @@ import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
+from ..shapefunctions.shapefunction import ShapeFunction
 from .base import Base
 from .nodes import Nodes
 from .particles import Particles
-from ..shapefunctions.base_shp import BaseShapeFunction
 
 
 def vmap_interactions(
@@ -122,6 +122,8 @@ class Interactions(Base):
         Args:
             cls (Self):
                 Reference to the self type.
+            stencil_size (jnp.int16):
+                Size of the stencil.
             num_particles (jnp.int16):
                 Number of particles.
             stencil (Array):
@@ -147,7 +149,7 @@ class Interactions(Base):
         self: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: BaseShapeFunction,
+        shapefunctions: ShapeFunction,
     ) -> Self:
         """Get the particle-node pair interactions.
 
@@ -161,6 +163,8 @@ class Interactions(Base):
                 Interactions state for the particle and node pairs.
             particles (Particles):
                 Particles state.
+            shapefunctions (ShapeFunction):
+                Shape functions state.
             nodes (Nodes):
                 Nodes state.
 

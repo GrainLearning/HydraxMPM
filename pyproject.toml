@@ -15,6 +15,7 @@ pyvista = "^0.43.5"
 ruff = "^0.4.3"
 jax = {extras = ["cpu"], version = "^0.4.28"}
 typing-extensions = "^4.11.0"
+jupyter = "^1.0.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -30,6 +31,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 line-length = 120
+
 
 [tool.ruff.lint]
 select = [
@@ -50,6 +52,11 @@ ignore = [
     "N803", # argument name should be lowercase
 ]
 
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

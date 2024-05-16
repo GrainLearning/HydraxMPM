@@ -9,7 +9,7 @@ from jax import Array
 from typing_extensions import Self
 
 from ..core.particles import Particles
-from .base_mat import BaseMaterial
+from .material import Material
 
 
 def vmap_update(
@@ -73,7 +73,7 @@ def vmap_update(
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class LinearIsotropicElastic(BaseMaterial):
+class LinearIsotropicElastic(Material):
     """State for the isotropic linear elastic material.
 
     Attributes:

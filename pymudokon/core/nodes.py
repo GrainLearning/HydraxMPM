@@ -1,4 +1,5 @@
 """State and functions for managing the Material Point Method (MPM) background grid nodes."""
+
 # TODO add test for node species
 import dataclasses
 
