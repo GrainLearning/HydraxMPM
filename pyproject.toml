@@ -11,11 +11,16 @@ packages = [
 [tool.poetry.dependencies]
 python = "^3.10"
 numpy = "^1.26.4"
-pyvista = "^0.43.5"
+pyvista = {extras = ["all", "trame"], version = "^0.43.8"}
 ruff = "^0.4.3"
 jax = {extras = ["cpu"], version = "^0.4.28"}
 typing-extensions = "^4.11.0"
 jupyter = "^1.0.0"
+imageio = "^2.34.1"
+trame = "^3.6.0"
+ipywidgets = "^8.1.2"
+trame-jupyter-extension = "^2.1.0"
+jupyterlab = ">=3"
 
 
 [tool.poetry.group.dev.dependencies]

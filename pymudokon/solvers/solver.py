@@ -1,7 +1,7 @@
 """Base solve module."""
 
 import dataclasses
-from typing import Callable, List
+from typing import Callable, List, Dict
 
 import jax
 import jax.numpy as jnp
@@ -51,6 +51,7 @@ class Solver(Base):
         num_steps: jnp.int32,
         output_step: jnp.int32 = 1,
         output_function: Callable = lambda x: x,
+        output_function_args: Dict = {},
     ):
         """Call the main solve loop of a solver.
 
@@ -77,5 +78,6 @@ class Solver(Base):
         for step in range(num_steps):
             self = self.update()
             if step % output_step == 0:
-                jax.debug.callback(output_function, (self, step))
+                # jax.debug.callback(output_function, (self, step), output_function_args=output_function_args)
+                output_function((self, step, *output_function_args))
         return self
