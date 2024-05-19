@@ -18,6 +18,8 @@ from .shapefunctions.shapefunction import ShapeFunction
 from .solvers.solver import Solver
 from .solvers.usl import USL
 
+from .utils.plot import create_plotter, update_plotter
+
 __all__ = [
     "Interactions",
     "Nodes",
@@ -32,4 +34,6 @@ __all__ = [
     "Material",
     "Base",
     "ShapeFunction",
+    "create_plotter",
+    "update_plotter"
 ]

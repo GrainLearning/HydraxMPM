@@ -101,9 +101,9 @@ def some_callback(package):
     points = usl.particles.positions
     velocities = usl.particles.velocities
 
-    points_3d = jnp.pad(points, [(0, 0), (0, 1)], mode="constant").__array__()
+    # points_3d = jnp.pad(points, [(0, 0), (0, 1)], mode="constant").__array__()
 
-    velocities_3d = jnp.pad(velocities, [(0, 0), (0, 1)], mode="constant").__array__()
+    # velocities_3d = jnp.pad(velocities, [(0, 0), (0, 1)], mode="constant").__array__()
 
     # id = 350
     # print(
