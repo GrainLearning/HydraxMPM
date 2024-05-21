@@ -340,7 +340,7 @@ class USL(Solver):
             nodes, out_force = force.apply_on_nodes_moments(
                 particles=particles, nodes=nodes, shapefunctions=shapefunctions, interactions=interactions, dt=self.dt
             )
-            forces.append(forces)
+            forces.append(out_force)
 
         particles = g2p(
             particles=particles,
@@ -356,17 +356,11 @@ class USL(Solver):
             particles, out_mat = mat.update_stress(particles=particles, dt=self.dt)
             materials.append(out_mat)
 
-        forces = []
-        for force in forces:
-            particles, out_force = force.apply_on_nodes_moments(
-                particles=particles, nodes=nodes, shapefunctions=shapefunctions, interactions=interactions, dt=self.dt
-            )
-            forces.append(forces)
-
         return self.replace(
             particles=particles,
             nodes=nodes,
             materials=materials,
+            forces=forces,
             shapefunctions=shapefunctions,
             interactions=interactions,
         )

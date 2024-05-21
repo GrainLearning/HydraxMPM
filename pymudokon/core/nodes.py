@@ -70,7 +70,7 @@ class Nodes(Base):
         end: Array,
         node_spacing: jnp.float32,
         particles_per_cell: jnp.int32,
-        small_mass_cutoff: jnp.float32 = 1e-10,
+        small_mass_cutoff: jnp.float32 = 1e-5,
     ) -> Self:
         """Initialize the state for the background MPM nodes.
 
@@ -120,7 +120,7 @@ class Nodes(Base):
             moments=jnp.zeros((num_nodes_total, _dim)).astype(jnp.float32),
             moments_nt=jnp.zeros((num_nodes_total, _dim)).astype(jnp.float32),
             species=jnp.zeros(num_nodes_total).astype(jnp.int32),
-            ids_grid=jnp.arange(num_nodes_total).reshape(grid_size),
+            ids_grid=jnp.arange(num_nodes_total).reshape(grid_size).astype(jnp.int32),
         )
 
     @jax.jit

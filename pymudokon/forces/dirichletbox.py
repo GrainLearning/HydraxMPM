@@ -15,9 +15,9 @@ from functools import partial
 
 
 @partial(jax.jit, static_argnames=["boundary_types"])
-def apply_boundary_box(moments: Array, ids_grid: Array, boundary_types: List):
+def apply_boundary_box(moments: Array, moments_nt: Array, ids_grid: Array, boundary_types: Array):
     # # TODO: Add support for 3D
-
+    moment_zeros = jnp.zeros_like(moments)
     x0 = ids_grid.at[0, :].get().reshape(-1)
     x1 = ids_grid.at[-1, :].get().reshape(-1)
 
@@ -25,19 +25,72 @@ def apply_boundary_box(moments: Array, ids_grid: Array, boundary_types: List):
     y0 = ids_grid.at[:, 0].get().reshape(-1)
     y1 = ids_grid.at[:, -1].get().reshape(-1)
 
-    if boundary_types.at[0, 0] == 1:
-        moments = moments.at[x0].set(0)
+    moments = jax.lax.cond(
+        boundary_types.at[0, 0] == 1,
+        lambda x: x.at[x0,1].set(0.0),
+        lambda x: x,
+        operand=moments,
+    )
+    moments = jax.lax.cond(
+        boundary_types.at[0, 1] == 1,
+        lambda x: x.at[x1,1].set(0.0),
+        lambda x: x,
+        operand=moments,
+    )
+    moments = jax.lax.cond(
+        boundary_types.at[1, 0] == 1,
+        lambda x: x.at[y0,0].set(0.0),
+        lambda x: x,
+        operand=moments,
+    )
+    moments = jax.lax.cond(
+        boundary_types.at[1, 1] == 1,
+        lambda x: x.at[y1,0].set(0.0),
+        lambda x: x,
+        operand=moments,
+    )
+    ##
+    moments_nt = jax.lax.cond(
+        boundary_types.at[0, 0] == 1,
+        lambda x: x.at[x0,1].set(0.0),
+        lambda x: x,
+        operand=moments_nt,
+    )
+    moments_nt = jax.lax.cond(
+        boundary_types.at[0, 1] == 1,
+        lambda x: x.at[x1,1].set(0.0),
+        lambda x: x,
+        operand=moments_nt,
+    )
+    moments_nt = jax.lax.cond(
+        boundary_types.at[1, 0] == 1,
+        lambda x: x.at[y0,0].set(0.0),
+        lambda x: x,
+        operand=moments_nt,
+    )
+    moments_nt = jax.lax.cond(
+        boundary_types.at[1, 1] == 1,
+        lambda x: x.at[y1,0].set(0.0),
+        lambda x: x,
+        operand=moments_nt,
+    )
+    # # if boundary_types.at[0, 0] == 1:
+    # moments = moments.at[x0].set(0.0)
+    # moments_nt = moments_nt.at[x0].set(0.0)
 
-    if boundary_types.at[0, 1] == 1:
-        moments = moments.at[x1].set(0)
+    # # if boundary_types.at[0, 1] == 1:
+    # moments = moments.at[x1].set(0.0)
+    # moments_nt = moments_nt.at[x1].set(0.0)
 
-    if boundary_types.at[1, 0] == 1:
-        moments = moments.at[y0].set(0)
+    # # if boundary_types.at[1, 0] == 1:
+    # moments = moments.at[y0].set(0.0)
+    # moments_nt = moments_nt.at[y0].set(0.0)
 
-    if boundary_types.at[1, 1] == 1:
-        moments = moments.at[y1].set(0)
+    # # if boundary_types.at[1, 1] == 1:
+    # moments = moments.at[y1].set(0.0)
+    # moments_nt = moments_nt.at[y1].set(0.0)
 
-    return moments
+    return moments, moments_nt
 
     # return nodes.replace(moments=moments), self
 
@@ -63,12 +116,12 @@ class DirichletBox(Base):
     width: int
 
     @classmethod
-    def register(cls: Self, boundary_types: Dict = None, width: int = 1) -> Self:
+    def register(cls: Self, boundary_types: List = None, width: int = 1) -> Self:
         """Register the Dirichlet nodes."""
         if boundary_types is None:
-            boundary_types = jnp.array([[0, 0], [0, 0], [0, 0]]).astype(jnp.int32)  # fixed
-
-        return cls(boundary_types, width)
+            boundary_types = jnp.array([[1, 1], [1, 1], [1, 1]])  # fixed
+        print(boundary_types)
+        return cls(boundary_types.astype(jnp.int32), width)
 
     @jax.jit
     def apply_on_nodes_moments(
@@ -81,6 +134,6 @@ class DirichletBox(Base):
     ) -> Tuple[Nodes, Self]:
         """Apply the force on the nodes."""
 
-        moments = apply_boundary_box(nodes.moments, nodes.ids_grid, self.boundary_types)
+        moments, moments_nt = apply_boundary_box(nodes.moments, nodes.moments_nt, nodes.ids_grid, self.boundary_types)
 
-        return nodes.replace(moments=moments), self
+        return nodes.replace(moments=moments, moments_nt=moments_nt), self
