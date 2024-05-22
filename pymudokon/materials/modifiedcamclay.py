@@ -12,55 +12,39 @@ from ..core.particles import Particles
 from .material import Material
 
 
+# from functools import partial
+# @partial(jax.jit, static_argnames=["boundary_types"])
 def accept_elastic_solution(package):
-    update_history, eps_e, eps_e_prev, stress = package
-    
-    if update_history:
-        return stress, eps_e
-    
-    return stress, eps_e_prev
+    update_history, eps_e_tr, eps_e_prev, pc_prev, eps_v_p_prev, p, s = package
+
+    stress = s - p * jnp.eye(3)
+
+    # if update_history:
+    #     return stress, eps_e_tr, pc_prev, eps_v_p_prev
+
+    return stress, eps_e_prev, pc_prev, eps_v_p_prev
+
+
+def return_mapping(package):
+    update_history, eps_e_tr, eps_e_prev, pc_prev, eps_v_p_prev, p, s = package
+    stress = s - p * jnp.eye(3)
+
+    return stress, eps_e_prev, pc_prev, eps_v_p_prev
+
 
 def vmap_update(
     eps_e_prev: Array,
     deps: Array,
     stress_ref: Array,
-    pc:Array,
+    pc: Array,
+    eps_v_p: Array,
     G: jnp.float32,
     K: jnp.float32,
     M: jnp.float32,
     lam: jnp.float32,
-    kap: jnp.float32
+    kap: jnp.float32,
+    update_history: jnp.bool,
 ) -> Tuple[Array, Array]:
-    """Parallelized stress update for each particle.
-
-    Tensors are mapped per particle via vmap (num_particles, dim) -> (dim,).
-
-    Args:
-        eps_e_prev (Array):
-            Vectorized previous elastic strain tensor.
-            Shape of full tensor is `(number of particles,dimension,dimension)`.
-        deps (Array):
-            Vectorized strain increment.
-            Shape of full tensor is `(number of particles,dimension,dimension)`.
-        G (jnp.float32):
-            Shear modulus.
-        K (jnp.float32):
-            Bulk modulus.
-        dt (jnp.float32):
-            Time step.
-
-    Returns:
-        Tuple[Array, Array]:
-            Updated stress and elastic strain tensors.
-
-    Example:
-        >>> import pymudokon as pm
-        >>> import jax.numpy as jnp
-        >>> eps_e = jnp.ones((2, 2, 2), dtype=jnp.float32)
-        >>> vel_grad = jnp.ones((2, 2, 2), dtype=jnp.float32)
-        >>> stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None, None))(
-        >>> eps_e, vel_grad, 1000, 1000, 0.001)
-    """
     dim = deps.shape[0]
 
     eps_e_tr = eps_e_prev + deps
@@ -75,31 +59,30 @@ def vmap_update(
     if dim == 2:
         s_tr = jnp.pad(s_tr, ((0, 1), (0, 1)), mode="constant")
 
-    p_tr =  K * eps_e_v_tr
+    p_tr = K * eps_e_v_tr
 
-    p_ref = -jnp.trace(stress_ref)/dim
+    p_ref = -jnp.trace(stress_ref) / dim
     s_ref = stress_ref + p_ref * jnp.eye(3)
-    
+
     p_tr = p_tr + p_ref
     s_tr = s_tr + s_ref
-    
-    q_tr = jnp.sqrt(1.5*(s_tr@s_tr.T).trace())
-            
-    ps_tr = 0.5*pc
-        
-    yield_function = lambda p, ps, q, M : (p-ps)**2 +(q/M)**2 -ps**2
-        
-    F = yield_function(p_tr,q_tr,ps_tr, M)
-    
-    s_tr, eps_e_tr, p_tr, q_tr = jax.lax.cond(
-        F <= 0,
-        lambda x: x,
-        lambda x: x, 
-        (update_history, eps_e, eps_e_prev, stress))
-    
-    
-    
-    return s_tr - p_tr* jnp.eye(3), eps_e_tr, p_tr,q_tr
+
+    q_tr = jnp.sqrt(1.5 * (s_tr @ s_tr.T).trace())
+
+    ps_tr = 0.5 * pc
+
+    yield_function = lambda p, ps, q, M: (p - ps) ** 2 + (q / M) ** 2 - ps**2
+
+    F = yield_function(p_tr, q_tr, ps_tr, M)
+
+    stress_next, eps_e_next, pc_next, eps_v_p_next = jax.lax.cond(
+        F <= 0, accept_elastic_solution, return_mapping, (update_history, eps_e_tr, eps_e_prev, pc, eps_v_p, p_tr, s_tr)
+    )
+
+    return stress_next, eps_e_next, pc_next, eps_v_p_next
+    # s_tr, eps_e_tr, p_tr, q_tr = j
+
+    # return s_tr - p_tr * jnp.eye(3), eps_e_tr, p_tr, q_tr
 
 
 @jax.tree_util.register_pytree_node_class
@@ -126,14 +109,14 @@ class ModifiedCamClay(Material):
     nu: jnp.float32
     G: jnp.float32
     K: jnp.float32
-    
+
     M: jnp.float32
     R: jnp.float32
-    
+
     lam: jnp.float32
     kap: jnp.float32
     Vs: jnp.float32
-    
+
     stress_ref: Array
     pc: Array
     eps_v_p: Array
@@ -151,7 +134,8 @@ class ModifiedCamClay(Material):
         Vs: jnp.float32,
         stress_ref: Array,
         num_particles,
-        dim: jnp.int16 = 3) -> Self:
+        dim: jnp.int16 = 3,
+    ) -> Self:
         """Initialize the isotropic linear elastic material.
 
         Args:
@@ -179,14 +163,27 @@ class ModifiedCamClay(Material):
         G = E / (2.0 * (1.0 + nu))
         K = E / (3.0 * (1.0 - 2.0 * nu))
         eps_e = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
-        
-        p_ref = -jnp.trace(stress_ref, axis1=1, axis2=2)/dim
-        pc = p_ref*R
-        
+
+        p_ref = -jnp.trace(stress_ref, axis1=1, axis2=2) / dim
+        pc = p_ref * R
+
         eps_v_p = jnp.zeros((num_particles), dtype=jnp.float32)
-        
-        return cls(E=E, nu=nu, G=G, K=K, M=M, R=R, lam=lam, kap=kap, Vs=Vs,
-                   stress_ref=stress_ref, eps_e=eps_e, eps_v_p=eps_v_p, pc=pc)
+
+        return cls(
+            E=E,
+            nu=nu,
+            G=G,
+            K=K,
+            M=M,
+            R=R,
+            lam=lam,
+            kap=kap,
+            Vs=Vs,
+            stress_ref=stress_ref,
+            eps_e=eps_e,
+            eps_v_p=eps_v_p,
+            pc=pc,
+        )
 
     @jax.jit
     def update_stress(
@@ -218,11 +215,11 @@ class ModifiedCamClay(Material):
         """
         raise NotImplementedError("This method is not implemented yet.")
         vel_grad = particles.velgrads
-        
+
         vel_grad_T = jnp.transpose(vel_grad, axes=(0, 2, 1))
-        
+
         deps = 0.5 * (vel_grad + vel_grad_T) * dt
-        
+
         stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
             self.eps_e, deps, self.G, self.K
         )
@@ -230,8 +227,6 @@ class ModifiedCamClay(Material):
         material = self.replace(eps_e=eps_e)
 
         particles = particles.replace(stresses=stress)
-        
-        
 
         return particles, material
 
@@ -242,10 +237,21 @@ class ModifiedCamClay(Material):
         dt: jnp.float32,
         update_history: bool = True,
     ) -> Self:
-        deps = strain_rate* dt
-        stress, eps_e, p_trail, q_trail = jax.vmap(vmap_update, in_axes=(0, 0, 0,0, None, None, None, None, None), out_axes=(0, 0, 0,0))(
-            self.eps_e, deps, self.stress_ref, self.pc, self.G, self.K, self.M, self.lam, self.kap
+        deps = strain_rate * dt
+        stress_next, eps_e_next, pc_next, eps_v_p_next = jax.vmap(
+            vmap_update, in_axes=(0, 0, 0, 0, 0, None, None, None, None, None, None), out_axes=(0, 0, 0, 0)
+        )(
+            self.eps_e,
+            deps,
+            self.stress_ref,
+            self.pc,
+            self.eps_v_p,
+            self.G,
+            self.K,
+            self.M,
+            self.lam,
+            self.kap,
+            update_history,
         )
-        
-        
-        return stress, self.replace(eps_e=eps_e)
+
+        return stress_next, self.replace(eps_e=eps_e_next, pc=pc_next, eps_v_p=eps_v_p_next)
