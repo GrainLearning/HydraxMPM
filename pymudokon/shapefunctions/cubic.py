@@ -17,7 +17,6 @@ from typing_extensions import Self
 
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
-from .shapefunction import ShapeFunction
 
 
 def middle_splines(package) -> Tuple[Array, Array]:
@@ -159,7 +158,7 @@ def vmap_cubic_shapefunction(
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class CubicShapeFunction(ShapeFunction):
+class CubicShapeFunction(Interactions):
     """Cubic B-spline shape functions for the particle-node interactions."""
 
     @classmethod
@@ -279,12 +278,15 @@ class CubicShapeFunction(ShapeFunction):
         stencil_size = stencil.shape[0]
 
         return cls(
-            shapef=jnp.zeros((num_particles * stencil_size, 1, 1), dtype=jnp.float32),
-            shapef_grad=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
+            intr_dist=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
+            intr_bins=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.int32),
+            intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
+            intr_shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
+            intr_shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
             stencil=stencil,
         )
 
-    def set_nodes_species(self: Self, nodes: Nodes) -> Nodes:
+    def set_boundary_nodes(self: Self, nodes: Nodes) -> Nodes:
         """Set the node species to ensure connectivity is correct.
 
         The background grid is divided into 4 regions. Each region is stored within
@@ -313,7 +315,6 @@ class CubicShapeFunction(ShapeFunction):
             >>> shapefunctions = pm.CubicShapeFunction.register(2, 2)
             >>> nodes = shapefunctions.set_node_species(nodes)
         """
-
         # middle nodes
         species = jnp.zeros(nodes.grid_size).astype(jnp.int32)
 
@@ -341,7 +342,6 @@ class CubicShapeFunction(ShapeFunction):
     def calculate_shapefunction(
         self: Self,
         nodes: Nodes,
-        interactions: Interactions,
     ) -> Self:
         """Top level function to calculate the shape functions.
 
@@ -350,9 +350,6 @@ class CubicShapeFunction(ShapeFunction):
                 Shape function at previous state
             nodes (Nodes):
                 Nodes state containing grid size and inv_node_spacing
-            interactions (Interactions):
-                Interactions state containing particle-node interactions' distances.
-
         Returns:
             CubicShapeFunction:
                 Updated shape function state for the particle and node pairs.
@@ -360,10 +357,10 @@ class CubicShapeFunction(ShapeFunction):
         dim = self.stencil.shape[1]
 
         # repeat for each dimension
-        intr_species = nodes.species.take(interactions.intr_hashes, axis=0).reshape(-1).repeat(dim)
+        intr_species = nodes.species.take(self.intr_hashes, axis=0).reshape(-1).repeat(dim)
 
         basis, dbasis = jax.vmap(vmap_cubic_shapefunction, in_axes=(0, 0, None))(
-            interactions.intr_dist.reshape(-1), intr_species, nodes.inv_node_spacing
+            self.intr_dist.reshape(-1), intr_species, nodes.inv_node_spacing
         )
         basis = basis.reshape(-1, dim)
         dbasis = dbasis.reshape(-1, dim)
@@ -373,13 +370,13 @@ class CubicShapeFunction(ShapeFunction):
         dN0 = dbasis[:, 0]
         dN1 = dbasis[:, 1]
 
-        shapef = (N0 * N1).reshape(-1, 1, 1)
+        intr_shapef = (N0 * N1).reshape(-1, 1, 1)
 
-        shapef_grad = jnp.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
+        intr_shapef_grad = jnp.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
 
         return self.replace(
-            shapef=shapef,
-            shapef_grad=shapef_grad,
+            intr_shapef=intr_shapef,
+            intr_shapef_grad=intr_shapef_grad,
         )
 
     def validate(self: Self, solver) -> Self:

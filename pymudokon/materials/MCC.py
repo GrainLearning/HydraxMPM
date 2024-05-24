@@ -1,5 +1,4 @@
-"""
-Contains the Modified Cam Clay constitutive model.
+"""Contains the Modified Cam Clay constitutive model.
 
 The model is designed as a standalone for educational and research purposes.
 It follows the return-mapping procedure described in the book:
@@ -19,8 +18,7 @@ import numpy as np
 
 
 def compute_yield_function(p: float, ps: float, q: float, M: float)->float:
-    """
-    Compute the modified Cam Clay yield function.
+    """Compute the modified Cam Clay yield function.
 
     Args:
     ----
@@ -51,8 +49,7 @@ class ModifiedCamClay:
         reference_stress: np.ndarray,
         reference_strain: np.ndarray = None,
     ) -> None:
-        """
-        Initialize the MCC (Modified Cam Clay) model parameters.
+        """Initialize the MCC (Modified Cam Clay) model parameters.
 
         Parameters
         ----------
@@ -130,8 +127,7 @@ class ModifiedCamClay:
         dt: float,
         update_history: bool = True,
     ) -> None:
-        """
-        Perform a stress update step of the modified Cam Clay model.
+        """Perform a stress update step of the modified Cam Clay model.
 
         Args:
         ----

@@ -1,31 +1,22 @@
 """Base class for single integration point benchmark module"""
 
-import dataclasses
 
-import jax
 import jax.numpy as jnp
-
-
+import xarray as xr
 from jax import Array
 
-from typing_extensions import Self
-
-from typing import Dict, List
-
 from ..materials.material import Material
-
-import xarray as xr
 
 
 def simple_shear(
     material: Material,
     eps_path: Array,
+    # volumes: Array,
     dt: jnp.float32 | Array,
     results_to_store=[],
     output_step=1,
 ):
-    """
-    Perfoms a loading step the simple shear test on a material.
+    """Perfoms a loading step the simple shear test on a material.
 
     Args:
     ----

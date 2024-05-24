@@ -12,41 +12,30 @@ from ..core.particles import Particles
 from .material import Material
 
 
-def vmap_update(
-    eps_e_prev: Array,
-    deps: Array,
-    G: jnp.float32,
-    K: jnp.float32
-) -> Tuple[Array, Array]:
+def vmap_update(eps_e_prev: Array, deps: Array, G: jnp.float32, K: jnp.float32) -> Tuple[Array, Array]:
     """Parallelized stress update for each particle.
 
     Tensors are mapped per particle via vmap (num_particles, dim) -> (dim,).
 
     Args:
-        eps_e_prev (Array):
-            Vectorized previous elastic strain tensor.
+        eps_e_prev (Array): Vectorized previous elastic strain tensor `(number of particles,dimension,dimension)`.
+        deps (Array): Vectorized strain increment.
             Shape of full tensor is `(number of particles,dimension,dimension)`.
-        deps (Array):
-            Vectorized strain increment.
-            Shape of full tensor is `(number of particles,dimension,dimension)`.
-        G (jnp.float32):
-            Shear modulus.
-        K (jnp.float32):
-            Bulk modulus.
-        dt (jnp.float32):
-            Time step.
+        G (jnp.float32): Shear modulus.
+        K (jnp.float32): Bulk modulus.
+        dt (jnp.float32): Time step.
 
     Returns:
-        Tuple[Array, Array]:
-            Updated stress and elastic strain tensors.
+        Tuple[Array, Array]: Updated stress and elastic strain tensors.
 
     Example:
         >>> import pymudokon as pm
         >>> import jax.numpy as jnp
         >>> eps_e = jnp.ones((2, 2, 2), dtype=jnp.float32)
-        >>> vel_grad = jnp.ones((2, 2, 2), dtype=jnp.float32)
-        >>> stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None, None))(
-        >>> eps_e, vel_grad, 1000, 1000, 0.001)
+        >>> deps = jnp.eye(3, dtype=jnp.float32)*0.001
+        >>> stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
+        ... eps_e, deps, 100, 100
+        ...)
     """
     dim = deps.shape[0]
 
@@ -73,17 +62,11 @@ class LinearIsotropicElastic(Material):
     """State for the isotropic linear elastic material.
 
     Attributes:
-        E (jnp.float32):
-            Young's modulus.
-        nu (Array):
-            Poisson's ratio.
-        G (Array):
-            Shear modulus.
-        K (Array):
-            Bulk modulus.
-        eps_e (Array):
-            Elastic strain tensors.
-            Shape is `(number of particles,dim,dim)`.
+        E (jnp.float32): Young's modulus.
+        nu (Array): Poisson's ratio.
+        G (Array): Shear modulus.
+        K (Array): Bulk modulus.
+        eps_e (Array): Elastic strain tensors `(number of particles,dim,dim)`.
     """
 
     # TODO we can replace this with incremental form / or hyperelastic form
@@ -100,23 +83,17 @@ class LinearIsotropicElastic(Material):
         """Initialize the isotropic linear elastic material.
 
         Args:
-            E (jnp.float32):
-                Young's modulus.
-            nu (jnp.float32):
-                Poisson's ratio.
-            num_particles (jnp.int16):
-                Number of particles.
-            dim (jnp.int16, optional):
-                Dimension. Defaults to 3.
+            E (jnp.float32): Young's modulus.
+            nu (jnp.float32): Poisson's ratio.
+            num_particles (jnp.int16): Number of particles.
+            dim (jnp.int16, optional): Dimension. Defaults to 3.
 
         Returns:
-            LinearIsotropicElastic:
-                Updated state for the isotropic linear elastic material.
+            LinearIsotropicElastic: Initial state of the isotropic linear elastic material.
 
         Example:
             >>> # Create a linear elastic material for plane strain and 2 particles
             >>> import pymudokon as pm
-            >>> import jax.numpy as jnp
             >>> material = pm.LinearIsotropicElastic.register(1000, 0.2, 2, 2)
         """
         # TODO: How can we avoid the need for num_particles and dim?
@@ -137,17 +114,13 @@ class LinearIsotropicElastic(Material):
         Called by the MPM solver (e.g., see :func:`~usl.update`).
 
         Args:
-            self (LinearIsotropicElastic):
-                self reference.
-            particles (ParticlesContainer):
-                State of the particles prior to the update.
+            self (LinearIsotropicElastic): Self reference.
+            particles (ParticlesContainer): State of the particles prior to the update.
 
-            dt (jnp.float32):
-                Time step.
+            dt (jnp.float32): Time step.
 
         Returns:
-            Tuple[ParticlesContainer, LinearIsotropicElastic]:
-                Updated particles and material state.
+            Tuple[ParticlesContainer, LinearIsotropicElastic]: Updated particles and material state.
 
         Example:
             >>> import pymudokon as pm
@@ -155,11 +128,11 @@ class LinearIsotropicElastic(Material):
             >>> particles, material = material.update_stress(particles, 0.001)
         """
         vel_grad = particles.velgrads
-        
+
         vel_grad_T = jnp.transpose(vel_grad, axes=(0, 2, 1))
-        
+
         deps = 0.5 * (vel_grad + vel_grad_T) * dt
-        
+
         stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
             self.eps_e, deps, self.G, self.K
         )
@@ -174,33 +147,29 @@ class LinearIsotropicElastic(Material):
     def update_stress_benchmark(
         self: Self,
         strain_rate: Array,
+        volumes: Array,
         dt: jnp.float32,
         update_history: bool = True,
     ) -> Self:
         """Update stress for a single element benchmark.
 
         Args:
-            self (LinearIsotropicElastic):
-                self reference.
-            strain_rate (Array):
-                Strain rate tensor.
-                Shape is `(dim,dim)`.
-            dt (jnp.float32):
-                Time step.
-            update_history (bool, optional):
-                Update the history. Defaults to True.
+            self (LinearIsotropicElastic): Self reference.
+            strain_rate (Array): Strain rate tensor `(dim,dim)`.
+            volumes: Volumes of the particles.
+            dt (jnp.float32): Time step.
+            update_history (bool, optional): Update the history. Defaults to True.
 
         Returns:
-            LinearIsotropicElastic:
-            Updated material state.
+            LinearIsotropicElastic: Updated material state.
 
         Example:
             >>> import pymudokon as pm
             >>> import jax.numpy as jnp
             >>> # ...  Assume material is initialized
-            >>> material = material.update_stress_benchmark(jnp.eye(2), 0.001)
+            >>> material = material.update_stress_benchmark(jnp.eye(2), 0.5, 0.001)
         """
-        deps = strain_rate* dt
+        deps = strain_rate * dt
         stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
             self.eps_e, deps, self.G, self.K
         )

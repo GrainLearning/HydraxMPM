@@ -45,25 +45,25 @@ class TestLinearElastic(unittest.TestCase):
         """Test the vectorized update of the isotropic linear elastic material."""
         material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
-        vel_grad = jnp.stack([jnp.eye(2), jnp.eye(2)])
-
-        stress, eps_e = jax.vmap(
-            pm.materials.linearelastic.vmap_update, in_axes=(0, 0, None, None, None), out_axes=(0, 0)
-        )(material.eps_e, vel_grad, material.G, material.K, 0.001)
+        transform = jnp.eye(2, dtype=jnp.float32) * 0.001
+        deps = jnp.stack([transform, transform])
+        stress, eps_e = jax.vmap(pm.materials.linearelastic.vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
+            material.eps_e, deps, material.G, material.K
+        )
 
         np.testing.assert_allclose(
             stress,
             jnp.array(
                 [
                     [
-                        [1.1111112, 0.0, 0.0],
-                        [0.0, 1.1111112, 0.0],
-                        [0.0, 0.0, 1.1111112],
+                        [1.11111111111, 0.0, 0.0],
+                        [0.0, 1.11111111111, 0.0],
+                        [0.0, 0.0, 1.11111111111],
                     ],
                     [
-                        [1.1111112, 0.0, 0.0],
-                        [0.0, 1.1111112, 0.0],
-                        [0.0, 0.0, 1.1111112],
+                        [1.11111111111, 0.0, 0.0],
+                        [0.0, 1.11111111111, 0.0],
+                        [0.0, 0.0, 1.11111111111],
                     ],
                 ]
             ),
@@ -102,6 +102,44 @@ class TestLinearElastic(unittest.TestCase):
                         [1.1111112, 0.0, 0.0],
                         [0.0, 1.1111112, 0.0],
                         [0.0, 0.0, 1.1111112],
+                    ],
+                ]
+            ),
+        )
+        np.testing.assert_allclose(
+            material.eps_e,
+            jnp.array(
+                [
+                    [[0.001, 0.0], [0.0, 0.001]],
+                    [[0.001, 0.0], [0.0, 0.001]],
+                ]
+            ),
+        )
+
+    @staticmethod
+    def test_update_benchmark():
+        """Test the vectorized update of the isotropic linear elastic material."""
+        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+
+        dt = 0.01
+        strain_rate_transform = jnp.eye(2, dtype=jnp.float32) * 0.001 / dt
+        strain_rate = jnp.stack([strain_rate_transform, strain_rate_transform])
+        volumes = np.ones(2)
+        stress, material = material.update_stress_benchmark(strain_rate, volumes, dt)
+
+        np.testing.assert_allclose(
+            stress,
+            jnp.array(
+                [
+                    [
+                        [1.11111111111, 0.0, 0.0],
+                        [0.0, 1.11111111111, 0.0],
+                        [0.0, 0.0, 1.11111111111],
+                    ],
+                    [
+                        [1.11111111111, 0.0, 0.0],
+                        [0.0, 1.11111111111, 0.0],
+                        [0.0, 0.0, 1.11111111111],
                     ],
                 ]
             ),

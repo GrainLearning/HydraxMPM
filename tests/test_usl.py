@@ -15,12 +15,7 @@ class TestUSL(unittest.TestCase):
     def test_init():
         """Unit test to initialize usl solver."""
         particles = pm.Particles.register(positions=jnp.array([[1.0, 2.0], [0.3, 0.1]]))
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=0.5,
-            particles_per_cell=2,
-        )
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
         shapefunctions = pm.LinearShapeFunction.register(2, 2)
 
@@ -49,7 +44,6 @@ class TestUSL(unittest.TestCase):
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=1.0,
-            particles_per_cell=1,
         )
 
         particles = particles.replace(
@@ -61,17 +55,14 @@ class TestUSL(unittest.TestCase):
 
         shapefunctions = pm.LinearShapeFunction.register(2, 2)
 
-        interactions = pm.Interactions.register(4, 2, 2)
+        shapefunctions = shapefunctions.get_interactions(particles, nodes)
 
-        interactions = interactions.get_interactions(particles, nodes, shapefunctions)
-
-        shapefunctions = shapefunctions.calculate_shapefunction(nodes, interactions)
+        shapefunctions = shapefunctions.calculate_shapefunction(nodes)
 
         nodes = pm.solvers.usl.p2g(
             nodes=nodes,
             particles=particles,
             shapefunctions=shapefunctions,
-            interactions=interactions,
             dt=0.1,
         )
 
@@ -96,26 +87,18 @@ class TestUSL(unittest.TestCase):
             stresses=jnp.stack([jnp.eye(3)] * 2),
         )
 
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=1.0,
-            particles_per_cell=1,
-        )
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=1.0)
 
         shapefunctions = pm.LinearShapeFunction.register(2, 2)
 
-        interactions = pm.Interactions.register(4, 2, 2)
+        shapefunctions = shapefunctions.get_interactions(particles, nodes)
 
-        interactions = interactions.get_interactions(particles, nodes, shapefunctions)
-
-        shapefunctions = shapefunctions.calculate_shapefunction(nodes, interactions)
+        shapefunctions = shapefunctions.calculate_shapefunction(nodes)
 
         nodes = pm.solvers.usl.p2g(
             nodes=nodes,
             particles=particles,
             shapefunctions=shapefunctions,
-            interactions=interactions,
             dt=0.1,
         )
 
@@ -123,7 +106,6 @@ class TestUSL(unittest.TestCase):
             particles=particles,
             nodes=nodes,
             shapefunctions=shapefunctions,
-            interactions=interactions,
             alpha=0.99,
             dt=0.1,
         )
@@ -165,7 +147,6 @@ class TestUSL(unittest.TestCase):
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
-            particles_per_cell=2,
         )
 
         shapefunctions = pm.LinearShapeFunction.register(2, 2)
@@ -195,12 +176,7 @@ class TestUSL(unittest.TestCase):
             masses=jnp.array([1.0, 3.0]),
         )
 
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=0.5,
-            particles_per_cell=2,
-        )
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
         material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
 

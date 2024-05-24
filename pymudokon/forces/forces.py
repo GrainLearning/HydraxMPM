@@ -11,7 +11,6 @@ from ..core.base import Base
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
-from ..shapefunctions.shapefunction import ShapeFunction
 
 
 @jax.tree_util.register_pytree_node_class
@@ -24,8 +23,7 @@ class Forces(Base):
         self: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: ShapeFunction,
-        interactions: Interactions,
+        shapefunctions: Interactions,
         dt: jnp.float32,
     ) -> Tuple[Particles, Self]:
         """Apply the force on the particles."""
@@ -36,8 +34,7 @@ class Forces(Base):
         self: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: ShapeFunction,
-        interactions: Interactions,
+        shapefunctions: Interactions,
         dt: jnp.float32,
     ) -> Tuple[Nodes, Self]:
         """Apply the force on the nodes."""

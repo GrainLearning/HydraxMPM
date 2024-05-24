@@ -20,10 +20,10 @@ class TestLinearShapeFunctions(unittest.TestCase):
 
         assert isinstance(shapefunction, pm.LinearShapeFunction)
 
-        np.testing.assert_allclose(shapefunction.shapef, jnp.zeros((2, 4), dtype=jnp.float32))
+        np.testing.assert_allclose(shapefunction.intr_shapef, jnp.zeros((2, 4), dtype=jnp.float32))
 
         np.testing.assert_allclose(
-            shapefunction.shapef_grad,
+            shapefunction.intr_shapef_grad,
             jnp.zeros((2, 4, 2), dtype=jnp.float32),
         )
 
@@ -79,32 +79,25 @@ class TestLinearShapeFunctions(unittest.TestCase):
         """Test the linear shape function for top level container input."""
         particles = pm.Particles.register(positions=jnp.array([[0.25, 0.25], [0.8, 0.4]]))
 
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=0.5,
-            particles_per_cell=1,
-        )
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
         shapefunction = pm.LinearShapeFunction.register(num_particles=2, dim=2)
 
-        interactions = pm.Interactions.register(stencil_size=4, num_particles=3, dim=2)  # unused intentionally
+        shapefunction = shapefunction.get_interactions(particles, nodes)
 
-        interactions = interactions.get_interactions(particles, nodes, shapefunction)
+        shapefunction = shapefunction.calculate_shapefunction(nodes)
 
-        shapefunction = shapefunction.calculate_shapefunction(nodes, interactions)
-
-        np.testing.assert_allclose(shapefunction.shapef.shape, (8, 1, 1))
+        np.testing.assert_allclose(shapefunction.intr_shapef.shape, (8, 1, 1))
 
         np.testing.assert_allclose(
-            shapefunction.shapef,
+            shapefunction.intr_shapef,
             jnp.array([[[0.25]], [[0.25]], [[0.25]], [[0.25]], [[0.08]], [[0.12]], [[0.32]], [[0.48]]]),
         )
 
-        np.testing.assert_allclose(shapefunction.shapef_grad.shape, (8, 2, 1))
+        np.testing.assert_allclose(shapefunction.intr_shapef_grad.shape, (8, 2, 1))
 
         np.testing.assert_allclose(
-            shapefunction.shapef_grad,
+            shapefunction.intr_shapef_grad,
             [
                 [[-1.0], [-1.0]],
                 [[1.0], [-1.0]],

@@ -12,24 +12,28 @@ from ..core.particles import Particles
 from .material import Material
 
 
-# from functools import partial
-# @partial(jax.jit, static_argnames=["boundary_types"])
 def accept_elastic_solution(package):
-    update_history, eps_e_tr, eps_e_prev, pc_prev, eps_v_p_prev, p, s = package
+    eps_e_tr, eps_e_prev, pc_prev, eps_v_p_prev, p, s = package
 
     stress = s - p * jnp.eye(3)
 
-    # if update_history:
-    #     return stress, eps_e_tr, pc_prev, eps_v_p_prev
-
-    return stress, eps_e_prev, pc_prev, eps_v_p_prev
+    return stress, eps_e_prev, eps_e_tr, eps_v_p_prev
 
 
 def return_mapping(package):
-    update_history, eps_e_tr, eps_e_prev, pc_prev, eps_v_p_prev, p, s = package
+    eps_e_tr, eps_e_prev, pc_prev, eps_v_p_prev, p, s = package
     stress = s - p * jnp.eye(3)
 
-    return stress, eps_e_prev, pc_prev, eps_v_p_prev
+    # , volume, Vs, lam, kap
+    # specific_volume = volume / Vs
+
+    # v_lam_tilde = specific_volume / (lam - kap)
+
+    # Solution = jnp.array([0.0, eps_v_p_prev])
+    # tol = 1e-2
+    # R = jnp.zeros(2)
+
+    return stress, eps_e_prev, eps_e_tr, eps_v_p_prev
 
 
 def vmap_update(
@@ -38,12 +42,13 @@ def vmap_update(
     stress_ref: Array,
     pc: Array,
     eps_v_p: Array,
+    # volumes: Array,
     G: jnp.float32,
     K: jnp.float32,
     M: jnp.float32,
     lam: jnp.float32,
     kap: jnp.float32,
-    update_history: jnp.bool,
+    # Vs: jnp.float32,
 ) -> Tuple[Array, Array]:
     dim = deps.shape[0]
 
@@ -75,8 +80,12 @@ def vmap_update(
 
     F = yield_function(p_tr, q_tr, ps_tr, M)
 
+    #  volumes, Vs, lam, kap
     stress_next, eps_e_next, pc_next, eps_v_p_next = jax.lax.cond(
-        F <= 0, accept_elastic_solution, return_mapping, (update_history, eps_e_tr, eps_e_prev, pc, eps_v_p, p_tr, s_tr)
+        F <= 0,
+        accept_elastic_solution,
+        return_mapping,
+        (eps_e_tr, eps_e_prev, pc, eps_v_p, p_tr, s_tr),
     )
 
     return stress_next, eps_e_next, pc_next, eps_v_p_next
@@ -234,12 +243,13 @@ class ModifiedCamClay(Material):
     def update_stress_benchmark(
         self: Self,
         strain_rate: Array,
+        volumes: Array,
         dt: jnp.float32,
         update_history: bool = True,
     ) -> Self:
         deps = strain_rate * dt
         stress_next, eps_e_next, pc_next, eps_v_p_next = jax.vmap(
-            vmap_update, in_axes=(0, 0, 0, 0, 0, None, None, None, None, None, None), out_axes=(0, 0, 0, 0)
+            vmap_update, in_axes=(0, 0, 0, 0, 0, None, None, None, None, None), out_axes=(0, 0, 0, 0)
         )(
             self.eps_e,
             deps,
@@ -251,7 +261,7 @@ class ModifiedCamClay(Material):
             self.M,
             self.lam,
             self.kap,
-            update_history,
+            # self.Vs
         )
 
         return stress_next, self.replace(eps_e=eps_e_next, pc=pc_next, eps_v_p=eps_v_p_next)

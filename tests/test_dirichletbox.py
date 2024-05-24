@@ -3,7 +3,6 @@
 import unittest
 
 import jax.numpy as jnp
-import numpy as np
 
 import pymudokon as pm
 
@@ -14,7 +13,6 @@ class DirichletBox(unittest.TestCase):
     @staticmethod
     def test_init():
         """Unit test to initialize the NodesContainer class."""
-
         box = pm.DirichletBox.register()
 
         assert isinstance(box, pm.DirichletBox)

@@ -7,6 +7,8 @@ import numpy as np
 
 import pymudokon as pm
 
+# TODO add test for node species
+
 
 class TestNodes(unittest.TestCase):
     """Unit tests for the TestNodes and functions."""
@@ -18,7 +20,6 @@ class TestNodes(unittest.TestCase):
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
-            particles_per_cell=1,
         )
 
         assert isinstance(nodes, pm.Nodes)
@@ -34,12 +35,7 @@ class TestNodes(unittest.TestCase):
     @staticmethod
     def test_refresh():
         """Unit test to refresh/reset the state of the nodes."""
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=0.5,
-            particles_per_cell=1,
-        )
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
         nodes = nodes.replace(masses=jnp.ones(9).astype(jnp.float32))
 

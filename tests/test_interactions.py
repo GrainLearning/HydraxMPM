@@ -18,8 +18,7 @@ class TestInteractions(unittest.TestCase):
         # 2D linear element stencil size of 4
         stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-        stencil_size, dim = stencil.shape
-        interactions = pm.Interactions.register(stencil_size=stencil_size, num_particles=2, dim=dim)
+        interactions = pm.Interactions.register(stencil=stencil, num_particles=2)
 
         assert isinstance(interactions, pm.Interactions)
 
@@ -81,18 +80,13 @@ class TestInteractions(unittest.TestCase):
     def test_get_interactions():
         """Unit test to get the particle-node pair interactions (top-level)."""
         particles = pm.Particles.register(positions=jnp.array([[0.25, 0.25], [0.25, 0.25], [0.8, 0.4]]))
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=0.5,
-            particles_per_cell=1,
-        )
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
-        shapefunctions = pm.LinearShapeFunction.register(num_particles=3, dim=2)
+        stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-        interactions = pm.Interactions.register(stencil_size=4, num_particles=3, dim=2)  # unused intentionally
+        interactions = pm.Interactions.register(stencil=stencil, num_particles=3)  # unused intentionally
 
-        interactions = interactions.get_interactions(particles, nodes, shapefunctions)
+        interactions = interactions.get_interactions(particles, nodes)
 
         np.testing.assert_allclose(interactions.intr_dist.shape, (12, 2, 1))
 

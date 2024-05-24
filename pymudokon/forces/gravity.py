@@ -1,6 +1,8 @@
+"""Gravity force on Nodes."""
+
 import dataclasses
 from functools import partial
-from typing import Dict, List, Tuple
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
@@ -11,16 +13,26 @@ from ..core.base import Base
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
-from ..shapefunctions.shapefunction import ShapeFunction
 
 
 @partial(jax.jit, static_argnames=["gravity"])
-def apply_gravity(moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32):
-    # # TODO: Add support for 3D
+def apply_gravity(
+    moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32
+) -> Tuple[Array, Array]:
+    """Apply gravity on the nodes.
 
+    Args:
+        moments (Array): Nodal moments `(num_nodes, dim)`.
+        moments_nt (Array): Nodal moments in the forward step `(num_nodes, dim)`.
+        masses (Array): Nodal masses `(num_nodes,)`.
+        gravity (Array): Gravity vector `(dim,)`.
+        dt (jnp.float32): Time step.
+
+    Returns:
+        Tuple[Array, Array]: Updated moments and moments_nt.
+    """
     moment_gravity = masses.reshape(-1, 1) * gravity * dt
 
-    moments = moments + moment_gravity
     moments_nt = moments_nt + moment_gravity
 
     return moments, moments_nt
@@ -29,18 +41,10 @@ def apply_gravity(moments: Array, moments_nt: Array, masses: Array, gravity: Arr
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
 class Gravity(Base):
-    """Dirichlet boundary conditions with user defined values.
+    """Dataclass containing the state of the Gravity forces.
 
     Attributes:
-        type mask (Array):
-            type mask in (X,Y,Z) space on where to apply the Dirichlet boundary conditions.
-            - 0 is not applied
-            - 1 is fixed
-            - 2 max
-            - 3 min
-            Shape is `(num_nodes, dim)`.
-        values (Array):
-            values of shape `(num_nodes, dim)` to apply on the nodes.
+        gravity (Array): Gravity vector `(dim,)`.
     """
 
     gravity: Array
@@ -50,11 +54,11 @@ class Gravity(Base):
         """Initialize Gravity force on Nodes.
 
         Args:
-            cls (Self): _description_
-            gravity (Array): _description_
+            cls (Gravity): Self reference.
+            gravity (Array): Gravity vector `(dim,)`.
 
         Returns:
-            Self: _description_
+            Gravity: Initialized Gravity force.
         """
         dim = gravity.shape[0]
         gravity.reshape(-1, dim)
@@ -65,14 +69,30 @@ class Gravity(Base):
         self: Self,
         nodes: Nodes,
         particles: Particles = None,
-        shapefunctions: ShapeFunction = None,
-        interactions: Interactions = None,
+        shapefunctions: Interactions = None,
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
-        """Apply the force on the nodes."""
+        """Apply gravity on the nodes.
 
+        Args:
+            self (Self): Self reference.
+            nodes (Nodes): Nodes in the simulation.
+            particles (Particles, optional): MPM particles. Defaults to None.
+            shapefunctions (Interactions, optional): Shapefunctions. Defaults to None.
+            dt (jnp.float32, optional): Time step. Defaults to 0.0.
+
+        Returns:
+            Tuple[Nodes, Self]: Updated nodes and gravity force.
+
+        Example:
+            >>> import jax.numpy as jnp
+            >>> import pymudokon as pm
+            >>> nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+            >>> grav = pm.Gravity.register(jnp.array([0.0, 9.8]))
+            >>> nodes, grav = grav.apply_on_nodes_moments(nodes=nodes, dt=0.01)
+        """
         moments, moments_nt = apply_gravity(nodes.moments, nodes.moments_nt, nodes.masses, self.gravity, dt)
         return nodes.replace(
-            moments=moments,
+            # moments=moments,
             moments_nt=moments_nt,
         ), self

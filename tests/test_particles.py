@@ -5,6 +5,8 @@ import unittest
 import jax.numpy as jnp
 import numpy as np
 
+import jax
+
 import pymudokon as pm
 
 
@@ -18,6 +20,9 @@ class TestParticles(unittest.TestCase):
             positions=jnp.array([[0.0, 0.0], [1.0, 1.0]]),
             velocities=jnp.array([[0.0, 0.0], [1.0, 2.0]]),
         )
+        
+        
+        jax.lax.scan
 
         assert isinstance(particles, pm.Particles)
 

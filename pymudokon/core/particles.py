@@ -1,4 +1,4 @@
-"""State and functions for managing the material points (called particles)."""
+"""State and functions for the material points (called particles)."""
 
 import dataclasses
 
@@ -13,34 +13,22 @@ from .base import Base
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
 class Particles(Base):
-    """State of the MPM particles.
+    """Dataclass containing the state of the MPM particles.
 
     Attributes:
-        original_density (jnp.float32):
-            Original density of the particles.
-        positions (Array):
-            Position vectors of the particles `(num_particles, dimension)`.
-        velocities (Array):
-            Velocity vectors of the particles `(num_particles, dimension)`.
-        masses (Array):
-            Masses of the particles `(num_particles,)`.
-        species (Array):
-            Species (material ID) of the particles `(num_particles,)`.
-        volumes (Array):
-            Current volumes of the particles `(num_particles,)`.
-        volumes_original (Array):
-            Original volumes of the particles `(num_particles,)`.
-        velgrads (Array):
-            Velocity gradient tensors of the particles `(num_particles, dimension, dimension)`.
-        stresses (Array):
-            Stress tensors of the particles  `(num_particles, 3, 3)`.
-        forces (Array):
-            External force vectors on the particles `(num_particles, dimension)`.
-        F (Array):
-            Deformation gradient tensors of the particles `(num_particles, dimension, dimension)`.
+        original_density (jnp.float32): Original density.
+        positions (Array): Spatial coordinate vectors `(num_particles, dimension)`.
+        velocities (Array): Spatial velocity vectors `(num_particles, dimension)`.
+        masses (Array): Masses `(num_particles,)`.
+        species (Array): Material ID or type `(num_particles,)`.
+        volumes (Array): Current volumes  `(num_particles,)`.
+        volumes_original (Array): Original volumes `(num_particles,)`.
+        velgrads (Array): Velocity gradient tensors `(num_particles, dimension, dimension)`.
+        stresses (Array): Cauchy stress tensors `(num_particles, 3, 3)`.
+        forces (Array): External force vectors `(num_particles, dimension)`.
+        F (Array): Deformation gradient tensors `(num_particles, dimension, dimension)`.
     """
 
-    # arrays
     positions: Array
     velocities: Array
     masses: Array
@@ -75,26 +63,16 @@ class Particles(Base):
         Args:
             cls (Particles):
                 self type reference
-            positions (Array):
-                Position vectors of the particles `(num_particles, dims)`.
-            velocities (Array, optional):
-                Velocity vectors of the particles `(num_particles, dims)`, defaults to zeros.
-            masses (Array, optional):
-                Masses array of the particles`(num_particles, )` defaults to zeros.
-            species (Array, optional):
-                Species / material id of the particle `(num_particles, )`, defaults to zeros.
-            volumes (Array, optional):
-                Volumes of the particles `(num_particles, )`, defaults to zeros.
-            velgrads (Array, optional):
-                Velocity gradient tensors of the particles `(num_particles, dims, dims )`, defaults to zeros.
-            stresses (Array, optional):
-                Stress tensor (Cauchy) of the particles `(num_particles, 3, 3 )`, defaults to zeros.
-            forces (Array, optional):
-                Force vectors of the particles `(num_particles, dims)`, defaults to zeros.
-            F (Array, optional):
-                Deformation gradient tensors of particles, `(num_particles, dims, dims)`, defaults to identity matrices.
-            original_density (jnp.float32, optional):
-                original density. Defaults to 1.0.
+            positions (Array): Spatial coordinate vectors `(num_particles, dims)`.
+            velocities (Array, optional): Velocity vectors `(num_particles, dims)`, defaults to zeros.
+            masses (Array, optional): Masses array `(num_particles, )` defaults to zeros.
+            species (Array, optional): Material ID or type of the particle `(num_particles, )`, defaults to zeros.
+            volumes (Array, optional): Volumes `(num_particles, )`, defaults to zeros.
+            velgrads (Array, optional): Velocity gradient tensors `(num_particles, dims, dims )`, defaults to zeros.
+            stresses (Array, optional): Cauchy stress tensors `(num_particles, 3, 3 )`, defaults to zeros.
+            forces (Array, optional): External force vectors `(num_particles, dims)`, defaults to zeros.
+            F (Array, optional): Deformation gradient tensors `(num_particles, dims, dims)`, defaults identity matrices.
+            original_density (jnp.float32, optional): Original density (Scalar). Defaults to 1.0.
 
         Returns:
             Particles: Updated state for the MPM particles.
@@ -164,18 +142,13 @@ class Particles(Base):
         Should be called after initialization, and before updating state with the MPM solver.
 
         Args:
-            cls (Particles):
-                Self reference
-            particles (Particles):
-                Particles state.
-            node_spacing (jnp.float32):
-                Node spacing of background grid.
-            particles_per_cell (jnp.int32):
-                number of particles in each cell.
+            cls (Particles): Self reference
+            particles (Particles): Particles state.
+            node_spacing (jnp.float32): Node spacing of background grid.
+            particles_per_cell (jnp.int32): Number of particles in each cell.
 
         Returns:
-            Particles:
-                Updated state for the MPM particles.
+            Particles: Updated state for the MPM particles.
 
         Example:
             >>> import pymudokon as pm
@@ -198,12 +171,10 @@ class Particles(Base):
         Typically called before each time step to reset the state of the particles (e.g. in :func:`~usl.update`).
 
         Args:
-            cls (Particles):
-                Particles state.
+            cls (Particles): Particles state.
 
         Returns:
-            Particles:
-                Updated state for the MPM particles.
+            Particles: Updated state for the MPM particles.
 
         Example:
             >>> import pymudokon as pm

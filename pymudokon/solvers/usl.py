@@ -18,7 +18,6 @@ from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..forces.forces import Forces
 from ..materials.material import Material
-from ..shapefunctions.shapefunction import ShapeFunction
 from .solver import Solver
 
 
@@ -26,8 +25,7 @@ from .solver import Solver
 def p2g(
     nodes: Nodes,
     particles: Particles,
-    shapefunctions: ShapeFunction,
-    interactions: Interactions,
+    shapefunctions: Interactions,
     dt: jnp.float32,
 ) -> Nodes:
     """Particle to grid transfer.
@@ -41,14 +39,9 @@ def p2g(
     - Integrate moments on nodes.
 
     Args:
-        nodes (Nodes):
-            MPM background nodes.
-        particles (Particles):
-            Material points / particles
-        shapefunctions (ShapeFunction):
-            A shape function e.g. `LinearShapeFunction`
-        interactions (Interactions):
-            Interactions between particles and nodes.
+        nodes (Nodes): MPM background nodes.
+        particles (Particles): Material points / particles
+        shapefunctions (Interactions): A shape function e.g. `LinearShapeFunction`
         dt (jnp.float32):
             Time step.
 
@@ -57,11 +50,11 @@ def p2g(
     """
     stencil_size, dim = shapefunctions.stencil.shape
 
-    shapef = shapefunctions.shapef
+    intr_shapef = shapefunctions.intr_shapef
 
     # padding is applied if we are in plane strain
-    shapef_grad = jnp.pad(
-        shapefunctions.shapef_grad,
+    intr_shapef_grad = jnp.pad(
+        shapefunctions.intr_shapef_grad,
         ((0, 0), (0, 1), (0, 0)),
         mode="constant",
         constant_values=0,
@@ -75,21 +68,21 @@ def p2g(
     intr_stresses = jnp.repeat(particles.stresses, stencil_size, axis=0).reshape(-1, 3, 3)
 
     # scaled quantities with shape functions and gradients
-    scaled_mass = intr_masses * shapef
+    scaled_mass = intr_masses * intr_shapef
     scaled_moments = jax.lax.batch_matmul(intr_velocities, scaled_mass)
-    scaled_ext_forces = jax.lax.batch_matmul(intr_ext_forces, shapef)
-    scaled_int_forces = jax.lax.batch_matmul(intr_stresses, shapef_grad)
+    scaled_ext_forces = jax.lax.batch_matmul(intr_ext_forces, intr_shapef)
+    scaled_int_forces = jax.lax.batch_matmul(intr_stresses, intr_shapef_grad)
     scaled_int_forces = jax.lax.batch_matmul(scaled_int_forces, -1.0 * intr_volumes)
     scaled_total_forces = scaled_int_forces[:, :2] + scaled_ext_forces  # unpad and add #TODO - generalize for 3D
 
     # node (reshape) and gather interactions
-    nodes_masses = nodes.masses.at[interactions.intr_hashes,].add(scaled_mass.reshape(-1), mode="drop")
+    nodes_masses = nodes.masses.at[shapefunctions.intr_hashes,].add(scaled_mass.reshape(-1), mode="drop")
 
-    nodes_moments = nodes.moments.at[interactions.intr_hashes].add(scaled_moments.reshape(-1, 2), mode="drop")
+    nodes_moments = nodes.moments.at[shapefunctions.intr_hashes].add(scaled_moments.reshape(-1, 2), mode="drop")
 
     nodes_forces = (
         jnp.zeros_like(nodes.moments_nt)
-        .at[interactions.intr_hashes]
+        .at[shapefunctions.intr_hashes]
         .add(scaled_total_forces.reshape(-1, 2), mode="drop")
     )
 
@@ -107,8 +100,7 @@ def p2g(
 def g2p(
     nodes: Nodes,
     particles: Particles,
-    shapefunctions: ShapeFunction,
-    interactions: Interactions,
+    shapefunctions: Interactions,
     alpha: jnp.float32,
     dt: jnp.float32,
 ) -> Particles:
@@ -125,18 +117,11 @@ def g2p(
 
 
     Args:
-        nodes (Nodes):
-            MPM background nodes.
-        particles (Particles):
-            Material points / particles
-        shapefunctions (ShapeFunction):
-            A shape function e.g. `LinearShapeFunction`.
-        interactions (Interactions):
-            Interactions between particles and nodes.
-        alpha (jnp.float32):
-            Flip & PIC ratio.
-        dt (jnp.float32):
-            Time step
+        nodes (Nodes): MPM background nodes.
+        particles (Particles): Material points / particles
+        shapefunctions (Interactions): A shape function e.g. `LinearShapeFunction`.
+        alpha (jnp.float32): Flip & PIC ratio.
+        dt (jnp.float32): Time step
 
     Returns:
         Particles: Updated particles
@@ -145,9 +130,9 @@ def g2p(
     stencil_size = shapefunctions.stencil.shape[0]
     # Prepare shape functions
 
-    shapef = shapefunctions.shapef
-    shapef_grad = shapefunctions.shapef_grad
-    shapef_grad_T = jnp.transpose(shapef_grad, axes=(0, 2, 1))
+    intr_shapef = shapefunctions.intr_shapef
+    intr_shapef_grad = shapefunctions.intr_shapef_grad
+    intr_shapef_grad_T = jnp.transpose(intr_shapef_grad, axes=(0, 2, 1))
 
     # Calculate the node velocities
     # small masses may cause numerical instability
@@ -169,22 +154,22 @@ def g2p(
     )
 
     # Scatter node quantities to particle-node interactions
-    intr_vels = jnp.take(nodes_velocities, interactions.intr_hashes, axis=0, mode="fill", fill_value=0.0).reshape(
+    intr_vels = jnp.take(nodes_velocities, shapefunctions.intr_hashes, axis=0, mode="fill", fill_value=0.0).reshape(
         -1, dim, 1
     )
 
-    intr_vels_nt = jnp.take(nodes_velocities_nt, interactions.intr_hashes, axis=0, mode="fill", fill_value=0.0).reshape(
-        -1, dim, 1
-    )
+    intr_vels_nt = jnp.take(
+        nodes_velocities_nt, shapefunctions.intr_hashes, axis=0, mode="fill", fill_value=0.0
+    ).reshape(-1, dim, 1)
 
     # Calculate the interaction velocities and velocity gradients
     intr_delta_vels = intr_vels_nt - intr_vels
 
-    intr_scaled_delta_vels = intr_delta_vels * shapef
+    intr_scaled_delta_vels = intr_delta_vels * intr_shapef
 
-    intr_scaled_vels_nt = intr_vels_nt * shapef
+    intr_scaled_vels_nt = intr_vels_nt * intr_shapef
 
-    intr_scaledgrad_vels_nt = jax.lax.batch_matmul(intr_vels_nt, shapef_grad_T)
+    intr_scaledgrad_vels_nt = jax.lax.batch_matmul(intr_vels_nt, intr_shapef_grad_T)
 
     # Sum interactions to particles
     particle_delta_vel_inc = jnp.sum(intr_scaled_delta_vels.reshape(-1, stencil_size, 2), axis=1)
@@ -234,7 +219,7 @@ class USL(Solver):
         cls: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: ShapeFunction,
+        shapefunctions: Interactions,
         materials: List[Material],
         forces: List[Forces] = None,
         alpha: jnp.float32 = 0.99,
@@ -243,22 +228,14 @@ class USL(Solver):
         """Register / construct a USL solver.
 
         Args:
-            cls (Self):
-                self reference.
-            particles (Particles):
-                Particles in the simulation.
-            nodes (Nodes):
-                Nodes in the simulation.
-            shapefunctions (ShapeFunction):
-                Shape functions in the simulation, e.g., `LinearShapeFunction`.
-            materials (List[Material]):
-                List of materials in the simulation, e.g., `LinearIsotropicElastic`.
-            forces (List[Force], optional):
-                List of forces. Defaults to None.
-            alpha (jnp.float32, optional):
-                FLIP-PIC ratio. Defaults to 0.99.
-            dt (jnp.float32, optional):
-                Time step. Defaults to 0.00001.
+            cls (Self): self reference.
+            particles (Particles): Particles in the simulation.
+            nodes (Nodes): Nodes in the simulation.
+            shapefunctions (Interactions): Shape functions in the simulation, e.g., `LinearShapeFunction`.
+            materials (List[Material]): List of materials in the simulation, e.g., `LinearIsotropicElastic`.
+            forces (List[Force], optional): List of forces. Defaults to None.
+            alpha (jnp.float32, optional): FLIP-PIC ratio. Defaults to 0.99.
+            dt (jnp.float32, optional): Time step. Defaults to 0.00001.
 
         Returns:
             USL: Initialized USL solver.
@@ -270,10 +247,10 @@ class USL(Solver):
             ...     origin=jnp.array([0.0, 0.0]),
             ...     end=jnp.array([1.0, 1.0]),
             ...     node_spacing=0.5,
-            ...     particles_per_cell=2,
             ... )
             >>> shapefunctions = pm.LinearShapeFunction.register(2, 2)
             >>> material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+            >>> particles, nodes, shapefunctions = pm.Discretize(particles, nodes, shapefunctions)
             >>> usl = pm.USL.register(
             ...     particles=particles,
             ...     nodes=nodes,
@@ -283,12 +260,6 @@ class USL(Solver):
             ...     dt=0.001,
             ... )
         """
-        num_particles, dim = particles.positions.shape
-
-        stencil_size = shapefunctions.stencil.shape[0]
-
-        interactions = Interactions.register(stencil_size, num_particles, dim)
-
         if forces is None:
             forces = []
 
@@ -296,7 +267,6 @@ class USL(Solver):
             particles=particles,
             nodes=nodes,
             shapefunctions=shapefunctions,
-            interactions=interactions,
             materials=materials,
             forces=forces,
             alpha=alpha,
@@ -308,28 +278,23 @@ class USL(Solver):
         """Solve 1 iteration of USL MPM.
 
         Args:
-            self (Self):
-                Current USL solver.
+            self (Self): Current USL solver.
 
         Returns:
-            Self:
-                Updated USL solver.
+            Self: Updated USL solver.
         """
         nodes = self.nodes.refresh()
 
         particles = self.particles.refresh()
 
-        interactions = self.interactions.get_interactions(
-            particles=particles, nodes=nodes, shapefunctions=self.shapefunctions
-        )
+        # shapefunctions = self.shapefunctions.get_interactions(particles=particles, nodes=nodes)
 
-        shapefunctions = self.shapefunctions.calculate_shapefunction(nodes=nodes, interactions=interactions)
+        shapefunctions = shapefunctions.calculate_shapefunction(nodes=nodes)
 
         nodes = p2g(
             nodes=nodes,
             particles=particles,
             shapefunctions=shapefunctions,
-            interactions=interactions,
             dt=self.dt,
         )
 
@@ -338,7 +303,7 @@ class USL(Solver):
         forces = []
         for force in self.forces:
             nodes, out_force = force.apply_on_nodes_moments(
-                particles=particles, nodes=nodes, shapefunctions=shapefunctions, interactions=interactions, dt=self.dt
+                particles=particles, nodes=nodes, shapefunctions=shapefunctions, dt=self.dt
             )
             forces.append(out_force)
 
@@ -346,7 +311,6 @@ class USL(Solver):
             particles=particles,
             nodes=nodes,
             shapefunctions=shapefunctions,
-            interactions=interactions,
             alpha=self.alpha,
             dt=self.dt,
         )
@@ -362,5 +326,4 @@ class USL(Solver):
             materials=materials,
             forces=forces,
             shapefunctions=shapefunctions,
-            interactions=interactions,
         )

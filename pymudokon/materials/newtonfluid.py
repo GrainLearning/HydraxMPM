@@ -21,8 +21,7 @@ def vmap_update(
     gamma: jnp.float32,
     viscosity: jnp.float32,
 ) -> Tuple[Array]:
-    """
-    Compression is negative in this formulation
+    """Compression is negative in this formulation.
     """
     dim = vel_grad.shape[0]
 
@@ -41,7 +40,7 @@ def vmap_update(
 
     dev_strain_rate = strain_rate - (vol_strain_rate / 3) * jnp.eye(3)
 
-    return -pressure * jnp.eye(3) + 2.0* viscosity * dev_strain_rate
+    return -pressure * jnp.eye(3) + 2.0 * viscosity * dev_strain_rate
 
 
 @jax.tree_util.register_pytree_node_class
@@ -55,7 +54,7 @@ class NewtonFluid(Material):
         viscosity (jnp.float32):
             Viscosity.
         gamma (jnp.float32):
-            parameter for the equation of state. Defaults to 7.0 (water). 
+            parameter for the equation of state. Defaults to 7.0 (water).
     """
 
     # TODO we can replace this with incremental form / or hyperelastic form
@@ -78,7 +77,7 @@ class NewtonFluid(Material):
         Returns:
             NewtonFluid:
                 Initialized material.
-                
+
         Example:
             >>> import pymudokon as pm
             >>> material = pm.NewtonFluid.register(K=1.0e6, viscosity=0.1)

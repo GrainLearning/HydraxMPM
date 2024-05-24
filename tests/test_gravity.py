@@ -1,4 +1,4 @@
-"""Unit tests for the NodesContainer class."""
+"""Unit tests for the Gravity data class."""
 
 import unittest
 
@@ -9,25 +9,19 @@ import pymudokon as pm
 
 
 class Gravity(unittest.TestCase):
-    """Unit tests for the DirichletBox and functions."""
+    """Unit tests for the Gravity force."""
 
     @staticmethod
     def test_init():
-        """Unit test to initialize the NodesContainer class."""
-
+        """Unit test to initialize gravity."""
         box = pm.Gravity.register(jnp.array([0.0, 0.0]))
 
         assert isinstance(box, pm.Gravity)
 
     @staticmethod
     def test_apply_on_node_moments():
-        """Unit test to initialize the NodesContainer class."""
-        nodes = pm.Nodes.register(
-            origin=jnp.array([0.0, 0.0]),
-            end=jnp.array([1.0, 1.0]),
-            node_spacing=0.5,
-            particles_per_cell=1,
-        )
+        """Unit test to apply gravity force on Nodes."""
+        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
         grav = pm.Gravity.register(jnp.array([0.0, 9.8]))
 
