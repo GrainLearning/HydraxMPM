@@ -11,7 +11,7 @@ from ..materials.material import Material
 def simple_shear(
     material: Material,
     eps_path: Array,
-    # volumes: Array,
+    volumes: Array,
     dt: jnp.float32 | Array,
     results_to_store=[],
     output_step=1,
@@ -39,11 +39,12 @@ def simple_shear(
 
         strain_rate = strain_increment / dt_step
 
-        stress, material = material.update_stress_benchmark(strain_rate, dt_step, update_history=True)
+        stress, material = material.update_stress_benchmark(strain_rate, volumes, dt_step, update_history=True)
 
         eps_inc_prev = eps_inc_target.copy()
 
         if step % output_step == 0:
+            print(f"Step {step} of {num_steps}")
             store = {
                 "stress": (["benchmark", "i", "j"], stress.copy()),
                 "strain_rate": (["benchmark", "i", "j"], strain_rate.copy()),

@@ -1,5 +1,5 @@
 """Two cubes falling featuring rough domain walls, gravity and cubic shape functions"""
-
+#%%
 import jax.numpy as jnp
 import numpy as np
 
@@ -33,7 +33,7 @@ block2 = create_block((7, 7), 2, particle_spacing)
 
 # Stack all the positions together
 pos = np.vstack([block1, block2])
-
+print("pos.shape", pos.shape)
 particles = pm.Particles.register(positions=pos, original_density=1000)
 
 nodes = pm.Nodes.register(
@@ -74,43 +74,50 @@ def save_particles(package):
 print("Running simulation")
 
 usl = usl.solve(num_steps=total_steps, output_steps=output_steps, output_function=save_particles)
+# usl = usl.solve_n(total_steps)
 
-print("\n Plotting")
-data = jnp.load(f"./output/particles_{output_steps}.npz")
-positions = data["positions"]
-mean_velocity = data["mean_velocity"]
-
-points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-
-cloud = pv.PolyData(points_3d)
-cloud.point_data["mean_velocities"] = data["mean_velocity"]
-
-pl = pv.Plotter()
-
-box = pv.Box(bounds=[0, domain_size, 0, domain_size, 0, 0])
-
-pl.add_mesh(box, style='wireframe', color='k', line_width=2)
-
-pl.add_mesh(
-    cloud,
-    scalars="mean_velocities",
-    style="points",
-    show_edges=True,
-    render_points_as_spheres=True,
-    cmap="inferno",
-    point_size=10,
-    clim=[-0.1, 0.1],
-)
-
-pl.camera_position = "xy"
-pl.open_gif("./figures/animation_cube_fall_rough_walls.gif")
-
-for i in range(output_steps, total_steps, output_steps):
-    data = jnp.load(f"./output/particles_{i}.npz")
-    positions = data["positions"]
-    mean_velocity = data["mean_velocity"]
-    points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-    cloud.points = points_3d
-    cloud.point_data["mean_velocities"] = data["mean_velocity"]
-    pl.write_frame()
-pl.close()
+#%%
+# import jax
+# jax.make_jaxpr(usl.update)()
+# 
+# print("\n Plotting")
+# data = jnp.load(f"./output/particles_{output_steps}.npz")
+# positions = data["positions"]
+# mean_velocity = data["mean_velocity"]
+# 
+# points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
+# 
+# cloud = pv.PolyData(points_3d)
+# cloud.point_data["mean_velocities"] = data["mean_velocity"]
+# 
+# pl = pv.Plotter()
+# 
+# box = pv.Box(bounds=[0, domain_size, 0, domain_size, 0, 0])
+# 
+# pl.add_mesh(box, style='wireframe', color='k', line_width=2)
+# 
+# pl.add_mesh(
+    # cloud,
+    # scalars="mean_velocities",
+    # style="points",
+    # show_edges=True,
+    # render_points_as_spheres=True,
+    # cmap="inferno",
+    # point_size=10,
+    # clim=[-0.1, 0.1],
+# )
+# 
+# pl.camera_position = "xy"
+# pl.open_gif("./figures/animation_cube_fall_rough_walls.gif")
+# 
+# for i in range(output_steps, total_steps, output_steps):
+    # data = jnp.load(f"./output/particles_{i}.npz")
+    # positions = data["positions"]
+    # mean_velocity = data["mean_velocity"]
+    # points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
+    # cloud.points = points_3d
+    # cloud.point_data["mean_velocities"] = data["mean_velocity"]
+    # pl.write_frame()
+# pl.close()
+# 
+# %%

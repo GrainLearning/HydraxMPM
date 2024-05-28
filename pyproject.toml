@@ -24,6 +24,8 @@ jupyterlab = ">=3"
 jupyter-server-proxy = "^4.1.2"
 xarray = {extras = ["vis"], version = "^2024.5.0"}
 matplotlib = "^3.9.0"
+optax = "^0.2.2"
+jaxopt = "^0.8.3"
 
 [tool.poetry.group.gpu.dependencies]
 jax = {extras = ["cuda12"], version = "^0.4.28"}

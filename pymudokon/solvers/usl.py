@@ -287,7 +287,7 @@ class USL(Solver):
 
         particles = self.particles.refresh()
 
-        # shapefunctions = self.shapefunctions.get_interactions(particles=particles, nodes=nodes)
+        shapefunctions = self.shapefunctions.get_interactions(particles=particles, nodes=nodes)
 
         shapefunctions = shapefunctions.calculate_shapefunction(nodes=nodes)
 
