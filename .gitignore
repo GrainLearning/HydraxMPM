@@ -3,6 +3,7 @@ poetry.lock
 output_vid.avi
 frames.*
 particles*.vtp
+*.npz
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
