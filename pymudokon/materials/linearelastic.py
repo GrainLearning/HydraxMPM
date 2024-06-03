@@ -12,7 +12,7 @@ from ..core.particles import Particles
 from .material import Material
 
 
-def vmap_update(eps_e_prev: Array, deps: Array, G: jnp.float32, K: jnp.float32) -> Tuple[Array, Array]:
+def vmap_update(eps_e_prev: Array, deps: Array, stress_ref: Array, G: jnp.float32, K: jnp.float32) -> Tuple[Array, Array]:
     """Parallelized stress update for each particle.
 
     Tensors are mapped per particle via vmap (num_particles, dim) -> (dim,).
@@ -51,8 +51,15 @@ def vmap_update(eps_e_prev: Array, deps: Array, G: jnp.float32, K: jnp.float32) 
     if dim == 2:
         s = jnp.pad(s, ((0, 1), (0, 1)), mode="constant")
 
+
     p = K * eps_e_v * jnp.eye(3)
 
+    p_ref = -jnp.trace(stress_ref) / dim
+    s_ref = stress_ref + p_ref * jnp.eye(3)
+    
+    p = p + p_ref
+
+    s = s + s_ref
     return s - p, eps_e
 
 
@@ -68,6 +75,8 @@ class LinearIsotropicElastic(Material):
         K (Array): Bulk modulus.
         eps_e (Array): Elastic strain tensors `(number of particles,dim,dim)`.
     """
+    
+    stress_ref: Array
 
     # TODO we can replace this with incremental form / or hyperelastic form
     E: Array
@@ -79,7 +88,7 @@ class LinearIsotropicElastic(Material):
     eps_e: Array
 
     @classmethod
-    def register(cls: Self, E: jnp.float32, nu: jnp.float32, num_particles, dim: jnp.int16 = 3) -> Self:
+    def register(cls: Self, E: jnp.float32, nu: jnp.float32, num_particles, dim: jnp.int16 = 3, stress_ref:Array=None) -> Self:
         """Initialize the isotropic linear elastic material.
 
         Args:
@@ -101,7 +110,10 @@ class LinearIsotropicElastic(Material):
         G = E / (2.0 * (1.0 + nu))
         K = E / (3.0 * (1.0 - 2.0 * nu))
         eps_e = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
-        return cls(E=E, nu=nu, G=G, K=K, eps_e=eps_e)
+        
+        if stress_ref is None:
+            stress_ref = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
+        return cls(E=E, nu=nu, G=G, K=K, eps_e=eps_e,stress_ref=stress_ref)
 
     @jax.jit
     def update_stress(
@@ -133,8 +145,8 @@ class LinearIsotropicElastic(Material):
 
         deps = 0.5 * (vel_grad + vel_grad_T) * dt
 
-        stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
-            self.eps_e, deps, self.G, self.K
+        stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0,0, None, None), out_axes=(0, 0))(
+            self.eps_e, deps,self.stress_ref, self.G, self.K
         )
 
         material = self.replace(eps_e=eps_e)
@@ -170,7 +182,7 @@ class LinearIsotropicElastic(Material):
             >>> material = material.update_stress_benchmark(jnp.eye(2), 0.5, 0.001)
         """
         deps = strain_rate * dt
-        stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
-            self.eps_e, deps, self.G, self.K
+        stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, 0, None, None), out_axes=(0, 0))(
+            self.eps_e, deps, self.stress_ref, self.G, self.K
         )
         return stress, self.replace(eps_e=eps_e)

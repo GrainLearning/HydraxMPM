@@ -15,15 +15,27 @@ from .material import Material
 
 from functools import partial
 
+def yield_function(p,p_c,q, H,cp):
 
-def yield_function(p, p_c, q, M):
-    """Compute the modified Cam Clay yield function."""
-    p_s = 0.5*p_c
-    return (p_s - p) ** 2 + (q / M) ** 2 - p_s**2
+
+# def plastic_potential(p, p_c, q, M):
+#     """Compute the modified Cam Clay yield function."""
+#     p_s = 0.5*p_c
+#     return (p_s - p) ** 2 + (q / M) ** 2 - p_s**2
+
+def get_potential_failure_stress_ratio(eta, M, lam, kap ):
+    inner_sqrt = (12.0*(3.0-M)/M**2)*jnp.exp(- (zeta/(lam -kap))) +1 
+    Mf = 6.0/( jnp.sqrt(inner_sqrt) + 1)
+    return Mf
+
+def get_zeta(void_ratio,void_ratio0, N, lam,kap, p, eta, M):
+    void_ratio_nu = N - lam*jnp.log(p) - (lam - kap)*jnp.log(1 + eta**2 / M**2)
+    zeta = void_ratio_nu - void_ratio0
+    return zeta
 
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
-class ModifiedCamClay(Material):
+class UnifiedModifiedCamClay(Material):
     """modified Cam-Clay model
 
     Attributes:

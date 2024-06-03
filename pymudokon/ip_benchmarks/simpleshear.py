@@ -2,64 +2,72 @@
 
 
 import jax.numpy as jnp
-import xarray as xr
+
+import jax
+
 from jax import Array
 
+from typing import Callable
 from ..materials.material import Material
 
-
+@jax.jit
 def simple_shear(
     material: Material,
     eps_path: Array,
     volumes: Array,
     dt: jnp.float32 | Array,
-    results_to_store=[],
-    output_step=1,
-):
-    """Perfoms a loading step the simple shear test on a material.
+    output_step= int,
+    output_function:Callable =None,
+)-> Material:
+    """Perfom a simple shear benchmark a material.
 
     Args:
-    ----
-        self (SimpleShearControl): self reference
+        material (Material): Material object.
+        eps_path (Array): Strain path.
+        volumes (Array): Volumes of the material points.
+        dt (jnp.float32 | Array): Time step.
+        output_step (_type_, optional): Output number of steps. Defaults to int.
+        output_function (Callable, optional): Callback function to process output. Defaults to None.
 
+    Returns:
+        Material: Updated material object.
     """
     num_benchmarks, num_steps = eps_path.shape
 
     eps_inc_target = jnp.zeros((num_benchmarks, 3, 3))
     eps_inc_prev = jnp.zeros((num_benchmarks, 3, 3))
 
-    if (isinstance(dt, jnp.float64)) | (isinstance(dt, jnp.float32)) | (isinstance(dt, float)):
-        dt = dt * jnp.ones(num_steps)
-
-    datasets = []
-    for step in range(num_steps):
-        dt_step = dt[step]
+    def body_loop(step,carry):
+        eps_inc_prev, eps_inc_target, material, volumes, dt,output_function = carry
         eps_inc_target = eps_inc_target.at[:, 0, 1].add(eps_path[:, step])
+        
         strain_increment = eps_inc_target - eps_inc_prev
-
-        strain_rate = strain_increment / dt_step
-
-        stress, material = material.update_stress_benchmark(strain_rate, volumes, dt_step, update_history=True)
-
-        eps_inc_prev = eps_inc_target.copy()
-
-        if step % output_step == 0:
-            print(f"Step {step} of {num_steps}")
-            store = {
-                "stress": (["benchmark", "i", "j"], stress.copy()),
-                "strain_rate": (["benchmark", "i", "j"], strain_rate.copy()),
-                "eps_path": (["benchmark", "i", "j"], eps_inc_target.copy()),
-                "dt": (["benchmark"], jnp.array([dt_step]).repeat(num_benchmarks)),
-            }
-            for attr in results_to_store:
-                if attr in material.__dict__:
-                    value = material.__dict__[attr].copy()
-                    if value.ndim != 3:
-                        value = value.reshape((1,) * (3 - value.ndim) + value.shape)
-                    store[attr] = (["benchmark", "i", "j"], value)
-
-            data = xr.Dataset(store, coords={"step": step})
-            datasets.append(data)
-
-    datasets = xr.concat(datasets, dim="iter")
-    return datasets, material
+        
+        strain_rate = strain_increment / dt
+        
+        stress, material = material.update_stress_benchmark(strain_rate, volumes, dt)
+        
+        eps_inc_prev = eps_inc_target
+        
+        jax.lax.cond(
+            step % output_step == 0,
+            lambda x: jax.experimental.io_callback(output_function, None,x),
+            lambda x: None,
+            (step, stress, material, eps_inc_target, num_steps, strain_rate, dt)
+        )
+        return (
+            eps_inc_prev,
+            eps_inc_target,
+            material,
+            volumes,
+            dt,
+            output_function
+        )
+    
+    package = jax.lax.fori_loop(
+        0,
+        num_steps,
+        body_loop,
+        (eps_inc_prev, eps_inc_target, material, volumes, dt,output_function))
+    
+    return material
