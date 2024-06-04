@@ -1,18 +1,19 @@
 """Gravity force on Nodes."""
 
-import dataclasses
 from functools import partial
 from typing import List, Tuple
-
+from flax import struct
 import jax
 import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
-from ..core.base import Base
+
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
+
+from functools import partial
 
 
 @partial(jax.jit, static_argnames=["boundary_types"])
@@ -93,9 +94,9 @@ def apply_boundary_box(
     return moments, moments_nt
 
 
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
-class DirichletBox(Base):
+
+@struct.dataclass
+class DirichletBox:
     """Dirichlet boundary conditions with user defined values.
 
     Attributes:
@@ -114,7 +115,7 @@ class DirichletBox(Base):
     width: int
 
     @classmethod
-    def register(cls: Self, boundary_types: List = None, width: int = 1) -> Self:
+    def create(cls: Self, boundary_types: List = None, width: int = 1) -> Self:
         """Register the Dirichlet nodes."""
         # if boundary_types is None:
         boundary_types = jnp.array([[1, 1], [1, 1], [1, 1]])  # fixed

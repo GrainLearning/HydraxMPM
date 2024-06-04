@@ -2,18 +2,16 @@
 
 import dataclasses
 from typing import Tuple
+from flax import struct
 
 import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.base import Base
 from ..core.particles import Particles
 
-
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
-class Material(Base):
+@struct.dataclass
+class Material:
     """Bass state for the materials."""
 
     @jax.jit

@@ -10,7 +10,7 @@ from typing_extensions import Self
 
 from ..core.particles import Particles
 from .material import Material
-
+from flax import struct
 
 def vmap_update(
     vel_grad: Array,
@@ -43,8 +43,7 @@ def vmap_update(
     return -pressure * jnp.eye(3) + 2.0 * viscosity * dev_strain_rate
 
 
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
+@struct.dataclass
 class NewtonFluid(Material):
     """Constitutive model for a nearly incompressible Newtonian fluid.
 

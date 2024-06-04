@@ -4,43 +4,22 @@ import dataclasses
 from functools import partial
 from typing import Tuple
 
+from flax import struct
 import jax
 import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
-from ..core.base import Base
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 
 
-@partial(jax.jit, static_argnames=["gravity"])
-def apply_gravity(
-    moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32
-) -> Tuple[Array, Array]:
-    """Apply gravity on the nodes.
-
-    Args:
-        moments (Array): Nodal moments `(num_nodes, dim)`.
-        moments_nt (Array): Nodal moments in the forward step `(num_nodes, dim)`.
-        masses (Array): Nodal masses `(num_nodes,)`.
-        gravity (Array): Gravity vector `(dim,)`.
-        dt (jnp.float32): Time step.
-
-    Returns:
-        Tuple[Array, Array]: Updated moments and moments_nt.
-    """
-    moment_gravity = masses.reshape(-1, 1) * gravity * dt
-
-    moments_nt = moments_nt + moment_gravity
-
-    return moments, moments_nt
 
 
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
-class Gravity(Base):
+
+@struct.dataclass
+class Gravity:
     """Dataclass containing the state of the Gravity forces.
 
     Attributes:
@@ -50,7 +29,7 @@ class Gravity(Base):
     gravity: Array
 
     @classmethod
-    def register(cls: Self, gravity: Array) -> Self:
+    def create(cls: Self, gravity: Array) -> Self:
         """Initialize Gravity force on Nodes.
 
         Args:
@@ -87,12 +66,33 @@ class Gravity(Base):
         Example:
             >>> import jax.numpy as jnp
             >>> import pymudokon as pm
-            >>> nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
-            >>> grav = pm.Gravity.register(jnp.array([0.0, 9.8]))
+            >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+            >>> grav = pm.Gravity.create(jnp.array([0.0, 9.8]))
             >>> nodes, grav = grav.apply_on_nodes_moments(nodes=nodes, dt=0.01)
         """
-        moments, moments_nt = apply_gravity(nodes.moments, nodes.moments_nt, nodes.masses, self.gravity, dt)
+        moments, moments_nt = self.apply_gravity(nodes.moments, nodes.moments_nt, nodes.masses, self.gravity, dt)
         return nodes.replace(
-            # moments=moments,
             moments_nt=moments_nt,
         ), self
+
+    @partial(jax.jit, static_argnames=["self","gravity"])
+    def apply_gravity(
+        self,moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32
+    ) -> Tuple[Array, Array]:
+        """Apply gravity on the nodes.
+
+        Args:
+            moments (Array): Nodal moments `(num_nodes, dim)`.
+            moments_nt (Array): Nodal moments in the forward step `(num_nodes, dim)`.
+            masses (Array): Nodal masses `(num_nodes,)`.
+            gravity (Array): Gravity vector `(dim,)`.
+            dt (jnp.float32): Time step.
+
+        Returns:
+            Tuple[Array, Array]: Updated moments and moments_nt.
+        """
+        moment_gravity = masses.reshape(-1, 1) * gravity * dt
+
+        moments_nt = moments_nt + moment_gravity
+
+        return moments, moments_nt

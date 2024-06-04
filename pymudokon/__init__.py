@@ -4,7 +4,6 @@ Built with JAX.
 """
 
 # core
-from .core.base import Base
 from .core.interactions import Interactions
 from .core.nodes import Nodes
 from .core.particles import Particles
@@ -39,7 +38,6 @@ __all__ = [
     "Gravity",
     "Solver",
     "Material",
-    "Base",
     "simple_shear",
     "triaxial_compression",
     "plot_tau_gamma",

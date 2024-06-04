@@ -4,9 +4,8 @@ References:
     - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
 """
 
-import dataclasses
 from typing import List
-
+from flax import struct
 import jax
 import jax.numpy as jnp
 from typing_extensions import Self
@@ -19,7 +18,7 @@ from ..core.particles import Particles
 from ..forces.forces import Forces
 from ..materials.material import Material
 from .solver import Solver
-
+from functools import partial
 
 @jax.jit
 def p2g(
@@ -95,6 +94,45 @@ def p2g(
         moments_nt=nodes_moments_nt,
     )
 
+@jax.jit
+def p2g_batch(
+        nodes: Nodes,
+        particles: Particles,
+        shapefunctions: Interactions,
+        dt: jnp.float32,
+    )-> Nodes:
+    
+    stencil_size, dim = shapefunctions.stencil.shape
+
+    intr_shapef = shapefunctions.intr_shapef
+
+    # padding is applied if we are in plane strain
+    intr_shapef_grad = jnp.pad(
+        shapefunctions.intr_shapef_grad,
+        ((0, 0), (0, 1), (0, 0)),
+        mode="constant",
+        constant_values=0,
+    )  # plane strain #TODO - generalize for 3D
+
+    # interactions
+    p_ids = jnp.repeat(particles.ids, stencil_size).reshape(-1, 1, 1)
+    
+        # interactions
+    intr_masses = jnp.repeat(particles.masses, stencil_size).reshape(-1, 1, 1)
+    
+    @partial(jax.vmap, in_axes=(0,None))    
+    def vmap_p2g(p_ids, p_masses):
+        
+        intr_masses2 = p_masses.at[p_ids].get()
+        # intr_masses = p_masses.take(int_hashes, axis=0, mode="fill", fill_value=0.0)
+        return intr_masses2
+    
+    
+    intr_masses2 = vmap_p2g(p_ids, particles.masses)
+    
+    # jax.testing.assert_allclose(intr_masses, intr_masses2)
+    # return nodes
+    return intr_masses2.reshape(-1, 1, 1), intr_masses
 
 @jax.jit
 def g2p(
@@ -200,9 +238,7 @@ def g2p(
         velgrads=particle_velgrads,
     )
 
-
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
+@struct.dataclass
 class USL(Solver):
     """Explicit Update Stress Last (USL) MPM solver.
 
@@ -215,7 +251,7 @@ class USL(Solver):
     alpha: jnp.float32
 
     @classmethod
-    def register(
+    def create(
         cls: Self,
         particles: Particles,
         nodes: Nodes,
@@ -223,9 +259,9 @@ class USL(Solver):
         materials: List[Material],
         forces: List[Forces] = None,
         alpha: jnp.float32 = 0.99,
-        dt: jnp.float32 = 0.00001,
+        dt: jnp.float32 = 0.00001
     ) -> Self:
-        """Register / construct a USL solver.
+        """Create a USL solver.
 
         Args:
             cls (Self): self reference.
@@ -242,16 +278,16 @@ class USL(Solver):
 
         Example:
             >>> import pymudokon as pm
-            >>> particles = pm.Particles.register(positions=jnp.array([[1.0, 2.0], [0.3, 0.1]]))
-            >>> nodes = pm.Nodes.register(
+            >>> particles = pm.Particles.create(positions=jnp.array([[1.0, 2.0], [0.3, 0.1]]))
+            >>> nodes = pm.Nodes.create(
             ...     origin=jnp.array([0.0, 0.0]),
             ...     end=jnp.array([1.0, 1.0]),
             ...     node_spacing=0.5,
             ... )
-            >>> shapefunctions = pm.LinearShapeFunction.register(2, 2)
-            >>> material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+            >>> shapefunctions = pm.LinearShapeFunction.create(2, 2)
+            >>> material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
             >>> particles, nodes, shapefunctions = pm.Discretize(particles, nodes, shapefunctions)
-            >>> usl = pm.USL.register(
+            >>> usl = pm.USL.create(
             ...     particles=particles,
             ...     nodes=nodes,
             ...     shapefunctions=shapefunctions,
@@ -270,7 +306,7 @@ class USL(Solver):
             materials=materials,
             forces=forces,
             alpha=alpha,
-            dt=dt,
+            dt=dt
         )
 
     @jax.jit

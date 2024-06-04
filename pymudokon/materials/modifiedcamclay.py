@@ -1,10 +1,10 @@
 """Implementation, state and functions for isotropic linear elastic material."""
 
-import dataclasses
+
 from typing import Tuple
 from typing import NamedTuple
 import jaxopt
-
+from flax import struct
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -21,8 +21,8 @@ def yield_function(p, p_c, q, M):
     p_s = 0.5*p_c
     return (p_s - p) ** 2 + (q / M) ** 2 - p_s**2
 
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
+
+@struct.dataclass
 class ModifiedCamClay(Material):
     """modified Cam-Clay model
 

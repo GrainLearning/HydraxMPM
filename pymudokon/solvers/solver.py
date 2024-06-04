@@ -1,13 +1,14 @@
 """Base solve module."""
 
-import dataclasses
+
 from typing import Callable, List
 
+from flax import struct
 import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.base import Base
+
 from ..core.interactions import (
     Interactions,
 )
@@ -17,9 +18,8 @@ from ..forces.forces import Forces
 from ..materials.material import Material
 
 
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
-class Solver(Base):
+@struct.dataclass
+class Solver:
     """State of a solver.
 
     Attributes:
@@ -30,7 +30,6 @@ class Solver(Base):
         forces (List[int]): List of forces in the simulation.
         dt (jnp.float32): Time step of the simulation.
     """
-
     particles: Particles
     nodes: Nodes
     materials: List[Material]
@@ -53,6 +52,7 @@ class Solver(Base):
         Returns:
             Solver: Updated solver
         """
+        
         usl = jax.lax.fori_loop(
             0,
             num_steps,
@@ -61,11 +61,12 @@ class Solver(Base):
         )
         return usl
 
+    @jax.jit
     def solve(
         self: Self,
         num_steps: jnp.int32,
-        output_steps: jnp.int32 = 1,
-        output_function: Callable = lambda x: x,
+        output_step: jnp.int32 = 1,
+        output_function: Callable = lambda x: None,
     ):
         """Call the main solve loop of a solver.
 
@@ -87,13 +88,32 @@ class Solver(Base):
             >>> usl = usl.solve(num_steps=10, output_function=some_callback)
         """
 
-        def split_number(n, divisor):
-            return [divisor] * (n // divisor) + ([n % divisor] if n % divisor else [])
 
-        segments = split_number(num_steps, output_steps)
-        current_step = 0
-        for steps in segments:
-            self = self.solve_n(steps)
-            current_step = current_step + steps
-            self = output_function((current_step, self))
-        return self
+        def body_loop(step, solver):
+            
+            solver = solver.update()
+            
+            jax.lax.cond(
+                step % output_step == 0,
+                lambda x: jax.experimental.io_callback(output_function, None,x),
+                lambda x: None,
+                (step, solver)
+            )
+            return solver
+            
+        solver = jax.lax.fori_loop(
+            0,
+            num_steps,
+            body_loop,
+            self,
+        )
+        # def split_number(n, divisor):
+        #     return [divisor] * (n // divisor) + ([n % divisor] if n % divisor else [])
+
+        # segments = split_number(num_steps, output_steps)
+        # current_step = 0
+        # for steps in segments:
+        #     self = self.solve_n(steps)
+        #     current_step = current_step + steps
+        #     self = output_function((current_step, self))
+        return solver

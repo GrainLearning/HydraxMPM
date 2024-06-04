@@ -16,7 +16,7 @@ class TestNodes(unittest.TestCase):
     @staticmethod
     def test_init():
         """Unit test to initialize the NodesContainer class."""
-        nodes = pm.Nodes.register(
+        nodes = pm.Nodes.create(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
             node_spacing=0.5,
@@ -35,7 +35,7 @@ class TestNodes(unittest.TestCase):
     @staticmethod
     def test_refresh():
         """Unit test to refresh/reset the state of the nodes."""
-        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+        nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
         nodes = nodes.replace(masses=jnp.ones(9).astype(jnp.float32))
 

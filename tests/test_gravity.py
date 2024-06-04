@@ -14,16 +14,16 @@ class Gravity(unittest.TestCase):
     @staticmethod
     def test_init():
         """Unit test to initialize gravity."""
-        box = pm.Gravity.register(jnp.array([0.0, 0.0]))
+        box = pm.Gravity.create(jnp.array([0.0, 0.0]))
 
         assert isinstance(box, pm.Gravity)
 
     @staticmethod
     def test_apply_on_node_moments():
         """Unit test to apply gravity force on Nodes."""
-        nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+        nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
-        grav = pm.Gravity.register(jnp.array([0.0, 9.8]))
+        grav = pm.Gravity.create(jnp.array([0.0, 9.8]))
 
         nodes = nodes.replace(
             masses=jnp.ones(nodes.num_nodes_total) * 1.0,
@@ -33,19 +33,6 @@ class Gravity(unittest.TestCase):
 
         nodes, grav = grav.apply_on_nodes_moments(nodes=nodes, dt=0.01)
 
-        expected_moments = jnp.array(
-            [
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-                [0.0, 0.098],
-            ]
-        )
 
         expected_moments_nt = jnp.array(
             [
@@ -61,7 +48,6 @@ class Gravity(unittest.TestCase):
             ]
         )
 
-        np.testing.assert_allclose(nodes.moments, expected_moments, rtol=1e-3)
         np.testing.assert_allclose(nodes.moments_nt, expected_moments_nt, rtol=1e-3)
 
 

@@ -1,21 +1,17 @@
 """Module for containing base class for the material."""
 
-import dataclasses
 from typing import Tuple
-
+from flax import struct
 import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.base import Base
 from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 
-
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
-class Forces(Base):
+@struct.dataclass
+class Forces:
     """Force state for the material properties."""
 
     @jax.jit

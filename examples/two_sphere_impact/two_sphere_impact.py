@@ -7,6 +7,7 @@ import pymudokon as pm
 
 import pyvista as pv
 
+import jax
 
 def create_circle(center: np.array, radius: float, cell_size: float, ppc: int = 2):
     """Generate a circle of particles.
@@ -46,31 +47,31 @@ pos = np.vstack(circles)
 velocities = [np.full(circle.shape, 0.1 if i == 0 else -0.1) for i, circle in enumerate(circles)]
 vels = np.vstack(velocities)
 
-particles = pm.Particles.register(positions=jnp.array(pos), velocities=jnp.array(vels), original_density=1000)
+particles = pm.Particles.create(positions=jnp.array(pos), velocities=jnp.array(vels), original_density=1000)
 
-nodes = pm.Nodes.register(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=cell_size)
+nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=cell_size)
 
-shapefunctions = pm.LinearShapeFunction.register(len(pos), 2)
+shapefunctions = pm.LinearShapeFunction.create(len(pos), 2)
 particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
 
-material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.3, num_particles=len(pos), dim=2)
+material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.3, num_particles=len(pos), dim=2)
 
-usl = pm.USL.register(
+usl = pm.USL.create(
     particles=particles, nodes=nodes, materials=[material], shapefunctions=shapefunctions, alpha=0.98, dt=0.001
 )
 
 
+@jax.tree_util.Partial
 def save_particles(package):
     steps, usl = package
     positions = usl.particles.positions
     mean_velocity = jnp.mean(usl.particles.velocities, axis=1)
     jnp.savez(f"output/particles_{steps}", positions=positions, mean_velocity=mean_velocity)
     print(f"output {steps}", end="\r")
-    return usl
 
 
 print("Running simulation")
-usl = usl.solve(num_steps=3000, output_steps=100, output_function=save_particles)
+usl = usl.solve(num_steps=3000, output_step=100, output_function=save_particles)
 
 print("\n Plotting")
 data = jnp.load(f"./output/particles_{100}.npz")

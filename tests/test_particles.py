@@ -16,7 +16,7 @@ class TestParticles(unittest.TestCase):
     @staticmethod
     def test_register():
         """Unit test to initialize particles."""
-        particles = pm.Particles.register(
+        particles = pm.Particles.create(
             positions=jnp.array([[0.0, 0.0], [1.0, 1.0]]),
             velocities=jnp.array([[0.0, 0.0], [1.0, 2.0]]),
         )
@@ -38,7 +38,7 @@ class TestParticles(unittest.TestCase):
 
         Volume calculation is based on the background grid discretization.
         """
-        particles = pm.Particles.register(positions=jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]))
+        particles = pm.Particles.create(positions=jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]))
         print(particles.positions)
 
         particles = particles.calculate_volume(node_spacing=0.5, particles_per_cell=1)
@@ -49,7 +49,7 @@ class TestParticles(unittest.TestCase):
     @staticmethod
     def test_refresh():
         """Unit test to refresh the state of the particles."""
-        particles = pm.Particles.register(
+        particles = pm.Particles.create(
             positions=jnp.array([[0.0, 0.0], [1.0, 1.0]]),
             velocities=jnp.array([[0.0, 0.0], [1.0, 2.0]]),
         )

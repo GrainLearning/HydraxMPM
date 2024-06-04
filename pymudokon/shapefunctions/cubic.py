@@ -7,11 +7,11 @@ References:
 
 # TODO add test for cubic shape function
 # TODO add docstring for cubic shape function
-import dataclasses
+
 from typing import Tuple
 
+from flax import struct
 import jax
-import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
@@ -19,150 +19,15 @@ from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 
 
-def middle_splines(package) -> Tuple[Array, Array]:
-    intr_dist, inv_node_spacing = package
-    conditions = [
-        (intr_dist >= 1.0) & (intr_dist < 2.0),
-        (intr_dist >= 0.0) & (intr_dist < 1.0),
-        (intr_dist >= -1.0) & (intr_dist < 0.0),
-        (intr_dist >= -2.0) & (intr_dist < -1.0),
-    ]
-    # Arrays are evaluated for each condition, is there a better way to do this?
-    basis_functions = [
-        (lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0)(intr_dist),
-        (lambda x: (0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
-        (lambda x: (-0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
-        (lambda x: ((1.0 / 6.0 * x + 1.0) * x + 2.0) * x + 4.0 / 3.0)(intr_dist),
-    ]
-
-    dbasis_functions = [
-        (lambda x, h: h * ((-0.5 * x + 2) * x - 2.0))(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (-3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
-        (lambda x, h: h * ((0.5 * x + 2) * x + 2.0))(intr_dist, inv_node_spacing),
-    ]
-    basis = jnp.select(conditions, basis_functions)
-    dbasis = jnp.select(conditions, dbasis_functions)
-    return basis, dbasis
+from functools import partial
 
 
-def boundary_padding_end_splines(package) -> Tuple[Array, Array]:
-    #     #     # left side of the boundary L - h
-
-    intr_dist, inv_node_spacing = package
-    conditions = [
-        (intr_dist >= 0.0) & (intr_dist < 1.0),
-        (intr_dist >= -1.0) & (intr_dist < 0.0),
-        (intr_dist >= -2.0) & (intr_dist < -1.0),
-    ]
-
-    basis_functions = [
-        (lambda x: (1.0 / 3.0 * x - 1.0) * x * x + 2.0 / 3.0)(intr_dist),
-        (lambda x: (-0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
-        (lambda x: ((1.0 / 6.0 * x + 1) * x + 2) * x + 4.0 / 3.0)(intr_dist),
-    ]
-
-    dbasis_functions = [
-        (lambda x, h: h * x * (x - 2))(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (-3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
-        (lambda x, h: h * ((0.5 * x + 2.0) * x + 2.0))(intr_dist, inv_node_spacing),
-    ]
-    basis = jnp.select(conditions, basis_functions)
-    dbasis = jnp.select(conditions, dbasis_functions)
-    return basis, dbasis
-
-
-def boundary_padding_start_splines(package) -> Tuple[Array, Array]:
-    intr_dist, inv_node_spacing = package
-    conditions = [
-        (intr_dist >= 1.0) & (intr_dist < 2.0),
-        (intr_dist >= 0.0) & (intr_dist < 1.0),
-        (intr_dist >= -1.0) & (intr_dist < 0.0),
-    ]
-
-    basis_functions = [
-        (lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0)(intr_dist),
-        (lambda x: (0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
-        (lambda x: (-1.0 / 3.0 * x - 1.0) * x * x + 2.0 / 3.0)(intr_dist),
-    ]
-
-    dbasis_functions = [
-        (lambda x, h: h * ((-0.5 * x + 2) * x - 2.0))(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (-x - 2) * x)(intr_dist, inv_node_spacing),
-    ]
-    basis = jnp.select(conditions, basis_functions)
-    dbasis = jnp.select(conditions, dbasis_functions)
-    return basis, dbasis
-
-
-def boundary_splines(package) -> Tuple[Array, Array]:
-    intr_dist, inv_node_spacing = package
-    conditions = [
-        (intr_dist >= 1.0) & (intr_dist < 2.0),
-        (intr_dist >= 0.0) & (intr_dist < 1.0),
-        (intr_dist >= -1.0) & (intr_dist < 0.0),
-        (intr_dist >= -2.0) & (intr_dist < -1.0),
-    ]
-
-    basis_functions = [
-        (lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0)(intr_dist),
-        (lambda x: (1.0 / 6.0 * x * x - 1.0) * x + 1.0)(intr_dist),
-        (lambda x: (-1.0 / 6.0 * x * x + 1.0) * x + 1.0)(intr_dist),
-        (lambda x: ((1.0 / 6.0 * x + 1.0) * x + 2.0) * x + 4.0 / 3.0)(intr_dist),
-    ]
-
-    dbasis_functions = [
-        (lambda x, h: h * ((-0.5 * x + 2) * x - 2.0))(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (0.5 * x * x - 1.0))(intr_dist, inv_node_spacing),
-        (lambda x, h: h * (-0.5 * x * x + 1.0))(intr_dist, inv_node_spacing),
-        (lambda x, h: h * ((0.5 * x + 2) * x + 2.0))(intr_dist, inv_node_spacing),
-    ]
-    basis = jnp.select(conditions, basis_functions)
-    dbasis = jnp.select(conditions, dbasis_functions)
-    return basis, dbasis
-
-
-def vmap_cubic_shapefunction(
-    intr_dist: Array,
-    intr_species: Array,
-    inv_node_spacing: jnp.float32,
-) -> Tuple[Array, Array]:
-    """Vectorized cubic shape function calculation.
-
-    Calculate the shape function, and then its gradients.
-
-    Args:
-        intr_dist (Array):
-            Particle-node pair interactions distance.
-        intr_species (Array):
-            Node type of the background grid. See
-            :meth:`pymudokon.core.nodes.Nodes.set_species` for details.
-        inv_node_spacing (jnp.float32):
-            Inverse node spacing.
-
-    Returns:
-        Tuple[Array, Array]:
-            Shape function and its gradient.
-    """
-    spline_branches = [
-        middle_splines,  # species 0
-        boundary_padding_start_splines,  # species 1
-        boundary_padding_end_splines,  # species 2
-        boundary_splines,  # species 3
-    ]
-
-    basis, dbasis = jax.lax.switch(intr_species, spline_branches, (intr_dist, inv_node_spacing))
-    return basis, dbasis
-
-
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
+@struct.dataclass
 class CubicShapeFunction(Interactions):
     """Cubic B-spline shape functions for the particle-node interactions."""
 
     @classmethod
-    def register(cls: Self, num_particles: jnp.int32, dim: jnp.int16) -> Self:
+    def create(cls: Self, num_particles: jax.numpy.int32, dim: jax.numpy.int16) -> Self:
         """Initializes Cubic B-splines.
 
         It is recommended that each background cell is populated by
@@ -172,9 +37,9 @@ class CubicShapeFunction(Interactions):
         Args:
             cls (Self):
                 self type reference
-            num_particles (jnp.int32):
+            num_particles (jax.numpy.int32):
                 Number of particles
-            dim (jnp.int16):
+            dim (jax.numpy.int16):
                 Dimension of the problem
 
         Returns:
@@ -182,9 +47,9 @@ class CubicShapeFunction(Interactions):
                 Container for shape functions and gradients
         """
         if dim == 1:
-            stencil = jnp.array([[-1], [0], [1], [2]])
+            stencil = jax.numpy.array([[-1], [0], [1], [2]])
         if dim == 2:
-            stencil = jnp.array(
+            stencil = jax.numpy.array(
                 [
                     [-1, -1],
                     [0, -1],
@@ -206,7 +71,7 @@ class CubicShapeFunction(Interactions):
             )
 
         if dim == 3:
-            stencil = jnp.array(
+            stencil = jax.numpy.array(
                 [
                     [-1, -1, -1],
                     [-1, -1, 0],
@@ -278,11 +143,11 @@ class CubicShapeFunction(Interactions):
         stencil_size = stencil.shape[0]
 
         return cls(
-            intr_dist=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
-            intr_bins=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.int32),
-            intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            intr_shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
+            intr_dist=jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jax.numpy.float32),
+            intr_bins=jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jax.numpy.int32),
+            intr_hashes=jax.numpy.zeros((num_particles * stencil_size), dtype=jax.numpy.int32),
+            intr_shapef=jax.numpy.zeros((num_particles, stencil_size), dtype=jax.numpy.float32),
+            intr_shapef_grad=jax.numpy.zeros((num_particles, stencil_size, dim), dtype=jax.numpy.float32),
             stencil=stencil,
         )
 
@@ -311,12 +176,12 @@ class CubicShapeFunction(Interactions):
 
         Example:
             >>> import pymudokon as pm
-            >>> nodes = pm.Nodes.register(grid_size=4, node_spacing=0.5)
-            >>> shapefunctions = pm.CubicShapeFunction.register(2, 2)
+            >>> nodes = pm.Nodes.create(grid_size=4, node_spacing=0.5)
+            >>> shapefunctions = pm.CubicShapeFunction.create(2, 2)
             >>> nodes = shapefunctions.set_node_species(nodes)
         """
         # middle nodes
-        species = jnp.zeros(nodes.grid_size).astype(jnp.int32)
+        species = jax.numpy.zeros(nodes.grid_size).astype(jax.numpy.int32)
 
         # # # TODO generalize for 3D
         # # # TODO document
@@ -359,7 +224,7 @@ class CubicShapeFunction(Interactions):
         # repeat for each dimension
         intr_species = nodes.species.take(self.intr_hashes, axis=0).reshape(-1).repeat(dim)
 
-        basis, dbasis = jax.vmap(vmap_cubic_shapefunction, in_axes=(0, 0, None))(
+        basis, dbasis = self.vmap_cubic_shapefunction(
             self.intr_dist.reshape(-1), intr_species, nodes.inv_node_spacing
         )
         basis = basis.reshape(-1, dim)
@@ -372,7 +237,7 @@ class CubicShapeFunction(Interactions):
 
         intr_shapef = (N0 * N1).reshape(-1, 1, 1)
 
-        intr_shapef_grad = jnp.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
+        intr_shapef_grad = jax.numpy.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
 
         return self.replace(
             intr_shapef=intr_shapef,
@@ -393,3 +258,141 @@ class CubicShapeFunction(Interactions):
         """
         # TODO check if 2,4,
         raise NotImplementedError("This method is not yet implemented.")
+
+    @partial(jax.vmap, in_axes=(None, 0, 0, None))
+    def vmap_cubic_shapefunction(
+        self,
+        intr_dist: Array,
+        intr_species: Array,
+        inv_node_spacing: jax.numpy.float32,
+    ) -> Tuple[Array, Array]:
+        """Vectorized cubic shape function calculation.
+
+        Calculate the shape function, and then its gradients.
+
+        Args:
+            intr_dist (Array):
+                Particle-node pair interactions distance.
+            intr_species (Array):
+                Node type of the background grid. See
+                :meth:`pymudokon.core.nodes.Nodes.set_species` for details.
+            inv_node_spacing (jax.numpy.float32):
+                Inverse node spacing.
+
+        Returns:
+            Tuple[Array, Array]:
+                Shape function and its gradient.
+        """
+        spline_branches = [
+            middle_splines,  # species 0
+            boundary_padding_start_splines,  # species 1
+            boundary_padding_end_splines,  # species 2
+            boundary_splines,  # species 3
+        ]
+
+        basis, dbasis = jax.lax.switch(intr_species, spline_branches, (intr_dist, inv_node_spacing))
+        return basis, dbasis
+
+
+def middle_splines(package) -> Tuple[Array, Array]:
+    intr_dist, inv_node_spacing = package
+    conditions = [
+        (intr_dist >= 1.0) & (intr_dist < 2.0),
+        (intr_dist >= 0.0) & (intr_dist < 1.0),
+        (intr_dist >= -1.0) & (intr_dist < 0.0),
+        (intr_dist >= -2.0) & (intr_dist < -1.0),
+    ]
+    # Arrays are evaluated for each condition, is there a better way to do this?
+    basis_functions = [
+        (lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0)(intr_dist),
+        (lambda x: (0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
+        (lambda x: (-0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
+        (lambda x: ((1.0 / 6.0 * x + 1.0) * x + 2.0) * x + 4.0 / 3.0)(intr_dist),
+    ]
+
+    dbasis_functions = [
+        (lambda x, h: h * ((-0.5 * x + 2) * x - 2.0))(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (-3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
+        (lambda x, h: h * ((0.5 * x + 2) * x + 2.0))(intr_dist, inv_node_spacing),
+    ]
+    basis = jax.numpy.select(conditions, basis_functions)
+    dbasis = jax.numpy.select(conditions, dbasis_functions)
+    return basis, dbasis
+
+
+def boundary_padding_end_splines(package) -> Tuple[Array, Array]:
+    #     #     # left side of the boundary L - h
+
+    intr_dist, inv_node_spacing = package
+    conditions = [
+        (intr_dist >= 0.0) & (intr_dist < 1.0),
+        (intr_dist >= -1.0) & (intr_dist < 0.0),
+        (intr_dist >= -2.0) & (intr_dist < -1.0),
+    ]
+
+    basis_functions = [
+        (lambda x: (1.0 / 3.0 * x - 1.0) * x * x + 2.0 / 3.0)(intr_dist),
+        (lambda x: (-0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
+        (lambda x: ((1.0 / 6.0 * x + 1) * x + 2) * x + 4.0 / 3.0)(intr_dist),
+    ]
+
+    dbasis_functions = [
+        (lambda x, h: h * x * (x - 2))(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (-3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
+        (lambda x, h: h * ((0.5 * x + 2.0) * x + 2.0))(intr_dist, inv_node_spacing),
+    ]
+    basis = jax.numpy.select(conditions, basis_functions)
+    dbasis = jax.numpy.select(conditions, dbasis_functions)
+    return basis, dbasis
+
+
+def boundary_padding_start_splines(package) -> Tuple[Array, Array]:
+    intr_dist, inv_node_spacing = package
+    conditions = [
+        (intr_dist >= 1.0) & (intr_dist < 2.0),
+        (intr_dist >= 0.0) & (intr_dist < 1.0),
+        (intr_dist >= -1.0) & (intr_dist < 0.0),
+    ]
+
+    basis_functions = [
+        (lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0)(intr_dist),
+        (lambda x: (0.5 * x - 1) * x * x + 2.0 / 3.0)(intr_dist),
+        (lambda x: (-1.0 / 3.0 * x - 1.0) * x * x + 2.0 / 3.0)(intr_dist),
+    ]
+
+    dbasis_functions = [
+        (lambda x, h: h * ((-0.5 * x + 2) * x - 2.0))(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (3.0 / 2.0 * x - 2.0) * x)(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (-x - 2) * x)(intr_dist, inv_node_spacing),
+    ]
+    basis = jax.numpy.select(conditions, basis_functions)
+    dbasis = jax.numpy.select(conditions, dbasis_functions)
+    return basis, dbasis
+
+
+def boundary_splines(package) -> Tuple[Array, Array]:
+    intr_dist, inv_node_spacing = package
+    conditions = [
+        (intr_dist >= 1.0) & (intr_dist < 2.0),
+        (intr_dist >= 0.0) & (intr_dist < 1.0),
+        (intr_dist >= -1.0) & (intr_dist < 0.0),
+        (intr_dist >= -2.0) & (intr_dist < -1.0),
+    ]
+
+    basis_functions = [
+        (lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0)(intr_dist),
+        (lambda x: (1.0 / 6.0 * x * x - 1.0) * x + 1.0)(intr_dist),
+        (lambda x: (-1.0 / 6.0 * x * x + 1.0) * x + 1.0)(intr_dist),
+        (lambda x: ((1.0 / 6.0 * x + 1.0) * x + 2.0) * x + 4.0 / 3.0)(intr_dist),
+    ]
+
+    dbasis_functions = [
+        (lambda x, h: h * ((-0.5 * x + 2) * x - 2.0))(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (0.5 * x * x - 1.0))(intr_dist, inv_node_spacing),
+        (lambda x, h: h * (-0.5 * x * x + 1.0))(intr_dist, inv_node_spacing),
+        (lambda x, h: h * ((0.5 * x + 2) * x + 2.0))(intr_dist, inv_node_spacing),
+    ]
+    basis = jax.numpy.select(conditions, basis_functions)
+    dbasis = jax.numpy.select(conditions, dbasis_functions)
+    return basis, dbasis

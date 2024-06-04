@@ -31,7 +31,7 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_init():
         """Test the initialization of the isotropic linear elastic material."""
-        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=3)
+        material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=3)
 
         assert isinstance(material, pm.LinearIsotropicElastic)
         np.testing.assert_allclose(material.E, 1000.0)
@@ -43,12 +43,12 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_vmap_update():
         """Test the vectorized update of the isotropic linear elastic material."""
-        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+        material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
         transform = jnp.eye(2, dtype=jnp.float32) * 0.001
         deps = jnp.stack([transform, transform])
-        stress, eps_e = jax.vmap(pm.materials.linearelastic.vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
-            material.eps_e, deps, material.G, material.K
+        stress, eps_e = material.vmap_update(
+            material.eps_e,  deps, jnp.zeros((2,3,3)), material.G, material.K
         )
 
         np.testing.assert_allclose(
@@ -81,11 +81,11 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_update_stress():
         """Test the update of stress and strain for all particles."""
-        particles = pm.Particles.register(positions=jnp.array([[0.0, 0.0], [1.0, 1.0]]))
+        particles = pm.Particles.create(positions=jnp.array([[0.0, 0.0], [1.0, 1.0]]))
 
         particles = particles.replace(velgrads=jnp.stack([jnp.eye(2), jnp.eye(2)]))
 
-        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+        material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
         particle, material = material.update_stress(particles, 0.001)
 
@@ -119,7 +119,7 @@ class TestLinearElastic(unittest.TestCase):
     @staticmethod
     def test_update_benchmark():
         """Test the vectorized update of the isotropic linear elastic material."""
-        material = pm.LinearIsotropicElastic.register(E=1000.0, nu=0.2, num_particles=2, dim=2)
+        material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
 
         dt = 0.01
         strain_rate_transform = jnp.eye(2, dtype=jnp.float32) * 0.001 / dt

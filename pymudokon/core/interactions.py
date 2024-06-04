@@ -7,79 +7,20 @@ Interactions are an intermediate representation before transferring information 
 These arrays are typically denoted as `intr_...` (interaction arrays).
 """
 
-import dataclasses
 from typing import Tuple
-
-import jax
-import jax.numpy as jnp
-from jax import Array
 from typing_extensions import Self
 
-from .base import Base
+from flax import struct
+
+import jax
+
 from .nodes import Nodes
 from .particles import Particles
 
+from functools import partial
 
-def vmap_interactions(
-    position: Array,
-    stencil: Array,
-    origin: Array,
-    inv_node_spacing: jnp.float32,
-    grid_size: jnp.int32,
-) -> Tuple[Array, Array, Array]:
-    """Vectorized mapping of particle-node pair interactions.
-
-    Position array is mapped per particle via vmap (num_particles, dim) -> (dim,).
-
-    Performs the following operations:
-    - Calculate the relative position of the particle to the node.
-    - Calculate the particle-node pair interactions (by repeating particle for each stencil point).
-    - Calculate particle-node pair interaction distances.
-    - Calculate particle-node pair grid ids.
-    - Calculate particle-node pair hash ids.
-
-    Args:
-        position (Array): Spatial coordinates of particle. Expects shape `(num_particles,dim)` vectorized to `(dim,)`.
-        stencil (Array): Stencil array, displacement of neighboring nodes. Expects shape `(stencil_size,dim)` static.
-        origin (Array): Grid origin. Expected shape `(dim,)` static.
-        inv_node_spacing (jnp.float32): Inverse of the node spacing, static.
-        grid_size (jnp.int32): Grid size/ total number of nodes about each axis. Expects shape `(dim,)`, static.
-
-    Returns:
-        (Tuple[Array, Array, Array]):
-            Tuple of particle-node pair interactions.
-            - intr_dist: Particle-node pair interaction distances.
-            - intr_bins: Particle-node pair grid ids.
-            - intr_hashes: Particle-node pair hash ids.
-    """
-    stencil_size, dim = stencil.shape
-
-    # current shape per particle (dim,)
-    # relative position of the particle to the background grid
-    rel_pos = (position - origin) * inv_node_spacing
-
-    # transforms shape per particle (stencil_size, dim)
-    repeat_rel_pos = jnp.tile(rel_pos, (stencil_size, 1))
-
-    # hereafter, all operations are per particle-per interactions
-    # shape per particle (stencil_size, dim), except hashes
-    intr_node_pos = jnp.floor(repeat_rel_pos) + stencil
-
-    intr_dist = repeat_rel_pos - intr_node_pos
-
-    intr_bins = intr_node_pos.astype(jnp.int32)
-
-    intr_hashes = (intr_node_pos[:, 0] + intr_node_pos[:, 1] * grid_size[0]).astype(jnp.int32)
-
-    # shape for all particle (after vmap) is
-    # (num_particles, stencil_size, dim) for distances and bins
-    # (num_particles, stencil_size) for hashes
-    return intr_dist, intr_bins, intr_hashes
-
-
-@jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
-class Interactions(Base):
+@struct.dataclass
+class Interactions:
     """Interaction state for the particle and node pairs.
 
     Each shapefunction inherits this class.
@@ -90,43 +31,42 @@ class Interactions(Base):
     stencil size 8, and 2D quadratic element stencil size of 9.
 
     Attributes:
-        intr_dist (Array: Particle-node interactions distance in the nodes' coordinate system.
+        intr_dist (jax.Array: Particle-node interactions distance in the nodes' coordinate system.
             `(num_particles*stencil_size,dim,1)`.
-        intr_bins (Array): Node-grid bins of the particle-node  interactions
+        intr_bins (jax.Array): Node-grid bins of the particle-node  interactions
             `(num_particles*stencil_size,dim,1)`, type int32.
-        intr_hash (Array): Cartesian hash of particle-node pair interactions
+        intr_hash (jax.Array): Cartesian hash of particle-node pair interactions
             `(num_particles*stencil_size)`, type int32.
-        intr_shapef (Array): Shape functions for the particle-node pair interactions
+        intr_shapef (jax.Array): Shape functions for the particle-node pair interactions
             `(num_particles, stencil_size,1)`
-        intr_shapef_grad (Array): Shape function gradients for the particle-node pair interactions
+        intr_shapef_grad (jax.Array): Shape function gradients for the particle-node pair interactions
             `(num_particles, stencil_size, dim)`
     """
 
-    # arrays
-    intr_dist: Array
-    intr_bins: Array
-    intr_hashes: Array
+    intr_dist: jax.Array
+    intr_bins: jax.Array
+    intr_hashes: jax.Array
 
-    intr_shapef: Array
-    intr_shapef_grad: Array
-    stencil: Array
+    intr_shapef: jax.Array
+    intr_shapef_grad: jax.Array
+    stencil: jax.Array
 
     @classmethod
-    def register(cls: Self, stencil: Array, num_particles: jnp.int16) -> Self:
+    def create(cls: Self, stencil: jax.Array, num_particles: jax.numpy.int16) -> Self:
         """Initialize the empty state or node-particle pair interactions.
 
         This function is typically not called directly, for testing purposes only.
 
         Args:
             cls (Self): Reference to the self type.
-            stencil_size (jnp.int16): Size of the stencil.
-            num_particles (jnp.int16): Number of particles.
-            stencil (Array):
+            stencil_size (jax.numpy.int16): Size of the stencil.
+            num_particles (jax.numpy.int16): Number of particles.
+            stencil (jax.Array):
                 Stencil array used to calculate particle-node pair interactions.
                 It is a window/box around each particle with the relative position of the particle to the node.
                 Stencil array is normally, the same for each particle/node pair.
                 Expected shape is `(stencil_size,dim)`.
-            dim (jnp.int16):
+            dim (jax.numpy.int16):
                 Dimension of the problem
 
         Returns:
@@ -134,13 +74,14 @@ class Interactions(Base):
                 Updated interactions state for the particle and node pairs.
         """
         stencil_size, dim = stencil.shape
+
         return cls(
-            intr_dist=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
-            intr_bins=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.int32),
-            intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            intr_shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
-            stencil=stencil,
+        intr_dist = jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jax.numpy.float32),
+        intr_bins = jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jax.numpy.int32),
+        intr_hashes = jax.numpy.zeros((num_particles * stencil_size), dtype=jax.numpy.int32),
+        intr_shapef = jax.numpy.zeros((num_particles, stencil_size), dtype=jax.numpy.float32),
+        intr_shapef_grad = jax.numpy.zeros((num_particles, stencil_size, dim), dtype=jax.numpy.float32),
+        stencil = stencil
         )
 
     @jax.jit
@@ -172,11 +113,7 @@ class Interactions(Base):
         """
         stencil_size, dim = self.stencil.shape
 
-        intr_dist, intr_bins, intr_hashes = jax.vmap(
-            vmap_interactions,
-            in_axes=(0, None, None, None, None),
-            out_axes=(0, 0, 0),
-        )(
+        intr_dist, intr_bins, intr_hashes = self.vmap_interactions(
             particles.positions,
             self.stencil,
             nodes.origin,
@@ -193,3 +130,64 @@ class Interactions(Base):
     def set_boundary_nodes(self: Self, nodes: Nodes) -> Nodes:
         """Set node species at boundaries (See `cubic` shape function)."""
         return nodes
+
+    
+    @partial(jax.vmap, in_axes=(None,0, None, None, None, None), out_axes=(0, 0, 0))
+    def vmap_interactions(
+        self: Self,
+        position: jax.Array,
+        stencil: jax.Array,
+        origin: jax.Array,
+        inv_node_spacing: jax.numpy.float32,
+        grid_size: jax.numpy.int32,
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+        """Vectorized mapping of particle-node pair interactions.
+
+        Position array is mapped per particle via vmap (num_particles, dim) -> (dim,).
+
+        Performs the following operations:
+        - Calculate the relative position of the particle to the node.
+        - Calculate the particle-node pair interactions (by repeating particle for each stencil point).
+        - Calculate particle-node pair interaction distances.
+        - Calculate particle-node pair grid ids.
+        - Calculate particle-node pair hash ids.
+
+        Args:
+            position (jax.Array): Spatial coordinates of particle. Expects shape `(num_particles,dim)` vectorized to `(dim,)`.
+            stencil (jax.Array): Stencil array, displacement of neighboring nodes. Expects shape `(stencil_size,dim)` static.
+            origin (jax.Array): Grid origin. Expected shape `(dim,)` static.
+            inv_node_spacing (jax.numpy.float32): Inverse of the node spacing, static.
+            grid_size (jax.numpy.int32): Grid size/ total number of nodes about each axis. Expects shape `(dim,)`, static.
+
+        Returns:
+            (Tuple[jax.Array, jax.Array, jax.Array]):
+                Tuple of particle-node pair interactions.
+                - intr_dist: Particle-node pair interaction distances.
+                - intr_bins: Particle-node pair grid ids.
+                - intr_hashes: Particle-node pair hash ids.
+        """
+        stencil_size, dim = stencil.shape
+
+        # current shape per particle (dim,)
+        # relative position of the particle to the background grid
+        rel_pos = (position - origin) * inv_node_spacing
+
+        # transforms shape per particle (stencil_size, dim)
+        repeat_rel_pos = jax.numpy.tile(rel_pos, (stencil_size, 1))
+
+        # hereafter, all operations are per particle-per interactions
+        # shape per particle (stencil_size, dim), except hashes
+        intr_node_pos = jax.numpy.floor(repeat_rel_pos) + stencil
+
+        intr_dist = repeat_rel_pos - intr_node_pos
+
+        intr_bins = intr_node_pos.astype(jax.numpy.int32)
+
+        intr_hashes = (intr_node_pos[:, 0] + intr_node_pos[:, 1] * grid_size[0]).astype(
+            jax.numpy.int32
+        )
+
+        # shape for all particle (after vmap) is
+        # (num_particles, stencil_size, dim) for distances and bins
+        # (num_particles, stencil_size) for hashes
+        return intr_dist, intr_bins, intr_hashes

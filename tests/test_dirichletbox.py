@@ -13,21 +13,20 @@ class DirichletBox(unittest.TestCase):
     @staticmethod
     def test_init():
         """Unit test to initialize the NodesContainer class."""
-        box = pm.DirichletBox.register()
+        box = pm.DirichletBox.create()
 
         assert isinstance(box, pm.DirichletBox)
 
     @staticmethod
     def test_apply_on_node_moments():
         """Unit test to initialize the NodesContainer class."""
-        nodes = pm.Nodes.register(
+        nodes = pm.Nodes.create(
             origin=jnp.array([0.0, 0.0]),
             end=jnp.array([1.0, 1.0]),
-            node_spacing=0.1,
-            particles_per_cell=1,
+            node_spacing=0.1
         )
 
-        box = pm.DirichletBox.register()
+        box = pm.DirichletBox.create()
 
         box.apply_on_nodes_moments(nodes)
 
