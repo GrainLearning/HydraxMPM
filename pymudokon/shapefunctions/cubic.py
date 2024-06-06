@@ -15,7 +15,7 @@ import jax
 from jax import Array
 from typing_extensions import Self
 
-from ..core.interactions import Interactions
+from .shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 
 
@@ -23,7 +23,7 @@ from functools import partial
 
 
 @struct.dataclass
-class CubicShapeFunction(Interactions):
+class CubicShapeFunction(ShapeFunction):
     """Cubic B-spline shape functions for the particle-node interactions."""
 
     @classmethod
@@ -180,11 +180,9 @@ class CubicShapeFunction(Interactions):
             >>> shapefunctions = pm.CubicShapeFunction.create(2, 2)
             >>> nodes = shapefunctions.set_node_species(nodes)
         """
+        #TODO generalize
         # middle nodes
         species = jax.numpy.zeros(nodes.grid_size).astype(jax.numpy.int32)
-
-        # # # TODO generalize for 3D
-        # # # TODO document
 
         # # boundary nodes 0 + h
         species = species.at[1, 1:-1].set(1)

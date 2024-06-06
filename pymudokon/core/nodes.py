@@ -1,9 +1,9 @@
 """State and functions for managing the Material Point Method (MPM) background grid nodes."""
 
-from flax import struct
-
 import jax
+from flax import struct
 from typing_extensions import Self
+
 
 @struct.dataclass
 class Nodes:
@@ -55,8 +55,8 @@ class Nodes:
             origin (jax.Array): Start coordinates of domain `(dim,)`.
             end (jax.Array): End coordinates of domain `(dim,)`.
             node_spacing (jax.numpy.float32): Spacing between each node in the grid.
-            small_mass_cutoff (jax.numpy.float32, optional): Small masses threshold to avoid unphysical large velocities,
-                defaults to 1e-10.
+            small_mass_cutoff (jax.numpy.float32, optional):
+                Small masses threshold to avoid unphysical large velocities, defaults to 1e-10.
 
         Returns:
             Nodes: Updated state for the background MPM nodes.
@@ -74,7 +74,7 @@ class Nodes:
         grid_size = ((end - origin) / node_spacing + 1).astype(jax.numpy.int32)
         num_nodes_total = jax.numpy.prod(grid_size).astype(jax.numpy.int32)
 
-        _dim = origin.shape[0]
+        dim = origin.shape[0]
 
         return cls(
             origin=origin,
@@ -85,8 +85,8 @@ class Nodes:
             grid_size=grid_size,
             inv_node_spacing=inv_node_spacing,
             masses=jax.numpy.zeros((num_nodes_total)).astype(jax.numpy.float32),
-            moments=jax.numpy.zeros((num_nodes_total, _dim)).astype(jax.numpy.float32),
-            moments_nt=jax.numpy.zeros((num_nodes_total, _dim)).astype(jax.numpy.float32),
+            moments=jax.numpy.zeros((num_nodes_total, dim)).astype(jax.numpy.float32),
+            moments_nt=jax.numpy.zeros((num_nodes_total, dim)).astype(jax.numpy.float32),
             species=jax.numpy.zeros(num_nodes_total).astype(jax.numpy.int32),
             ids_grid=jax.numpy.arange(num_nodes_total).reshape(grid_size).astype(jax.numpy.int32),
         )

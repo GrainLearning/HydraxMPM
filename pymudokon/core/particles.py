@@ -1,8 +1,7 @@
 """State and functions for the material points (called particles)."""
 
-from flax import struct
 import jax
-
+from flax import struct
 from typing_extensions import Self
 
 
@@ -34,7 +33,7 @@ class Particles:
     stresses: jax.Array
     forces: jax.Array
     F: jax.Array
-    
+
     ids: jax.Array
 
     original_density: jax.numpy.float32
@@ -68,7 +67,8 @@ class Particles:
             velgrads (jax.Array, optional): Velocity gradient tensors `(num_particles, dims, dims )`, defaults to zeros.
             stresses (jax.Array, optional): Cauchy stress tensors `(num_particles, 3, 3 )`, defaults to zeros.
             forces (jax.Array, optional): External force vectors `(num_particles, dims)`, defaults to zeros.
-            F (jax.Array, optional): Deformation gradient tensors `(num_particles, dims, dims)`, defaults identity matrices.
+            F (jax.Array, optional):
+                Deformation gradient tensors `(num_particles, dims, dims)`, defaults identity matrices.
             original_density (jax.numpy.float32, optional): Original density (Scalar). Defaults to 1.0.
 
         Returns:
@@ -84,10 +84,10 @@ class Particles:
             >>> )
         )
         """
-        _num_particles, _dim = positions.shape
+        _num_particles, dim = positions.shape
 
         if velocities is None:
-            velocities = jax.numpy.zeros((_num_particles, _dim))
+            velocities = jax.numpy.zeros((_num_particles, dim))
 
         if masses is None:
             masses = jax.numpy.zeros((_num_particles))
@@ -101,16 +101,16 @@ class Particles:
         volumes_original = volumes
 
         if velgrads is None:
-            velgrads = jax.numpy.zeros((_num_particles, _dim, _dim))
+            velgrads = jax.numpy.zeros((_num_particles, dim, dim))
 
         if stresses is None:
             stresses = jax.numpy.zeros((_num_particles, 3, 3))
 
         if forces is None:
-            forces = jax.numpy.zeros((_num_particles, _dim))
+            forces = jax.numpy.zeros((_num_particles, dim))
 
         if F is None:
-            F = jax.numpy.stack([jax.numpy.eye(_dim)] * _num_particles)
+            F = jax.numpy.stack([jax.numpy.eye(dim)] * _num_particles)
 
         original_density = original_density
 

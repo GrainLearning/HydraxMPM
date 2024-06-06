@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
-from ..core.interactions import Interactions
+from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 
@@ -48,7 +48,7 @@ class Gravity:
         self: Self,
         nodes: Nodes,
         particles: Particles = None,
-        shapefunctions: Interactions = None,
+        shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
         """Apply gravity on the nodes.

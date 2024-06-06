@@ -4,7 +4,6 @@ Built with JAX.
 """
 
 # core
-from .core.interactions import Interactions
 from .core.nodes import Nodes
 from .core.particles import Particles
 from .forces.dirichletbox import DirichletBox
@@ -17,6 +16,7 @@ from .materials.linearelastic import LinearIsotropicElastic
 from .materials.material import Material
 from .materials.modifiedcamclay import ModifiedCamClay
 from .materials.newtonfluid import NewtonFluid
+from .shapefunctions.shapefunction import ShapeFunction
 from .shapefunctions.cubic import CubicShapeFunction
 from .shapefunctions.linear import LinearShapeFunction
 from .solvers.solver import Solver
@@ -24,7 +24,7 @@ from .solvers.usl import USL
 from .utils.domain import discretize
 
 __all__ = [
-    "Interactions",
+    "ShapeFunction",
     "Nodes",
     "Particles",
     "LinearIsotropicElastic",
