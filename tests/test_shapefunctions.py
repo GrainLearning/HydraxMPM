@@ -41,16 +41,16 @@ def test_vmap_interactions():
     )
     intr_dist, intr_bins, intr_hashes = shapefunction.vmap_get_interactions(positions, origin, inv_node_spacing, grid_size)
 
-    # np.testing.assert_allclose(
-    #     intr_dist,
-    #     jnp.array(
-    #         [
-    #             [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]],
-    #             [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]],
-    #             [[0.6, 0.8], [-0.4, 0.8], [0.6, -0.2], [-0.4, -0.2]],
-    #         ]
-    #     ),
-    # )
+    np.testing.assert_allclose(
+        intr_dist,
+        jnp.array(
+            [
+                [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]],
+                [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]],
+                [[0.6, 0.8], [-0.4, 0.8], [0.6, -0.2], [-0.4, -0.2]],
+            ]
+        ),
+    )
 
 
 # class TestInteractions(unittest.TestCase):
