@@ -1,23 +1,21 @@
 """Module for containing the linear shape functions."""
 
-import dataclasses
+from functools import partial
 from typing import Tuple
-
-from flax import struct
 
 import jax
 import jax.numpy as jnp
+from flax import struct
 from jax import Array
 from typing_extensions import Self
 
-from ..core.interactions import Interactions
 from ..core.nodes import Nodes
+from ..core.particles import Particles
+from .shapefunction import ShapeFunction
 
-
-from functools import partial
 
 @struct.dataclass
-class LinearShapeFunction(Interactions):
+class LinearShapeFunction(ShapeFunction):
     """Linear shape functions for the particle-node interactions."""
 
     @classmethod
@@ -31,6 +29,7 @@ class LinearShapeFunction(Interactions):
 
         Returns: ShapeFunction: Initialized shape function and interactions state.
         """
+        # Generate the stencil based on the dimension
         if dim == 1:
             stencil = jnp.array([[0.0], [1.0]])
         if dim == 2:
@@ -43,8 +42,6 @@ class LinearShapeFunction(Interactions):
         stencil_size = stencil.shape[0]
 
         return cls(
-            intr_dist=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
-            intr_bins=jnp.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.int32),
             intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
             intr_shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
             intr_shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
@@ -52,7 +49,7 @@ class LinearShapeFunction(Interactions):
         )
 
     @jax.jit
-    def calculate_shapefunction(self: Self, nodes: Nodes) -> Self:
+    def calculate_shapefunction(self: Self, nodes: Nodes, particles: Particles) -> Self:
         """Top level function to calculate the shape functions. Assumes `get_interactions` has been called.
 
         Args:
@@ -60,15 +57,42 @@ class LinearShapeFunction(Interactions):
                 Shape function at previous state
             nodes (Nodes):
                 Nodes state containing grid size and inv_node_spacing
+            particles (Particles):
+                Particles state containing particle positions
 
-        Returns:
+        Returns:>
             LinearShapeFunction: Updated shape function state for the particle and node pairs.
         """
-        intr_shapef, intr_shapef_grad = self.vmap_linear_shapefunction(
-            self.intr_dist, nodes.inv_node_spacing
+        # Solution procedure:
+        _, dim = self.stencil.shape
+
+        # 1. Calculate the particle-node pair interactions
+        # see `ShapeFunction class` for more details
+        intr_dist, intr_hashes = self.vmap_interactions(
+            particles.positions,
+            nodes.origin,
+            nodes.inv_node_spacing,
+            nodes.grid_size,
         )
-        return self.replace(intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad)
-    
+
+        # 2. Reshape arrays to be batched
+        intr_dist = intr_dist.reshape(-1, dim, 1)
+        intr_hashes = intr_hashes.reshape(-1)
+
+        # 3. Calculate the shape functions
+        intr_shapef = self.vmap_linear_shapefunction(
+            intr_dist, nodes.inv_node_spacing
+        )
+
+        # 4. Calculate the shape function gradients
+        intr_shapef_grad = jax.grad(self.vmap_linear_shapefunction)(
+            intr_dist, nodes.inv_node_spacing
+        )
+
+        return self.replace(
+            intr_shapef=intr_shapef,
+            intr_shapef_grad=intr_shapef_grad)
+
     @partial(jax.vmap, in_axes=(None,0, None))
     def vmap_linear_shapefunction(
         self: Self,
@@ -89,21 +113,18 @@ class LinearShapeFunction(Interactions):
             Tuple[Array, Array]:
                 Shape function and its gradient.
         """
+        num_interactions, dim, _ = intr_dist.shape
+
         abs_intr_dist = jnp.abs(intr_dist)
         basis = jnp.where(abs_intr_dist < 1.0, 1.0 - abs_intr_dist, 0.0)
-        dbasis = jnp.where(abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0)
 
-        N0 = basis[0, :]
-        N1 = basis[1, :]
-        dN0 = dbasis[0, :]
-        dN1 = dbasis[1, :]
-
-        intr_shapef = jnp.expand_dims(N0 * N1, axis=1)
-
-        intr_shapef_grad = jnp.array([dN0 * N1, N0 * dN1])
+        intr_shapef = jax.lax.switch(
+            dim-1,
+            lambda _: basis, #1D
+            lambda _: jnp.expand_dims(basis[0, :] * basis[1, :], axis=1), #2D
+            lambda _:  jnp.expand_dims(basis[0, :] * basis[1, :] * basis[2, :], axis=1) #3D
+        )
 
         # shapes of returned array are
         # (num_particles*stencil_size, 1, 1)
-        # and (num_particles*stencil_size, dim,1)
-        # respectively
-        return intr_shapef, intr_shapef_grad
+        return intr_shapef

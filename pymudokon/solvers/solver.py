@@ -9,9 +9,7 @@ import jax.numpy as jnp
 from typing_extensions import Self
 
 
-from ..core.interactions import (
-    Interactions,
-)
+from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..forces.forces import Forces
@@ -25,7 +23,7 @@ class Solver:
     Attributes:
         particles  (Particles): Particles in the simulation.
         nodes (Nodes): Nodes in the simulation.
-        shapefunctions (Interactions): Shape functions in the simulation.
+        shapefunctions (ShapeFunction): Shape functions in the simulation.
         materials (List[Material]): List of materials in the simulation.
         forces (List[int]): List of forces in the simulation.
         dt (jnp.float32): Time step of the simulation.
@@ -34,7 +32,7 @@ class Solver:
     nodes: Nodes
     materials: List[Material]
     forces: List[Forces]
-    shapefunctions: Interactions
+    shapefunctions: ShapeFunction
     dt: jnp.float32
 
     def update(self: Self):

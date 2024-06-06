@@ -30,6 +30,7 @@ tensorflow = "^2.16.1"
 tensorboard-plugin-profile = "^2.15.1"
 equinox = "^0.11.4"
 flax = "^0.8.4"
+pyperf = "^2.7.0"
 
 [tool.poetry.group.gpu.dependencies]
 jax = {extras = ["cuda12"], version = "^0.4.28"}

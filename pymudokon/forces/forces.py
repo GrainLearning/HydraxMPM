@@ -6,9 +6,9 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.interactions import Interactions
 from ..core.nodes import Nodes
 from ..core.particles import Particles
+from ..shapefunctions.shapefunction import ShapeFunction
 
 @struct.dataclass
 class Forces:
@@ -19,7 +19,7 @@ class Forces:
         self: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: Interactions,
+        shapefunctions: ShapeFunction,
         dt: jnp.float32,
     ) -> Tuple[Particles, Self]:
         """Apply the force on the particles."""
@@ -30,7 +30,7 @@ class Forces:
         self: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: Interactions,
+        shapefunctions: ShapeFunction,
         dt: jnp.float32,
     ) -> Tuple[Nodes, Self]:
         """Apply the force on the nodes."""

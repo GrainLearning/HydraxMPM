@@ -10,9 +10,7 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.interactions import (
-    Interactions,
-)
+from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..forces.forces import Forces
@@ -24,7 +22,7 @@ from functools import partial
 def p2g(
     nodes: Nodes,
     particles: Particles,
-    shapefunctions: Interactions,
+    shapefunctions: ShapeFunction,
     dt: jnp.float32,
 ) -> Nodes:
     """Particle to grid transfer.
@@ -32,7 +30,7 @@ def p2g(
     The procedure is as follows:
 
     - Prepare shape functions and and their gradients.
-    - Map out interactions for a particle and its stencil.
+    - Map out shapefunction for a particle and its stencil.
     - Scale quantities with shape functions and gradients.
     - Gather quantities to nodes.
     - Integrate moments on nodes.
@@ -40,7 +38,7 @@ def p2g(
     Args:
         nodes (Nodes): MPM background nodes.
         particles (Particles): Material points / particles
-        shapefunctions (Interactions): A shape function e.g. `LinearShapeFunction`
+        shapefunctions (ShapeFunction): A shape function e.g. `LinearShapeFunction`
         dt (jnp.float32):
             Time step.
 
@@ -73,7 +71,7 @@ def p2g(
     scaled_int_forces = jax.lax.batch_matmul(intr_stresses, intr_shapef_grad)
     scaled_int_forces = jax.lax.batch_matmul(scaled_int_forces, -1.0 * intr_volumes)
     scaled_total_forces = scaled_int_forces[:, :2] + scaled_ext_forces  # unpad and add #TODO - generalize for 3D
-
+        
     # node (reshape) and gather interactions
     nodes_masses = nodes.masses.at[shapefunctions.intr_hashes,].add(scaled_mass.reshape(-1), mode="drop")
 
@@ -98,7 +96,7 @@ def p2g(
 def p2g_batch(
         nodes: Nodes,
         particles: Particles,
-        shapefunctions: Interactions,
+        shapefunctions: ShapeFunction,
         dt: jnp.float32,
     )-> Nodes:
     
@@ -115,30 +113,69 @@ def p2g_batch(
     )  # plane strain #TODO - generalize for 3D
 
     # interactions
-    p_ids = jnp.repeat(particles.ids, stencil_size).reshape(-1, 1, 1)
+    p_ids = jnp.repeat(particles.ids, stencil_size).reshape(-1)
     
         # interactions
-    intr_masses = jnp.repeat(particles.masses, stencil_size).reshape(-1, 1, 1)
+    # intr_masses = jnp.repeat(particles.masses, stencil_size).reshape(-1, 1, 1)
     
-    @partial(jax.vmap, in_axes=(0,None))    
-    def vmap_p2g(p_ids, p_masses):
+    @partial(jax.vmap, in_axes=(0,0,0,None,None,None,None, None))    
+    def vmap_p2g(
+        p_ids,
+        intr_shapef,
+        intr_shapef_grad,
+        p_masses, p_volumes, p_velocities, p_forces, p_stresses):
         
-        intr_masses2 = p_masses.at[p_ids].get()
-        # intr_masses = p_masses.take(int_hashes, axis=0, mode="fill", fill_value=0.0)
-        return intr_masses2
+        intr_masses = p_masses.at[p_ids].get(indices_are_sorted=True, unique_indices=True)
+        intr_volumes = p_volumes.at[p_ids].get(indices_are_sorted=True, unique_indices=True)
+        intr_velocities = p_velocities.at[p_ids].get(indices_are_sorted=True, unique_indices=True)
+        intr_ext_forces = p_forces.at[p_ids].get(indices_are_sorted=True, unique_indices=True)
+        intr_stresses = p_stresses.at[p_ids].get(indices_are_sorted=True, unique_indices=True)
+        
+        scaled_mass = intr_shapef*intr_masses
+        scaled_moments = scaled_mass*intr_velocities
+        scaled_ext_force = scaled_mass*intr_ext_forces
+
+        scaled_int_force = -1.0*intr_volumes*intr_stresses@intr_shapef_grad
+
+        scaled_total_force = scaled_int_force[:2,0] + scaled_ext_force
+
+        return scaled_mass,scaled_moments,scaled_total_force
     
-    
-    intr_masses2 = vmap_p2g(p_ids, particles.masses)
-    
-    # jax.testing.assert_allclose(intr_masses, intr_masses2)
-    # return nodes
-    return intr_masses2.reshape(-1, 1, 1), intr_masses
+    scaled_mass,scaled_moments,scaled_total_force = vmap_p2g(p_ids,
+                            intr_shapef.reshape(-1,1),
+                            intr_shapef_grad,
+                            particles.masses,
+                            particles.volumes,
+                            particles.velocities,
+                            particles.forces,
+                            particles.stresses
+                            )
+ 
+    # # node (reshape) and gather interactions
+    nodes_masses = nodes.masses.at[shapefunctions.intr_hashes,].add(scaled_mass.reshape(-1), mode="drop")
+
+    nodes_moments = nodes.moments.at[shapefunctions.intr_hashes].add(scaled_moments.reshape(-1, 2), mode="drop")
+
+    nodes_forces = (
+        jnp.zeros_like(nodes.moments_nt)
+        .at[shapefunctions.intr_hashes]
+        .add(scaled_total_force.reshape(-1, 2), mode="drop")
+    )
+
+    # integrate node moments
+    nodes_moments_nt = nodes_moments + nodes_forces * dt
+
+    return nodes.replace(
+        masses=nodes_masses,
+        moments=nodes_moments,
+        moments_nt=nodes_moments_nt,
+    )
 
 @jax.jit
 def g2p(
     nodes: Nodes,
     particles: Particles,
-    shapefunctions: Interactions,
+    shapefunctions: ShapeFunction,
     alpha: jnp.float32,
     dt: jnp.float32,
 ) -> Particles:
@@ -255,7 +292,7 @@ class USL(Solver):
         cls: Self,
         particles: Particles,
         nodes: Nodes,
-        shapefunctions: Interactions,
+        shapefunctions: ShapeFunction,
         materials: List[Material],
         forces: List[Forces] = None,
         alpha: jnp.float32 = 0.99,
@@ -267,7 +304,7 @@ class USL(Solver):
             cls (Self): self reference.
             particles (Particles): Particles in the simulation.
             nodes (Nodes): Nodes in the simulation.
-            shapefunctions (Interactions): Shape functions in the simulation, e.g., `LinearShapeFunction`.
+            shapefunctions (ShapeFunction): Shape functions in the simulation, e.g., `LinearShapeFunction`.
             materials (List[Material]): List of materials in the simulation, e.g., `LinearIsotropicElastic`.
             forces (List[Force], optional): List of forces. Defaults to None.
             alpha (jnp.float32, optional): FLIP-PIC ratio. Defaults to 0.99.
