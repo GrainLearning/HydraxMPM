@@ -15,6 +15,7 @@ import jax.numpy as jnp
 from flax import struct
 from typing_extensions import Self
 
+from ..core.nodes import Nodes
 
 @struct.dataclass
 class ShapeFunction:
@@ -34,15 +35,24 @@ class ShapeFunction:
     intr_shapef: jax.Array
     intr_shapef_grad: jax.Array
     intr_hashes: jax.Array
+    intr_ids: jax.Array
     stencil: jax.Array
 
-    @partial(jax.vmap, in_axes=(None,0, None, None, None), out_axes=(0, 0, 0))
-    def vmap_get_interactions(
+    def set_boundary_nodes(self: Self, nodes: Nodes) -> Nodes:
+        return nodes
+
+    @partial(jax.vmap,
+              in_axes=(None,0, None, None, None, None, None), 
+              out_axes=(0, 0)
+              )
+    def vmap_intr(
         self: Self,
+        intr_id: jax.Array,
         position: jax.Array,
         origin: jax.Array,
         inv_node_spacing: jnp.float32,
         grid_size: jnp.int32,
+        dim: jnp.int32
     ) -> Tuple[jax.Array, jax.Array]:
         """Vectorized mapping of particle-node pair interactions.
 
@@ -65,27 +75,26 @@ class ShapeFunction:
         stencil_size, dim = self.stencil.shape
 
         # Solution procedure:
+
+        # 0. Get particle and stencil ids
+        particle_id = (intr_id/stencil_size).astype(jnp.int32)
+        stencil_id = (intr_id%stencil_size).astype(jnp.int16)
+
         # 1. Calculate the relative position of the particle to the node.
-        rel_pos = (position - origin) * inv_node_spacing
+        particle_pos = position.at[particle_id].get()
+        rel_pos =  (particle_pos - origin)*inv_node_spacing
 
-        # 2. Calculate the particle-node pair interactions (by repeating particle for each stencil point).
-        repeat_rel_pos = jnp.tile(rel_pos, (stencil_size, 1))
+        # 2. Calculate particle-node pair interaction distances.
+        stencil_pos= self.stencil.at[stencil_id].get()
+        intr_n_pos = jnp.floor(rel_pos) + stencil_pos
+        
+        intr_dist = rel_pos - intr_n_pos
 
-        # 3. Calculate particle-node pair interaction distances.
-        intr_n_pos = jnp.floor(repeat_rel_pos) + self.stencil
-        intr_dist = repeat_rel_pos - intr_n_pos
+        if dim == 1:
+            intr_hashes = intr_n_pos.astype(jnp.int32)
+        elif dim ==2:
+            intr_hashes = (intr_n_pos[0] + intr_n_pos[1] * grid_size[0]).astype(jnp.int32)
+        else:
+            intr_hashes = (intr_n_pos[0] + intr_n_pos[1] * grid_size[0] + intr_n_pos[2] * grid_size[0] * grid_size[1]).astype(jnp.int32)
 
-        # 4. Calculate particle-node pair hash ids.
-        intr_hashes = jax.lax.switch(
-            dim-1,
-            (lambda pos,grid: pos.astype(jnp.int32),
-            lambda pos,grid: (pos[:, 0] + pos[:, 1] * grid[0]).astype(jnp.int32),
-            lambda pos,grid: (pos[:, 0] + pos[:, 1] * grid[0] + pos[:, 2] * grid[0] * grid[1]).astype(jnp.int32)
-            ),
-            (intr_n_pos,grid_size)
-        )
-
-        # 5. Return the particle-node pair interactions.
-        # shape for intr_dist (after vmap) is (num_particles, stencil_size, dim),
-        # (num_particles, stencil_size) for hashes
         return intr_dist, intr_hashes

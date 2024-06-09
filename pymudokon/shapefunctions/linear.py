@@ -38,13 +38,14 @@ class LinearShapeFunction(ShapeFunction):
             stencil = jnp.array(
                 [[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]]
             )
-
         stencil_size = stencil.shape[0]
-
+        
+        intr_ids = jnp.arange(num_particles*stencil_size).astype(jnp.int32)
         return cls(
+            intr_ids = intr_ids,
             intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            intr_shapef=jnp.zeros((num_particles, stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jnp.zeros((num_particles, stencil_size, dim), dtype=jnp.float32),
+            intr_shapef=jnp.zeros((num_particles*stencil_size), dtype=jnp.float32),
+            intr_shapef_grad=jnp.zeros((num_particles*stencil_size, dim), dtype=jnp.float32),
             stencil=stencil,
         )
 
@@ -68,33 +69,28 @@ class LinearShapeFunction(ShapeFunction):
 
         # 1. Calculate the particle-node pair interactions
         # see `ShapeFunction class` for more details
-        intr_dist, intr_hashes = self.vmap_interactions(
+        intr_dist, intr_hashes = self.vmap_intr(
+            self.intr_ids,
             particles.positions,
             nodes.origin,
             nodes.inv_node_spacing,
             nodes.grid_size,
+            dim
         )
-
-        # 2. Reshape arrays to be batched
-        intr_dist = intr_dist.reshape(-1, dim, 1)
-        intr_hashes = intr_hashes.reshape(-1)
 
         # 3. Calculate the shape functions
-        intr_shapef = self.vmap_linear_shapefunction(
+        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(
             intr_dist, nodes.inv_node_spacing
         )
-
-        # 4. Calculate the shape function gradients
-        intr_shapef_grad = jax.grad(self.vmap_linear_shapefunction)(
-            intr_dist, nodes.inv_node_spacing
-        )
-
+        
         return self.replace(
             intr_shapef=intr_shapef,
-            intr_shapef_grad=intr_shapef_grad)
+            intr_shapef_grad=intr_shapef_grad,
+            intr_hashes=intr_hashes
+            )
 
-    @partial(jax.vmap, in_axes=(None,0, None))
-    def vmap_linear_shapefunction(
+    @partial(jax.vmap, in_axes=(None,0, None), out_axes=(0))
+    def vmap_intr_shp(
         self: Self,
         intr_dist: Array,
         inv_node_spacing: jnp.float32,
@@ -113,18 +109,12 @@ class LinearShapeFunction(ShapeFunction):
             Tuple[Array, Array]:
                 Shape function and its gradient.
         """
-        num_interactions, dim, _ = intr_dist.shape
 
         abs_intr_dist = jnp.abs(intr_dist)
         basis = jnp.where(abs_intr_dist < 1.0, 1.0 - abs_intr_dist, 0.0)
+        dbasis = jnp.where(abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0)
 
-        intr_shapef = jax.lax.switch(
-            dim-1,
-            lambda _: basis, #1D
-            lambda _: jnp.expand_dims(basis[0, :] * basis[1, :], axis=1), #2D
-            lambda _:  jnp.expand_dims(basis[0, :] * basis[1, :] * basis[2, :], axis=1) #3D
-        )
+        intr_shapef = jnp.prod(basis)
+        intr_shapef_grad = (dbasis * jnp.roll(basis, shift=-1))
 
-        # shapes of returned array are
-        # (num_particles*stencil_size, 1, 1)
-        return intr_shapef
+        return intr_shapef, intr_shapef_grad

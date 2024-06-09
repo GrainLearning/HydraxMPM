@@ -174,9 +174,10 @@ class LinearIsotropicElastic(Material):
         s = 2.0 * G * eps_e_d
 
         # pad for 3D stress tensor
-        if dim == 2:
+        if dim == 1:
             s = jnp.pad(s, ((0, 1), (0, 1)), mode="constant")
-
+        elif dim ==2:
+            s = jnp.pad(s, ((0, 1), (0, 1)), mode="constant")
 
         p = K * eps_e_v * jnp.eye(3)
 

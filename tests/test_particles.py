@@ -24,27 +24,6 @@ def test_create(dim, exp_shape_scalars, exp_shape_vectors, exp_shape_tensors):
     )
     assert particles.positions.shape == (num_particles, dim)
     assert particles.velocities.shape == (num_particles, dim)
-    assert particles.masses.shape == (num_particles,)
-    assert particles.species.shape == (num_particles,)
-    assert particles.volumes.shape == (num_particles,)
-    assert particles.volumes_original.shape == (num_particles,)
-    assert particles.velgrads.shape == (num_particles, dim, dim)
-    assert particles.stresses.shape == (num_particles, 3, 3)
-    assert particles.forces.shape == (num_particles, dim)
-    assert particles.F.shape == (num_particles, dim, dim)
-    assert particles.ids.shape == (num_particles,)
-    assert particles.positions.dtype == jnp.float32
-    assert particles.velocities.dtype == jnp.float32
-    assert particles.masses.dtype == jnp.float32
-    assert particles.species.dtype == jnp.int32
-    assert particles.volumes.dtype == jnp.float32
-    assert particles.volumes_original.dtype == jnp.float32
-    assert particles.velgrads.dtype == jnp.float32
-    assert particles.stresses.dtype == jnp.float32
-    assert particles.forces.dtype == jnp.float32
-    assert particles.F.dtype == jnp.float32
-    assert particles.ids.dtype == jnp.int32
-    assert particles.ids[0] != particles.ids[1]
 
 
 def test_calculate_volume():

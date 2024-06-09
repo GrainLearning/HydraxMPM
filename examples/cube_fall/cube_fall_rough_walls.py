@@ -1,5 +1,7 @@
 """Two cubes falling featuring rough domain walls, gravity and cubic shape functions"""
 #%%
+
+import timeit
 import jax.numpy as jnp
 import numpy as np
 import jax
@@ -13,7 +15,7 @@ particles_per_cell = 2
 cell_size = (1 / 120) * domain_size
 
 output_steps = 1000
-total_steps = 100000
+total_steps = 10000
 
 particle_spacing = cell_size / particles_per_cell
 
@@ -72,7 +74,12 @@ def save_particles(package):
 
 print("Running simulation")
 
+start = timeit.default_timer()
+print("The start time is :", start)
 usl = usl.solve(num_steps=total_steps, output_step=output_steps, output_function=save_particles)
+
+print("The difference of time is :", 
+              timeit.default_timer() - start)
 
 
 jax.make_jaxpr(usl.update)()

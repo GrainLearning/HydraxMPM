@@ -126,7 +126,7 @@ class DirichletBox:
         self: Self,
         nodes: Nodes,
         particles: Particles = None,
-        shape_function: ShapeFunction = None,
+        shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
         """Apply the force on the nodes."""

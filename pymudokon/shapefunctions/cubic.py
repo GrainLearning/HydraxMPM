@@ -12,12 +12,13 @@ from typing import Tuple
 
 from flax import struct
 import jax
+import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
 from .shapefunction import ShapeFunction
 from ..core.nodes import Nodes
-
+from ..core.particles import Particles
 
 from functools import partial
 
@@ -143,11 +144,9 @@ class CubicShapeFunction(ShapeFunction):
         stencil_size = stencil.shape[0]
 
         return cls(
-            intr_dist=jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jax.numpy.float32),
-            intr_bins=jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jax.numpy.int32),
             intr_hashes=jax.numpy.zeros((num_particles * stencil_size), dtype=jax.numpy.int32),
-            intr_shapef=jax.numpy.zeros((num_particles, stencil_size), dtype=jax.numpy.float32),
-            intr_shapef_grad=jax.numpy.zeros((num_particles, stencil_size, dim), dtype=jax.numpy.float32),
+            intr_shapef=jax.numpy.zeros((num_particles*stencil_size,1,1), dtype=jnp.float32),
+            intr_shapef_grad=jax.numpy.zeros((num_particles*stencil_size, dim,1), dtype=jnp.float32),
             stencil=stencil,
         )
 
@@ -205,6 +204,7 @@ class CubicShapeFunction(ShapeFunction):
     def calculate_shapefunction(
         self: Self,
         nodes: Nodes,
+        particles: Particles,
     ) -> Self:
         """Top level function to calculate the shape functions.
 
@@ -222,25 +222,58 @@ class CubicShapeFunction(ShapeFunction):
         # repeat for each dimension
         intr_species = nodes.species.take(self.intr_hashes, axis=0).reshape(-1).repeat(dim)
 
-        basis, dbasis = self.vmap_cubic_shapefunction(
-            self.intr_dist.reshape(-1), intr_species, nodes.inv_node_spacing
+
+        # 1. Calculate the particle-node pair interactions
+        # see `ShapeFunction class` for more details
+        intr_dist, intr_hashes = self.vmap_get_interactions(
+            particles.positions,
+            nodes.origin,
+            nodes.inv_node_spacing,
+            nodes.grid_size,
+            dim
         )
+        # 2. Reshape arrays to be batched
+        intr_dist = intr_dist.reshape(-1, dim, 1)
+        intr_hashes = intr_hashes.reshape(-1)
+
+        # 3. Calculate the shape functions
+        basis, dbasis = self.vmap_cubic_shapefunction(
+            intr_dist.reshape(-1), intr_species, nodes.inv_node_spacing
+        )
+        
         basis = basis.reshape(-1, dim)
         dbasis = dbasis.reshape(-1, dim)
+        if dim ==1:
+            intr_shapef = basis.reshape(-1, 1, 1)
+            intr_shapef_grad = dbasis.reshape(-1, dim, 1)
 
-        N0 = basis[:, 0]
-        N1 = basis[:, 1]
-        dN0 = dbasis[:, 0]
-        dN1 = dbasis[:, 1]
+        if dim ==2:
+            N0 = basis[:, 0]
+            N1 = basis[:, 1]
+            dN0 = dbasis[:, 0]
+            dN1 = dbasis[:, 1]
 
-        intr_shapef = (N0 * N1).reshape(-1, 1, 1)
+            intr_shapef = (N0 * N1).reshape(-1, 1, 1)
 
-        intr_shapef_grad = jax.numpy.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
-
+            intr_shapef_grad = jax.numpy.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
+        else:
+            N0 = basis[:, 0]
+            N1 = basis[:, 1]
+            N2 =  basis[:, 2]
+            dN0 = dbasis[:, 0]
+            dN1 = dbasis[:, 1]
+            dN2 = dbasis[:, 2]
+            intr_shapef = (N0 * N1* N2).reshape(-1, 1, 1)
+            intr_shapef_grad = jax.numpy.array([
+                dN0 * N1 * dN2, 
+                dN1 * N0 * dN2,
+                dN2 * N1 * dN0,
+                ]).T.reshape(-1, dim, 1)
+            
         return self.replace(
             intr_shapef=intr_shapef,
             intr_shapef_grad=intr_shapef_grad,
-        )
+            intr_hashes=intr_hashes)
 
     def validate(self: Self, solver) -> Self:
         """Verify the shape functions and gradients.

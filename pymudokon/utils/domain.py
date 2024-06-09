@@ -29,8 +29,6 @@ def discretize(
 
     nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction = shapefunction.get_interactions(particles, nodes)
-
-    shapefunction = shapefunction.calculate_shapefunction(nodes)
+    shapefunction = shapefunction.calculate_shapefunction(nodes,particles)
 
     return particles, nodes, shapefunction
