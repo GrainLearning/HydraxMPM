@@ -17,6 +17,7 @@ from typing_extensions import Self
 
 from ..core.nodes import Nodes
 
+
 @struct.dataclass
 class ShapeFunction:
     """Interaction state for the particle and node pairs.
@@ -41,10 +42,7 @@ class ShapeFunction:
     def set_boundary_nodes(self: Self, nodes: Nodes) -> Nodes:
         return nodes
 
-    @partial(jax.vmap,
-              in_axes=(None,0, None, None, None, None, None), 
-              out_axes=(0, 0)
-              )
+    @partial(jax.vmap, in_axes=(None, 0, None, None, None, None, None), out_axes=(0, 0))
     def vmap_intr(
         self: Self,
         intr_id: jax.Array,
@@ -52,7 +50,7 @@ class ShapeFunction:
         origin: jax.Array,
         inv_node_spacing: jnp.float32,
         grid_size: jnp.int32,
-        dim: jnp.int32
+        dim: jnp.int32,
     ) -> Tuple[jax.Array, jax.Array]:
         """Vectorized mapping of particle-node pair interactions.
 
@@ -77,24 +75,26 @@ class ShapeFunction:
         # Solution procedure:
 
         # 0. Get particle and stencil ids
-        particle_id = (intr_id/stencil_size).astype(jnp.int32)
-        stencil_id = (intr_id%stencil_size).astype(jnp.int16)
+        particle_id = (intr_id / stencil_size).astype(jnp.int32)
+        stencil_id = (intr_id % stencil_size).astype(jnp.int16)
 
         # 1. Calculate the relative position of the particle to the node.
-        particle_pos = position.at[particle_id].get()
-        rel_pos =  (particle_pos - origin)*inv_node_spacing
+        particle_pos = position.at[particle_id].get(indices_are_sorted=True)
+        rel_pos = (particle_pos - origin) * inv_node_spacing
 
         # 2. Calculate particle-node pair interaction distances.
-        stencil_pos= self.stencil.at[stencil_id].get()
+        stencil_pos = self.stencil.at[stencil_id].get(indices_are_sorted=True, unique_indices=True)
         intr_n_pos = jnp.floor(rel_pos) + stencil_pos
-        
+
         intr_dist = rel_pos - intr_n_pos
 
         if dim == 1:
             intr_hashes = intr_n_pos.astype(jnp.int32)
-        elif dim ==2:
+        elif dim == 2:
             intr_hashes = (intr_n_pos[0] + intr_n_pos[1] * grid_size[0]).astype(jnp.int32)
         else:
-            intr_hashes = (intr_n_pos[0] + intr_n_pos[1] * grid_size[0] + intr_n_pos[2] * grid_size[0] * grid_size[1]).astype(jnp.int32)
+            intr_hashes = (
+                intr_n_pos[0] + intr_n_pos[1] * grid_size[0] + intr_n_pos[2] * grid_size[0] * grid_size[1]
+            ).astype(jnp.int32)
 
         return intr_dist, intr_hashes

@@ -1,18 +1,16 @@
 """Implementation, state and functions for isotropic linear elastic material."""
 
-import dataclasses
+from functools import partial
 from typing import Tuple
-from flax import struct
+
 import jax
 import jax.numpy as jnp
+from flax import struct
 from jax import Array
 from typing_extensions import Self
 
 from ..core.particles import Particles
 from .material import Material
-
-
-from functools import partial
 
 
 @struct.dataclass
@@ -38,7 +36,9 @@ class LinearIsotropicElastic(Material):
     eps_e: Array
 
     @classmethod
-    def create(cls: Self, E: jnp.float32, nu: jnp.float32, num_particles, dim: jnp.int16 = 3, stress_ref:Array=None) -> Self:
+    def create(
+        cls: Self, E: jnp.float32, nu: jnp.float32, num_particles, dim: jnp.int16 = 3, stress_ref: Array = None
+    ) -> Self:
         """Initialize the isotropic linear elastic material.
 
         Args:
@@ -60,10 +60,10 @@ class LinearIsotropicElastic(Material):
         G = E / (2.0 * (1.0 + nu))
         K = E / (3.0 * (1.0 - 2.0 * nu))
         eps_e = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
-        
+
         if stress_ref is None:
             stress_ref = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)
-        return cls(E=E, nu=nu, G=G, K=K, eps_e=eps_e,stress_ref=stress_ref)
+        return cls(E=E, nu=nu, G=G, K=K, eps_e=eps_e, stress_ref=stress_ref)
 
     @jax.jit
     def update_stress(
@@ -95,9 +95,7 @@ class LinearIsotropicElastic(Material):
 
         deps = 0.5 * (vel_grad + vel_grad_T) * dt
 
-        stress, eps_e = self.vmap_update(
-            self.eps_e, deps, self.stress_ref, self.G, self.K
-        )
+        stress, eps_e = self.vmap_update(self.eps_e, deps, self.stress_ref, self.G, self.K)
 
         material = self.replace(eps_e=eps_e)
 
@@ -132,13 +130,13 @@ class LinearIsotropicElastic(Material):
             >>> material = material.update_stress_benchmark(jnp.eye(2), 0.5, 0.001)
         """
         deps = strain_rate * dt
-        stress, eps_e = self.vmap_update(
-            self.eps_e, deps, self.stress_ref, self.G, self.K
-        )
+        stress, eps_e = self.vmap_update(self.eps_e, deps, self.stress_ref, self.G, self.K)
         return stress, self.replace(eps_e=eps_e)
 
     @partial(jax.vmap, in_axes=(None, 0, 0, 0, None, None), out_axes=(0, 0))
-    def vmap_update(self:Self, eps_e_prev: Array, deps: Array, stress_ref: Array, G: jnp.float32, K: jnp.float32) -> Tuple[Array, Array]:
+    def vmap_update(
+        self: Self, eps_e_prev: Array, deps: Array, stress_ref: Array, G: jnp.float32, K: jnp.float32
+    ) -> Tuple[Array, Array]:
         """Parallelized stress update for each particle.
 
         Tensors are mapped per particle via vmap (num_particles, dim) -> (dim,).
@@ -176,14 +174,14 @@ class LinearIsotropicElastic(Material):
         # pad for 3D stress tensor
         if dim == 1:
             s = jnp.pad(s, ((0, 1), (0, 1)), mode="constant")
-        elif dim ==2:
+        elif dim == 2:
             s = jnp.pad(s, ((0, 1), (0, 1)), mode="constant")
 
         p = K * eps_e_v * jnp.eye(3)
 
         p_ref = -jnp.trace(stress_ref) / dim
         s_ref = stress_ref + p_ref * jnp.eye(3)
-        
+
         p = p + p_ref
 
         s = s + s_ref

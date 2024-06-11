@@ -1,9 +1,9 @@
 """Unit tests for the linear shape functions."""
 
 import jax.numpy as jnp
+import numpy as np
 
 import pymudokon as pm
-import numpy as np
 
 
 def test_create():

@@ -126,7 +126,7 @@ class Particles:
             forces=forces,
             F=F,
             original_density=original_density,
-            ids = jax.numpy.arange(_num_particles)
+            ids=jax.numpy.arange(_num_particles),
         )
 
     @jax.jit

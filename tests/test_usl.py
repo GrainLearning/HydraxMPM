@@ -1,8 +1,9 @@
 """Unit tests for the USL Solver."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
-import jax
+
 import pymudokon as pm
 
 
@@ -65,8 +66,9 @@ def test_p2g():
     expected_node_moments = jnp.array([[0.27, 0.27], [0.03, 0.03], [0.09, 0.09], [0.01, 0.01]])
     np.testing.assert_allclose(nodes.moments, expected_node_moments, rtol=1e-3)
 
-def test_p2g_3D():
 
+def test_p2g_3d():
+    """Unit test to perform particle-to-grid transfer in 3D."""
     particles = pm.Particles.create(
         positions=jnp.array([[0.1, 0.25, 0.25], [0.1, 0.25, 0.6]]),
         velocities=jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
@@ -98,19 +100,22 @@ def test_p2g_3D():
     # note these values have not been verified analytically
     expected_mass = jnp.array([0.13162498, 0.014625, 0.04387499, 0.004875, 0.13837501, 0.015375, 0.046125, 0.005125])
     expected_node_moments = jnp.array(
-        [[0.13162498, 0.13162498, 0.13162498],
-        [0.014625,   0.014625,   0.014625  ],
-        [0.04387499, 0.04387499, 0.04387499],
-        [0.004875,   0.004875,   0.004875  ],
-        [0.13837501, 0.13837501, 0.13837501],
-        [0.015375,   0.015375,   0.015375  ],
-        [0.046125,   0.046125,   0.046125  ],
-        [0.005125,   0.005125,   0.005125  ]]
+        [
+            [0.13162498, 0.13162498, 0.13162498],
+            [0.014625, 0.014625, 0.014625],
+            [0.04387499, 0.04387499, 0.04387499],
+            [0.004875, 0.004875, 0.004875],
+            [0.13837501, 0.13837501, 0.13837501],
+            [0.015375, 0.015375, 0.015375],
+            [0.046125, 0.046125, 0.046125],
+            [0.005125, 0.005125, 0.005125],
+        ]
     )
 
     np.testing.assert_allclose(nodes.masses, expected_mass, rtol=1e-3)
 
     np.testing.assert_allclose(nodes.moments, expected_node_moments, rtol=1e-3)
+
 
 def test_g2p():
     """Unit test to perform grid-to-particle transfer."""
@@ -256,11 +261,12 @@ def test_solve():
     usl = pm.USL.create(
         particles=particles, nodes=nodes, materials=[material], shapefunctions=shapefunctions, alpha=0.9, dt=0.001
     )
-    
+
     @jax.tree_util.Partial
     def some_callback(package):
         step, usl = package  # unused intentionally
 
-    usl = usl.solve(num_steps=10,output_step=2, output_function=some_callback)
+    usl = usl.solve(num_steps=10, output_step=2, output_function=some_callback)
+
 
 test_g2p()

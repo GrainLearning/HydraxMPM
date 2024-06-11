@@ -1,21 +1,17 @@
 """Gravity force on Nodes."""
 
-import dataclasses
 from functools import partial
 from typing import Tuple
 
-from flax import struct
 import jax
 import jax.numpy as jnp
+from flax import struct
 from jax import Array
 from typing_extensions import Self
 
-from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
-
-
-
+from ..shapefunctions.shapefunction import ShapeFunction
 
 
 @struct.dataclass
@@ -75,9 +71,9 @@ class Gravity:
             moments_nt=moments_nt,
         ), self
 
-    @partial(jax.jit, static_argnames=["self","gravity"])
+    @partial(jax.jit, static_argnames=["self", "gravity"])
     def apply_gravity(
-        self,moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32
+        self, moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32
     ) -> Tuple[Array, Array]:
         """Apply gravity on the nodes.
 

@@ -1,14 +1,13 @@
 """Base class for single integration point benchmark module"""
 
-
-import jax.numpy as jnp
+from typing import Callable
 
 import jax
-
+import jax.numpy as jnp
 from jax import Array
 
-from typing import Callable
 from ..materials.material import Material
+
 
 @jax.jit
 def simple_shear(
@@ -16,9 +15,9 @@ def simple_shear(
     eps_path: Array,
     volumes: Array,
     dt: jnp.float32 | Array,
-    output_step= int,
-    output_function:Callable =None,
-)-> Material:
+    output_step=int,
+    output_function: Callable = None,
+) -> Material:
     """Perfom a simple shear benchmark a material.
 
     Args:
@@ -37,37 +36,28 @@ def simple_shear(
     eps_inc_target = jnp.zeros((num_benchmarks, 3, 3))
     eps_inc_prev = jnp.zeros((num_benchmarks, 3, 3))
 
-    def body_loop(step,carry):
-        eps_inc_prev, eps_inc_target, material, volumes, dt,output_function = carry
+    def body_loop(step, carry):
+        eps_inc_prev, eps_inc_target, material, volumes, dt, output_function = carry
         eps_inc_target = eps_inc_target.at[:, 0, 1].add(eps_path[:, step])
-        
+
         strain_increment = eps_inc_target - eps_inc_prev
-        
+
         strain_rate = strain_increment / dt
-        
+
         stress, material = material.update_stress_benchmark(strain_rate, volumes, dt)
-        
+
         eps_inc_prev = eps_inc_target
-        
+
         jax.lax.cond(
             step % output_step == 0,
-            lambda x: jax.experimental.io_callback(output_function, None,x),
+            lambda x: jax.experimental.io_callback(output_function, None, x),
             lambda x: None,
-            (step, stress, material, eps_inc_target, num_steps, strain_rate, dt)
+            (step, stress, material, eps_inc_target, num_steps, strain_rate, dt),
         )
-        return (
-            eps_inc_prev,
-            eps_inc_target,
-            material,
-            volumes,
-            dt,
-            output_function
-        )
-    
+        return (eps_inc_prev, eps_inc_target, material, volumes, dt, output_function)
+
     package = jax.lax.fori_loop(
-        0,
-        num_steps,
-        body_loop,
-        (eps_inc_prev, eps_inc_target, material, volumes, dt,output_function))
-    
+        0, num_steps, body_loop, (eps_inc_prev, eps_inc_target, material, volumes, dt, output_function)
+    )
+
     return material

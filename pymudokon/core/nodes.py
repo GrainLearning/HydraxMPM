@@ -38,7 +38,6 @@ class Nodes:
     moments: jax.Array
     moments_nt: jax.Array
     species: jax.Array
-    ids_grid: jax.Array
 
     @classmethod
     def create(
@@ -88,7 +87,7 @@ class Nodes:
             moments=jax.numpy.zeros((num_nodes_total, dim)).astype(jax.numpy.float32),
             moments_nt=jax.numpy.zeros((num_nodes_total, dim)).astype(jax.numpy.float32),
             species=jax.numpy.zeros(num_nodes_total).astype(jax.numpy.int32),
-            ids_grid=jax.numpy.arange(num_nodes_total).reshape(grid_size).astype(jax.numpy.int32),
+            # ids_grid=jax.numpy.arange(num_nodes_total).reshape(grid_size).astype(jax.numpy.int32),
         )
 
     @jax.jit

@@ -1,19 +1,17 @@
 """Base solve module."""
 
-
 from typing import Callable, List
 
-from flax import struct
 import jax
 import jax.numpy as jnp
+from flax import struct
 from typing_extensions import Self
 
-
-from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..forces.forces import Forces
 from ..materials.material import Material
+from ..shapefunctions.shapefunction import ShapeFunction
 
 
 @struct.dataclass
@@ -28,6 +26,7 @@ class Solver:
         forces (List[int]): List of forces in the simulation.
         dt (jnp.float32): Time step of the simulation.
     """
+
     particles: Particles
     nodes: Nodes
     materials: List[Material]
@@ -50,7 +49,6 @@ class Solver:
         Returns:
             Solver: Updated solver
         """
-        
         usl = jax.lax.fori_loop(
             0,
             num_steps,
@@ -86,19 +84,17 @@ class Solver:
             >>> usl = usl.solve(num_steps=10, output_function=some_callback)
         """
 
-
         def body_loop(step, solver):
-            
             solver = solver.update()
-            
+
             jax.lax.cond(
                 step % output_step == 0,
-                lambda x: jax.experimental.io_callback(output_function, None,x),
+                lambda x: jax.experimental.io_callback(output_function, None, x),
                 lambda x: None,
-                (step, solver)
+                (step, solver),
             )
             return solver
-            
+
         solver = jax.lax.fori_loop(
             0,
             num_steps,

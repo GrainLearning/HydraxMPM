@@ -16,7 +16,6 @@ The module contains the following main components:
 
 """
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -34,6 +33,7 @@ def test_create():
     np.testing.assert_allclose(material.K, 555.5555555555557)
     np.testing.assert_allclose(material.eps_e, jnp.zeros((2, 3, 3), dtype=jnp.float32))
 
+
 def test_vmap_update():
     """Test the vectorized update of the isotropic linear elastic material."""
     # 2D
@@ -41,9 +41,7 @@ def test_vmap_update():
 
     transform = jnp.eye(2, dtype=jnp.float32) * 0.001
     deps = jnp.stack([transform, transform])
-    stress, eps_e = material.vmap_update(
-        material.eps_e,  deps, jnp.zeros((2,3,3)), material.G, material.K
-    )
+    stress, eps_e = material.vmap_update(material.eps_e, deps, jnp.zeros((2, 3, 3)), material.G, material.K)
     np.testing.assert_allclose(
         stress,
         jnp.array(
@@ -74,14 +72,12 @@ def test_vmap_update():
     # 3D
 
     material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=3)
-    
+
     transform = jnp.eye(3, dtype=jnp.float32) * 0.001
-    
+
     deps = jnp.stack([transform, transform])
-    
-    stress, eps_e = material.vmap_update(
-        material.eps_e,  deps, jnp.zeros((2,3,3)), material.G, material.K
-    )
+
+    stress, eps_e = material.vmap_update(material.eps_e, deps, jnp.zeros((2, 3, 3)), material.G, material.K)
     np.testing.assert_allclose(
         stress,
         jnp.array(
@@ -104,12 +100,13 @@ def test_vmap_update():
         eps_e,
         jnp.array(
             [
-                [[0.001, 0.0, 0.0], [0.0, 0.001, 0.0], [0.0, 0.0, 0.001] ],
-                [[0.001, 0.0, 0.0], [0.0, 0.001, 0.0], [0.0, 0.0, 0.001] ]
+                [[0.001, 0.0, 0.0], [0.0, 0.001, 0.0], [0.0, 0.0, 0.001]],
+                [[0.001, 0.0, 0.0], [0.0, 0.001, 0.0], [0.0, 0.0, 0.001]],
             ]
         ),
-    rtol=1e-3
+        rtol=1e-3,
     )
+
 
 def test_update_stress():
     """Test the update of stress and strain for all particles."""
@@ -123,6 +120,7 @@ def test_update_stress():
 
     # Runs!
 
+
 def test_update_benchmark():
     """Test the vectorized update of the isotropic linear elastic material."""
     material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
@@ -133,4 +131,3 @@ def test_update_benchmark():
     volumes = np.ones(2)
     stress, material = material.update_stress_benchmark(strain_rate, volumes, dt)
     # Runs!
-

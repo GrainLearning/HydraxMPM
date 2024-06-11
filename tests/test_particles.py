@@ -1,5 +1,4 @@
 """Unit tests for the Particles dataclass."""
-import pytest
 
 import jax.numpy as jnp
 import numpy as np

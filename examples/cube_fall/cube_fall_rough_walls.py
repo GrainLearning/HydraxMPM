@@ -9,6 +9,7 @@ import pymudokon as pm
 
 import pyvista as pv
 
+# jax.config.update('jax_platform_name', 'cpu')
 domain_size = 10
 
 particles_per_cell = 2
@@ -66,9 +67,9 @@ usl = pm.USL.create(
 @jax.tree_util.Partial
 def save_particles(package):
     steps, usl = package
-    positions = usl.particles.positions
-    mean_velocity = jnp.mean(usl.particles.velocities, axis=1)
-    jnp.savez(f"output/particles_{steps}", positions=positions, mean_velocity=mean_velocity)
+    # positions = usl.particles.positions
+    # mean_velocity = jnp.mean(usl.particles.velocities, axis=1)
+    # jnp.savez(f"output/particles_{steps}", positions=positions, mean_velocity=mean_velocity)
     print(f"output {steps}", end="\r")
 
 

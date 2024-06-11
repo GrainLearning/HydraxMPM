@@ -1,14 +1,14 @@
 """Module for containing base class for the material."""
 
-import dataclasses
 from typing import Tuple
-from flax import struct
 
 import jax
 import jax.numpy as jnp
+from flax import struct
 from typing_extensions import Self
 
 from ..core.particles import Particles
+
 
 @struct.dataclass
 class Material:

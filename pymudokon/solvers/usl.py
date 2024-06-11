@@ -4,19 +4,20 @@ References:
     - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
 """
 
+from functools import partial
 from typing import List
-from flax import struct
+
 import jax
 import jax.numpy as jnp
+from flax import struct
 from typing_extensions import Self
 
-from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..forces.forces import Forces
 from ..materials.material import Material
+from ..shapefunctions.shapefunction import ShapeFunction
 from .solver import Solver
-from functools import partial
 
 # @jax.jit
 # def p2g(
@@ -80,12 +81,12 @@ from functools import partial
 #     scaled_ext_forces = jax.lax.batch_matmul(intr_ext_forces, intr_shapef)
 #     scaled_int_forces = jax.lax.batch_matmul(intr_stresses, intr_shapef_grad)
 #     scaled_int_forces = jax.lax.batch_matmul(scaled_int_forces, -1.0 * intr_volumes)
-    
+
 #     if dim==1:
 #         scaled_total_forces = scaled_int_forces[:, :1] + scaled_ext_forces
 #     elif dim==2:
 #         scaled_total_forces = scaled_int_forces[:, :2] + scaled_ext_forces
-#     else: 
+#     else:
 #         scaled_total_forces = scaled_int_forces + scaled_ext_forces
 #     # node (reshape) and gather interactions
 
@@ -108,29 +109,28 @@ from functools import partial
 #         moments_nt=nodes_moments_nt,
 #     )
 
+
 @jax.jit
 def p2g(
-        nodes: Nodes,
-        particles: Particles,
-        shapefunctions: ShapeFunction,
-        dt: jnp.float32,
-    )-> Nodes:
-    
+    nodes: Nodes,
+    particles: Particles,
+    shapefunctions: ShapeFunction,
+    dt: jnp.float32,
+) -> Nodes:
     stencil_size, dim = shapefunctions.stencil.shape
-    
-    padding = ((0, 3 - dim))
 
-    @partial(jax.vmap, in_axes=(0,0,0))
-    def vmap_p2g(intr_id, intr_shapef,intr_shapef_grad):
+    padding = (0, 3 - dim)
 
-        particle_id = (intr_id/stencil_size).astype(jnp.int32)
+    @partial(jax.vmap, in_axes=(0, 0, 0))
+    def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad):
+        particle_id = (intr_id / stencil_size).astype(jnp.int32)
 
-        intr_masses = particles.masses.at[particle_id].get(indices_are_sorted=True, unique_indices=True)
-        intr_volumes = particles.volumes.at[particle_id].get(indices_are_sorted=True, unique_indices=True)
-        intr_velocities = particles.velocities.at[particle_id].get(indices_are_sorted=True, unique_indices=True)
-        intr_ext_forces = particles.forces.at[particle_id].get(indices_are_sorted=True, unique_indices=True)
-        intr_stresses = particles.stresses.at[particle_id].get(indices_are_sorted=True, unique_indices=True)
-        
+        intr_masses = particles.masses.at[particle_id].get()
+        intr_volumes = particles.volumes.at[particle_id].get()
+        intr_velocities = particles.velocities.at[particle_id].get()
+        intr_ext_forces = particles.forces.at[particle_id].get()
+        intr_stresses = particles.stresses.at[particle_id].get()
+
         intr_shapef_grad = jnp.pad(
             intr_shapef_grad,
             padding,
@@ -138,27 +138,23 @@ def p2g(
             constant_values=0,
         )
 
-        scaled_mass = intr_shapef*intr_masses
-        scaled_moments = scaled_mass*intr_velocities
-        scaled_ext_force = scaled_mass*intr_ext_forces
-        scaled_int_force = -1.0*intr_volumes*intr_stresses@intr_shapef_grad
+        scaled_mass = intr_shapef * intr_masses
+        scaled_moments = scaled_mass * intr_velocities
+        scaled_ext_force = scaled_mass * intr_ext_forces
+        scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
         scaled_total_force = scaled_int_force[:dim] + scaled_ext_force
 
-        return scaled_mass,scaled_moments,scaled_total_force
-    
-    scaled_mass,scaled_moments,scaled_total_force = vmap_p2g(shapefunctions.intr_ids,
-            shapefunctions.intr_shapef,
-            shapefunctions.intr_shapef_grad)
-    
+        return scaled_mass, scaled_moments, scaled_total_force
+
+    scaled_mass, scaled_moments, scaled_total_force = vmap_p2g(
+        shapefunctions.intr_ids, shapefunctions.intr_shapef, shapefunctions.intr_shapef_grad
+    )
+
     nodes_masses = nodes.masses.at[shapefunctions.intr_hashes].add(scaled_mass, mode="drop")
 
     nodes_moments = nodes.moments.at[shapefunctions.intr_hashes].add(scaled_moments, mode="drop")
 
-    nodes_forces = (
-        jnp.zeros_like(nodes.moments_nt)
-        .at[shapefunctions.intr_hashes]
-        .add(scaled_total_force, mode="drop")
-    )
+    nodes_forces = jnp.zeros_like(nodes.moments_nt).at[shapefunctions.intr_hashes].add(scaled_total_force, mode="drop")
 
     nodes_moments_nt = nodes_moments + nodes_forces * dt
     return nodes.replace(
@@ -198,27 +194,23 @@ def g2p(
     Returns:
         Particles: Updated particles
     """
-
     _, dim = shapefunctions.stencil.shape
 
-    @partial(jax.vmap, in_axes=(0,0,0))
+    @partial(jax.vmap, in_axes=(0, 0, 0))
     def vmap_intr_scatter(intr_hashes, intr_shapef, intr_shapef_grad):
         intr_masses = nodes.masses.at[intr_hashes].get()
         intr_moments = nodes.moments.at[intr_hashes].get()
         intr_moments_nt = nodes.moments_nt.at[intr_hashes].get()
 
         intr_vels = jax.lax.cond(
-            intr_masses > nodes.small_mass_cutoff,
-            lambda x: x/intr_masses,
-            lambda x: jnp.zeros_like(x),
-            intr_moments
+            intr_masses > nodes.small_mass_cutoff, lambda x: x / intr_masses, lambda x: jnp.zeros_like(x), intr_moments
         )
 
         intr_vels_nt = jax.lax.cond(
             intr_masses > nodes.small_mass_cutoff,
             lambda x: x / intr_masses,
             lambda x: jnp.zeros_like(x),
-            intr_moments_nt
+            intr_moments_nt,
         )
         intr_delta_vels = intr_vels_nt - intr_vels
 
@@ -226,24 +218,22 @@ def g2p(
 
         intr_scaled_vels_nt = intr_vels_nt * intr_shapef
 
-        intr_scaled_velgrad = intr_shapef_grad.reshape(-1,1)@intr_vels_nt.reshape(1,-1)
+        intr_scaled_velgrad = intr_shapef_grad.reshape(-1, 1) @ intr_vels_nt.reshape(1, -1)
 
         return intr_scaled_delta_vels, intr_scaled_vels_nt, intr_scaled_velgrad
-    
-    
-    @partial(jax.vmap, in_axes=(0,0,0,0,0,0,0))
+
+    @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0, 0))
     def vmap_particles_update(
-            intr_delta_vels_reshaped,
-            intr_vels_nt_reshaped,
-            intr_velgrad_reshaped,
-            p_velocities,
-            p_positions,
-            p_F,
-            p_volumes_orig,
+        intr_delta_vels_reshaped,
+        intr_vels_nt_reshaped,
+        intr_velgrad_reshaped,
+        p_velocities,
+        p_positions,
+        p_F,
+        p_volumes_orig,
     ):
         # Update particle quantities
         p_velgrads_next = jnp.sum(intr_velgrad_reshaped, axis=0)
-
 
         delta_vels = jnp.sum(intr_delta_vels_reshaped, axis=0)
         vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
@@ -251,35 +241,32 @@ def g2p(
 
         p_positions_next = p_positions + vels_nt * dt
 
-        p_F_next = p_F@(jnp.eye(dim) + p_velgrads_next * dt)
+        p_F_next = p_F @ (jnp.eye(dim) + p_velgrads_next * dt)
 
-        p_volumes_next = p_volumes_orig*jnp.linalg.det(p_F_next)
-        return p_velocities_next, p_positions_next, p_F_next, p_volumes_next
-    
+        p_volumes_next = p_volumes_orig * jnp.linalg.det(p_F_next)
+        return p_velocities_next, p_positions_next, p_F_next, p_volumes_next, p_velgrads_next
 
     intr_scaled_delta_vels, intr_scaled_vels_nt, intr_scaled_velgrad = vmap_intr_scatter(
-        shapefunctions.intr_hashes,
-        shapefunctions.intr_shapef, 
-        shapefunctions.intr_shapef_grad)
+        shapefunctions.intr_hashes, shapefunctions.intr_shapef, shapefunctions.intr_shapef_grad
+    )
 
-    p_velocities_next, p_positions_next, p_F_next, p_volumes_next = vmap_particles_update(
+    p_velocities_next, p_positions_next, p_F_next, p_volumes_next, p_velgrads_next = vmap_particles_update(
         intr_scaled_delta_vels.reshape(-1, *shapefunctions.stencil.shape),
         intr_scaled_vels_nt.reshape(-1, *shapefunctions.stencil.shape),
         intr_scaled_velgrad.reshape(-1, *shapefunctions.stencil.shape, shapefunctions.stencil.shape[1]),
         particles.velocities,
         particles.positions,
         particles.F,
-        particles.volumes_original
-        )
-    
+        particles.volumes_original,
+    )
+
     return particles.replace(
         velocities=p_velocities_next,
         positions=p_positions_next,
         F=p_F_next,
         volumes=p_volumes_next,
+        velgrads=p_velgrads_next,
     )
-
-
 
     # # Sum interactions to particles
     # particle_delta_vel_inc = jnp.sum(intr_scaled_delta_vels.reshape(-1, stencil_size, dim), axis=1)
@@ -312,6 +299,7 @@ def g2p(
     #     velgrads=particle_velgrads,
     # )
 
+
 @struct.dataclass
 class USL(Solver):
     """Explicit Update Stress Last (USL) MPM solver.
@@ -332,8 +320,8 @@ class USL(Solver):
         shapefunctions: ShapeFunction,
         materials: List[Material],
         forces: List[Forces] = None,
-        alpha: jnp.float32 = 0.99,
-        dt: jnp.float32 = 0.00001
+        alpha: jnp.float32 = 0.98,
+        dt: jnp.float32 = 0.00001,
     ) -> Self:
         """Create a USL solver.
 
@@ -380,7 +368,7 @@ class USL(Solver):
             materials=materials,
             forces=forces,
             alpha=alpha,
-            dt=dt
+            dt=dt,
         )
 
     @jax.jit
@@ -397,7 +385,7 @@ class USL(Solver):
 
         particles = self.particles.refresh()
 
-        shapefunctions = self.shapefunctions.calculate_shapefunction(nodes=nodes, particles= particles)
+        shapefunctions = self.shapefunctions.calculate_shapefunction(nodes=nodes, particles=particles)
 
         nodes = p2g(
             nodes=nodes,
@@ -408,13 +396,13 @@ class USL(Solver):
 
         # for loop is statically unrolled, may result in large compile times
         # for many materials/forces
-        # forces = []
-        # for force in self.forces:
-        #     nodes, out_force = force.apply_on_nodes_moments(
-        #         particles=particles, nodes=nodes, shapefunctions=shapefunctions, dt=self.dt
-        #     )
-        #     forces.append(out_force)
-        forces = self.forces
+        forces = []
+        for force in self.forces:
+            nodes, out_force = force.apply_on_nodes_moments(
+                particles=particles, nodes=nodes, shapefunctions=shapefunctions, dt=self.dt
+            )
+            forces.append(out_force)
+        # forces = self.forces
 
         particles = g2p(
             particles=particles,
@@ -436,5 +424,3 @@ class USL(Solver):
             forces=forces,
             shapefunctions=shapefunctions,
         )
-
-

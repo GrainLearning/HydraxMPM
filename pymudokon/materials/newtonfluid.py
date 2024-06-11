@@ -1,16 +1,16 @@
 """Constitutive model for a nearly incompressible Newtonian fluid."""
 
-import dataclasses
 from typing import Tuple
 
 import jax
 import jax.numpy as jnp
+from flax import struct
 from jax import Array
 from typing_extensions import Self
 
 from ..core.particles import Particles
 from .material import Material
-from flax import struct
+
 
 def vmap_update(
     vel_grad: Array,
@@ -21,8 +21,7 @@ def vmap_update(
     gamma: jnp.float32,
     viscosity: jnp.float32,
 ) -> Tuple[Array]:
-    """Compression is negative in this formulation.
-    """
+    """Compression is negative in this formulation."""
     dim = vel_grad.shape[0]
 
     density = masses / volumes

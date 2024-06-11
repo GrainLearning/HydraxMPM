@@ -1,11 +1,10 @@
 """Helper functions to discretize the domain."""
 
-
 from typing import Tuple
 
-from ..shapefunctions.shapefunction import ShapeFunction
 from ..core.nodes import Nodes
 from ..core.particles import Particles
+from ..shapefunctions.shapefunction import ShapeFunction
 
 
 def discretize(
@@ -29,6 +28,6 @@ def discretize(
 
     nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes,particles)
+    shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
 
     return particles, nodes, shapefunction
