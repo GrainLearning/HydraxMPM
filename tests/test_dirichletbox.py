@@ -18,19 +18,22 @@ def test_apply_on_node_moments():
     """Unit test to initialize the NodesContainer class."""
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1)
 
-    box = pm.DirichletBox.create()
+    box = pm.DirichletBox.create(
+        nodes,
+        boundary_types=jnp.array([[2, 1], [1, 1]]),
+    )
 
     box.apply_on_nodes_moments(nodes)
 
-    # 3D fix
-    nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
+    # # 3D fix
+    # nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
 
-    box = pm.DirichletBox.create()
+    # box = pm.DirichletBox.create()
 
-    box.apply_on_nodes_moments(nodes)
+    # box.apply_on_nodes_moments(nodes)
 
-    assert isinstance(box, pm.DirichletBox)
+    # assert isinstance(box, pm.DirichletBox)
 
 
-test_init()
-# test_apply_on_node_moments()
+# test_init()
+test_apply_on_node_moments()

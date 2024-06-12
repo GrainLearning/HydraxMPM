@@ -71,7 +71,7 @@ usl = pm.USL.create(
     # forces=[gravity,box],
     shapefunctions=shapefunctions,
     alpha=0.99,
-    dt=0.001,
+    dt=0.0001,
 
 )
 
@@ -109,18 +109,16 @@ points_data_dict = {
 }
 @jax.tree_util.Partial
 def save_particles(package):
-    global points_data_dict
-    step, usl = package
+    steps, usl = package
+    positions = usl.particles.positions
 
-    points_data_dict["points"].append(usl.particles.positions)
-
+    points_data_dict["points"].append(positions)
     KE = pm.get_KE( usl.particles.masses,usl.particles.velocities,)
-    points_data_dict["KE"].append(KE.__array__())
-
-    print(f"output {step}", end="\r")
+    points_data_dict["KE"].append(KE)
+ 
+    print(f"output {steps}", end="\r")
 
 print("Running simulation")
-
 
 usl = usl.solve(num_steps=total_steps, 
                 output_start_step = output_start,

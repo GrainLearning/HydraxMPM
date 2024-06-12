@@ -14,15 +14,15 @@ cell_size = (1 / 20) * domain_size
 
 output_steps = 1000
 output_start = 0
-total_steps = 110000
+total_steps = 21000
 
 particle_spacing = cell_size / particles_per_cell
 
 print("Creating simulation")
 
-def create_block(block_start, block_size, spacing):
+def create_block(block_start, block_end, spacing):
     """Create a block of particles in 3D space."""
-    block_end = (block_start[0] + block_size, block_start[1] + block_size, block_start[1] + block_size)
+
     x = np.arange(block_start[0], block_end[0], spacing)
     y = np.arange(block_start[1], block_end[1], spacing)
     z = np.arange(block_start[2], block_end[2], spacing)
@@ -30,18 +30,18 @@ def create_block(block_start, block_size, spacing):
     return block
 
 # Create two blocks (cubes in 2D context)
-pos = create_block((5, 5, 5), 3, particle_spacing)
+pos = create_block((2, 2, 2), (4, 4, 4), particle_spacing)
 
 particles = pm.Particles.create(positions=pos, original_density=1000)
 
 nodes = pm.Nodes.create(
-    origin=jnp.array([0.0, 0.0, 0.0]), 
+    origin=jnp.array([0.0, 0.0, 0.0]),
     end=jnp.ones(3)*domain_size,
     node_spacing=cell_size,
     small_mass_cutoff=1e-6
 )
 
-shapefunctions = pm.LinearShapeFunction.create(len(pos), 3)
+shapefunctions = pm.CubicShapeFunction.create(len(pos), 3)
 
 particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
 
@@ -62,32 +62,7 @@ usl = pm.USL.create(
 
 )
 
-def debug_particles(
-        step: jnp.int32, 
-        particles: pm.Particles,
-        stress_limit: jnp.float32 = 1e6,
-    ):
-    """
-    First challenge is to narow down the iteration.
-    
-    Second challenge is the find function causing the error.
 
-    Third challenge is the find the memory location of the error.
-    """
-    
-    # Check out of bounds
-    positions = usl.particles.positions
-    out_of_bounds = jnp.any(jnp.logical_or(positions < nodes.origin, positions > nodes.end))
-    if out_of_bounds:
-        Exception(f"Instability detected: Particles out of bounds at step {step}")
-
-    # Check for NaN or Inf values
-    if jnp.any(jnp.isnan(particles.stresses)) or jnp.any(jnp.isinf(particles.stresses)):
-        raise Exception(f"Instability detected: NaN or Inf value in stress {step}")
-
-    # Check for extreme values
-    if jnp.max(jnp.abs(particles.stresses)) > stress_limit:
-        raise Exception("Instability detected: Stress exceeds limit")
 
 
 points_data_dict = {

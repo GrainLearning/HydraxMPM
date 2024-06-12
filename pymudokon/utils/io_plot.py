@@ -23,9 +23,10 @@ def plot_simple_3D(
         end: np.ndarray,
         output_file: str="output.gif",
         plot_params: Dict[str, Any] = None,
-        camera_params: Dict[str, Any] = None
+        camera_params: Dict[str, Any] = None,
+        theme="dark"
     ):
-
+    pv.set_plot_theme(theme)
     num_iterations,num_points, dim = point_data_dict["points"].shape
     
     if "points" not in point_data_dict:
@@ -48,7 +49,7 @@ def plot_simple_3D(
     box = pv.Box(bounds=np.array(list(zip(origin, end))).flatten())
 
     pl = pv.Plotter()
-
+    
     if plot_params is None:
         plot_params = {}
 
@@ -64,7 +65,8 @@ def plot_simple_3D(
     if "clim" not in plot_params:
         plot_params["clim"] = [-0.1, 0.1]
 
-
+    if "scalar_bar_args" not in plot_params:
+        plot_params["scalar_bar_args"] = dict( position_x=0.2, position_y=0.01)
     pl.add_mesh(
         cloud,
         **plot_params
@@ -98,7 +100,10 @@ def plot_simple_3D(
             camera_params["elevation"] = 30
     
     if "zoom" not in camera_params:
-        camera_params["zoom"] = 0.9
+        if dim == 2:
+            camera_params["zoom"] = 1.1
+        else:
+            camera_params["zoom"] = 0.9
         
     
 
@@ -114,10 +119,10 @@ def plot_simple_3D(
     for iter in range(num_iterations):
 
         cloud.points = points_to_3D(point_data_dict["points"][iter],dim)
-        for key, value in point_data_dict.items():
-            if key == "points":
-                continue
-            cloud.point_data[key] = value[iter]
+
+
+        if "scalars" in plot_params:
+            cloud.point_data[plot_params["scalars"]] = point_data_dict[plot_params["scalars"]][iter]
 
         pl.write_frame()
 

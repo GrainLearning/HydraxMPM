@@ -61,7 +61,7 @@ class NewtonFluid(Material):
     gamma: jnp.float32
 
     @classmethod
-    def register(cls: Self, K: jnp.float32, viscosity: jnp.float32, gamma: jnp.float32 = 7.0) -> Self:
+    def create(cls: Self, K: jnp.float32, viscosity: jnp.float32, gamma: jnp.float32 = 7.0) -> Self:
         """Initialize Newtonian fluid material.
 
         Args:

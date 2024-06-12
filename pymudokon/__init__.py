@@ -9,6 +9,8 @@ from .core.particles import Particles
 from .forces.dirichletbox import DirichletBox
 from .forces.forces import Forces
 from .forces.gravity import Gravity
+from .forces.nodewall import NodeWall
+
 # from .ip_benchmarks.plotting import plot_q_p, plot_strain_grid, plot_stress_grid, plot_tau_gamma
 from .ip_benchmarks.simpleshear import simple_shear
 from .ip_benchmarks.triaxial import triaxial_compression
@@ -32,7 +34,7 @@ from .utils.math_helpers import (
     get_KE,
     get_pressure)
 
-from .utils.io_plot import plot_simple_3D
+from .utils.io_plot import plot_simple_3D,points_to_3D
 
 __all__ = [
     "ShapeFunction",
@@ -64,5 +66,7 @@ __all__ = [
     "get_volumetric_strain",
     "get_KE",
     "get_pressure",
-    "plot_simple_3D"
+    "plot_simple_3D",
+    "points_to_3D",
+    "NodeWall"
 ]

@@ -3,6 +3,7 @@ import numpy as np
 
 import pymudokon as pm
 import pyvista as pv
+import jax
 
 # dam
 dam_height = 2.0
@@ -32,32 +33,36 @@ dt = 0.1 * cell_size / c
 
 particles_per_cell = 2
 
-total_steps = 80000
+total_steps = 20000
 output_steps = 1000
 print(cell_size, dt, total_steps)
 
-nodes = pm.Nodes.register(origin=origin, end=end, node_spacing=cell_size)
+nodes = pm.Nodes.create(origin=origin, end=end, node_spacing=cell_size)
 
-sep = cell_size / 2
+sep = cell_size / particles_per_cell
 x = np.arange(0, dam_length + sep, sep) + 3.5 * sep
 y = np.arange(0, dam_height + sep, sep) + 3.5 * sep
 xv, yv = np.meshgrid(x, y)
 pnts = np.array(list(zip(xv.flatten(), yv.flatten()))).astype(np.float64)
 
-particles = pm.Particles.register(positions=jnp.array(pnts), original_density=rho)
+particles = pm.Particles.create(positions=jnp.array(pnts), original_density=rho)
 
-nodes = pm.Nodes.register(origin=origin, end=end, node_spacing=cell_size)
+nodes = pm.Nodes.create(
+    origin=origin,
+    end=end,
+    node_spacing=cell_size,
+    small_mass_cutoff=1e-12)
 
-shapefunctions = pm.CubicShapeFunction.register(len(pnts), 2)
+shapefunctions = pm.CubicShapeFunction.create(len(pnts), 2)
 
 particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions, ppc=particles_per_cell)
 
-water = pm.NewtonFluid.register(K=bulk_modulus, viscosity=mu)
+water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=mu)
 
-gravity = pm.Gravity.register(gravity=jnp.array([0.0, g]))
-box = pm.DirichletBox.register()
+gravity = pm.Gravity.create(gravity=jnp.array([0.0, g]))
+box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[0, 0], [3, 0]]))
 
-usl = pm.USL.register(
+usl = pm.USL.create(
     particles=particles,
     nodes=nodes,
     materials=[water],
@@ -67,56 +72,40 @@ usl = pm.USL.register(
     dt=dt,
 )
 
+points_data_dict = {
+    "points" : [],
+    "KE" : []
+}
 
+
+@jax.tree_util.Partial
 def save_particles(package):
+
     steps, usl = package
     positions = usl.particles.positions
-    mean_velocity = jnp.mean(usl.particles.velocities, axis=1)
-    jnp.savez(f"output/particles_{steps}", positions=positions, mean_velocity=mean_velocity)
+
+    points_data_dict["points"].append(positions)
+    KE = pm.get_KE( usl.particles.masses,pm.points_to_3D(usl.particles.velocities),)
+    points_data_dict["KE"].append(KE)
+    print(KE.mean())
+ 
     print(f"output {steps}", end="\r")
-    return usl
 
 
-print("Running simulation")
+usl = usl.solve(num_steps=total_steps, output_step=output_steps, output_function=save_particles)
 
-usl = usl.solve(num_steps=total_steps, output_steps=output_steps, output_function=save_particles)
 
-print("\n Plotting")
-data = jnp.load(f"./output/particles_{output_steps}.npz")
-positions = data["positions"]
-mean_velocity = data["mean_velocity"]
+for key, value in points_data_dict.items():
+    points_data_dict[key] = np.array(value)
 
-points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-
-cloud = pv.PolyData(points_3d)
-cloud.point_data["mean_velocities"] = data["mean_velocity"]
-
-pl = pv.Plotter()
-
-box = pv.Box(bounds=[0, 6, 0, 6, 0, 0])
-
-pl.add_mesh(box, style="wireframe", color="k", line_width=2)
-
-pl.add_mesh(
-    cloud,
-    scalars="mean_velocities",
-    style="points",
-    show_edges=True,
-    render_points_as_spheres=True,
-    cmap="inferno",
-    point_size=10,
-    clim=[-0.1, 0.1],
+pm.plot_simple_3D(
+    points_data_dict,
+    origin=origin,
+    end=end,
+    output_file="output.gif",
+    plot_params={
+        "scalars": "KE",
+        "cmap": "viridis",
+        "clim": [3, 7],
+    }
 )
-
-pl.camera_position = "xy"
-pl.open_gif("./figures/animation_dambreak.gif")
-
-for i in range(output_steps, total_steps, output_steps):
-    data = jnp.load(f"./output/particles_{i}.npz")
-    positions = data["positions"]
-    mean_velocity = data["mean_velocity"]
-    points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-    cloud.points = points_3d
-    cloud.point_data["mean_velocities"] = data["mean_velocity"]
-    pl.write_frame()
-pl.close()

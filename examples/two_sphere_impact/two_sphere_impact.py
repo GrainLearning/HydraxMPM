@@ -54,7 +54,7 @@ nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]),
 shapefunctions = pm.LinearShapeFunction.create(len(pos), 2)
 particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
 
-material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.3, num_particles=len(pos), dim=2)
+material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.3, num_particles=len(pos))
 
 usl = pm.USL.create(
     particles=particles, nodes=nodes, materials=[material], shapefunctions=shapefunctions, alpha=0.98, dt=0.001
@@ -73,7 +73,7 @@ def save_particles(package):
     points_data_dict["points"].append(positions)
     KE = pm.get_KE( usl.particles.masses,usl.particles.velocities,)
     points_data_dict["KE"].append(KE)
- 
+    print(KE.mean())
     print(f"output {steps}", end="\r")
 
 
@@ -91,6 +91,6 @@ pm.plot_simple_3D(
     plot_params={
         "scalars": "KE",
         "cmap": "viridis",
-        "clim": [-60.0, 100.0],
+        "clim": [0.009, 0.0125],
     }
 )

@@ -16,7 +16,7 @@ particles_per_cell = 2
 cell_size = (1 / 120) * domain_size
 
 output_steps = 1000
-total_steps = 10000
+total_steps = 120000
 
 particle_spacing = cell_size / particles_per_cell
 
@@ -32,10 +32,10 @@ def create_block(block_start, block_size, spacing):
 
 # Create two blocks (cubes in 2D context)
 block1 = create_block((1, 1), 2, particle_spacing)
-block2 = create_block((7, 7), 2, particle_spacing)
+# block2 = create_block((7, 7), 2, particle_spacing)
 
 # Stack all the positions together
-pos = np.vstack([block1, block2])
+pos = np.vstack([block1])
 print("pos.shape", pos.shape)
 particles = pm.Particles.create(positions=pos, original_density=1000)
 
@@ -48,11 +48,14 @@ print("nodes.num_nodes", len(nodes.moments))
 shapefunctions = pm.CubicShapeFunction.create(len(pos), 2)
 particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
 
-material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.3, num_particles=len(pos), dim=2)
+material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.3, num_particles=len(pos))
 
 
-gravity = pm.Gravity.create(gravity=jnp.array([-0.001, -0.0098]))
-box = pm.DirichletBox.create()
+gravity = pm.Gravity.create(gravity=jnp.array([0.004, -0.0098]))
+box = pm.DirichletBox.create(
+    nodes,
+    boundary_types=jnp.array([[0, 0], [3, 0]]),
+    )
 
 usl = pm.USL.create(
     particles=particles,
@@ -64,12 +67,22 @@ usl = pm.USL.create(
     dt=0.001,
 )
 
+points_data_dict = {
+    "points" : [],
+    "KE" : []
+}
+
+
 @jax.tree_util.Partial
 def save_particles(package):
+
     steps, usl = package
-    # positions = usl.particles.positions
-    # mean_velocity = jnp.mean(usl.particles.velocities, axis=1)
-    # jnp.savez(f"output/particles_{steps}", positions=positions, mean_velocity=mean_velocity)
+    positions = usl.particles.positions
+
+    points_data_dict["points"].append(positions)
+    KE = pm.get_KE( usl.particles.masses,usl.particles.velocities,)
+    points_data_dict["KE"].append(KE)
+ 
     print(f"output {steps}", end="\r")
 
 
@@ -82,46 +95,17 @@ usl = usl.solve(num_steps=total_steps, output_step=output_steps, output_function
 print("The difference of time is :", 
               timeit.default_timer() - start)
 
+for key, value in points_data_dict.items():
+    points_data_dict[key] = np.array(value)
 
-jax.make_jaxpr(usl.update)()
-
-print("\n Plotting")
-data = jnp.load(f"./output/particles_{output_steps}.npz")
-positions = data["positions"]
-mean_velocity = data["mean_velocity"]
-
-points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-
-cloud = pv.PolyData(points_3d)
-cloud.point_data["mean_velocities"] = data["mean_velocity"]
-
-pl = pv.Plotter()
-
-box = pv.Box(bounds=[0, domain_size, 0, domain_size, 0, 0])
-
-pl.add_mesh(box, style='wireframe', color='k', line_width=2)
-
-pl.add_mesh(
-    cloud,
-    scalars="mean_velocities",
-    style="points",
-    show_edges=True,
-    render_points_as_spheres=True,
-    cmap="inferno",
-    point_size=10,
-    clim=[-0.1, 0.1],
+pm.plot_simple_3D(
+    points_data_dict,
+    origin=jnp.array([0.0, 0.0]),
+    end=jnp.array([domain_size,domain_size]),
+    output_file="output.gif",
+    plot_params={
+        "scalars": "KE",
+        "cmap": "viridis",
+        "clim": [0.009, 0.0125],
+    }
 )
-
-pl.camera_position = "xy"
-pl.open_gif("./figures/animation_cube_fall_rough_walls.gif")
-
-for i in range(output_steps, total_steps, output_steps):
-    data = jnp.load(f"./output/particles_{i}.npz")
-    positions = data["positions"]
-    mean_velocity = data["mean_velocity"]
-    points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-    cloud.points = points_3d
-    cloud.point_data["mean_velocities"] = data["mean_velocity"]
-    pl.write_frame()
-pl.close()
-
