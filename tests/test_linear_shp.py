@@ -21,28 +21,159 @@ def test_create():
     )
 
 
-def test_calculate_shapefunction():
+def test_calc_shp_2d():
     """Test the linear shape function for top level container input."""
-    particles = pm.Particles.create(positions=jnp.array([[0.25, 0.25], [0.8, 0.4]]))
+    particles = pm.Particles.create(positions=jnp.array([[0.45, 0.21], [0.8, 0.4]]))
 
-    nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+    nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1)
 
     shapefunction = pm.LinearShapeFunction.create(num_particles=2, dim=2)
 
     shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
-
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (8,))
 
-    np.testing.assert_allclose(
-        shapefunction.intr_shapef,
-        jnp.array([0.25, 0.25, 0.25, 0.25, 0.08, 0.12, 0.32, 0.48]),
+    expected_shapef = jnp.array([0.45000005, 0.04999995, 0.45000005, 0.04999995, 1.0, 0.0, 0.0, 0.0])
+    np.testing.assert_allclose(expected_shapef, shapefunction.intr_shapef)
+    np.testing.assert_allclose(jnp.prod(shapefunction.intr_shapef, axis=0), 0)
+
+    expected_shapef_grad = jnp.array(
+        [
+            [
+                -9.000001,
+                -5.0,
+            ],
+            [
+                -0.99999905,
+                5.0,
+            ],
+            [
+                9.000001,
+                -5.0,
+            ],
+            [
+                0.99999905,
+                5.0,
+            ],
+            [
+                -0.0,
+                -0.0,
+            ],
+            [
+                -0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                -0.0,
+            ],
+            [
+                0.0,
+                0.0,
+            ],
+        ]
     )
 
-    np.testing.assert_allclose(shapefunction.intr_shapef_grad.shape, (8, 2))
+    np.testing.assert_allclose(expected_shapef_grad, shapefunction.intr_shapef_grad)
 
-    np.testing.assert_allclose(
-        shapefunction.intr_shapef_grad,
-        jnp.array(
-            [[-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0], [1.0, 1.0], [-0.4, -0.8], [0.4, -1.2], [-1.6, 0.8], [1.6, 1.2]]
-        ).reshape((8, 2)),
+
+def test_calc_shp_3d():
+    """Test the linear shape function for top level container input."""
+    particles = pm.Particles.create(positions=jnp.array([[0.45, 0.21, 0.1], [0.8, 0.4, 0.1]]))
+
+    nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 1.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
+
+    shapefunction = pm.LinearShapeFunction.create(num_particles=2, dim=3)
+
+    shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
+    np.testing.assert_allclose(shapefunction.intr_shapef.shape, (16,))
+    expected_shapef = jnp.array([0.45, 0.0, 0.45, 0.0, 0.05, 0.0, 0.05, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    np.testing.assert_allclose(expected_shapef, shapefunction.intr_shapef, rtol=1e-5)
+    np.testing.assert_allclose(jnp.prod(shapefunction.intr_shapef, axis=0), 0)
+
+    expected_shapef_grad = jnp.array(
+        [
+            [
+                -9.0,
+                -5.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                9.0,
+                -5.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                -1.0,
+                5.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                1.0,
+                5.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+            ],
+        ]
     )
+
+    np.testing.assert_allclose(expected_shapef_grad, shapefunction.intr_shapef_grad, rtol=1e-4)

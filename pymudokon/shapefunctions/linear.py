@@ -33,7 +33,7 @@ class LinearShapeFunction(ShapeFunction):
         if dim == 1:
             stencil = jnp.array([[0.0], [1.0]])
         if dim == 2:
-            stencil = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+            stencil = jnp.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
         if dim == 3:
             stencil = jnp.array(
                 [[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]]
@@ -103,6 +103,25 @@ class LinearShapeFunction(ShapeFunction):
         dbasis = jnp.where(abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0)
 
         intr_shapef = jnp.prod(basis)
-        intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
+        # intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
+        dim = basis.shape[0]
+        if dim ==2:
+            intr_shapef_grad = jnp.array(
+                [
+                dbasis[0]*basis[1],
+                dbasis[1]*basis[0],
+                ]
+            )
+        elif dim ==3:
+            intr_shapef_grad = jnp.array(
+                [
+                dbasis[0]*basis[1]*basis[2],
+                dbasis[1]*basis[0]*basis[2],
+                dbasis[2]*basis[0]*basis[1]]
+            )
+        else:
+            intr_shapef_grad = dbasis
+
+
 
         return intr_shapef, intr_shapef_grad

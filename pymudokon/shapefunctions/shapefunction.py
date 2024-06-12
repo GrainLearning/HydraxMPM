@@ -79,11 +79,11 @@ class ShapeFunction:
         stencil_id = (intr_id % stencil_size).astype(jnp.int16)
 
         # 1. Calculate the relative position of the particle to the node.
-        particle_pos = position.at[particle_id].get(indices_are_sorted=True)
+        particle_pos = position.at[particle_id].get()
         rel_pos = (particle_pos - origin) * inv_node_spacing
 
         # 2. Calculate particle-node pair interaction distances.
-        stencil_pos = self.stencil.at[stencil_id].get(indices_are_sorted=True, unique_indices=True)
+        stencil_pos = self.stencil.at[stencil_id].get()
         intr_n_pos = jnp.floor(rel_pos) + stencil_pos
 
         intr_dist = rel_pos - intr_n_pos

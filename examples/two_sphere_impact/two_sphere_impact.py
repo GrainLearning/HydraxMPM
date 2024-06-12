@@ -60,53 +60,37 @@ usl = pm.USL.create(
     particles=particles, nodes=nodes, materials=[material], shapefunctions=shapefunctions, alpha=0.98, dt=0.001
 )
 
+points_data_dict = {
+    "points" : [],
+    "KE" : []
+}
 
 @jax.tree_util.Partial
 def save_particles(package):
     steps, usl = package
     positions = usl.particles.positions
-    mean_velocity = jnp.mean(usl.particles.velocities, axis=1)
-    jnp.savez(f"output/particles_{steps}", positions=positions, mean_velocity=mean_velocity)
+
+    points_data_dict["points"].append(positions)
+    KE = pm.get_KE( usl.particles.masses,usl.particles.velocities,)
+    points_data_dict["KE"].append(KE)
+ 
     print(f"output {steps}", end="\r")
 
 
 print("Running simulation")
 usl = usl.solve(num_steps=3000, output_step=100, output_function=save_particles)
 
-print("\n Plotting")
-data = jnp.load(f"./output/particles_{100}.npz")
-positions = data["positions"]
-mean_velocity = data["mean_velocity"]
+for key, value in points_data_dict.items():
+    points_data_dict[key] = np.array(value)
 
-points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-
-cloud = pv.PolyData(points_3d)
-cloud.point_data["mean_velocities"] = data["mean_velocity"]
-
-pl = pv.Plotter()
-
-box = pv.Box(bounds=[0, 1, 0, 1, 0, 0])
-
-pl.add_mesh(
-    cloud,
-    scalars="mean_velocities",
-    style="points",
-    show_edges=True,
-    render_points_as_spheres=True,
-    cmap="inferno",
-    point_size=10,
-    clim=[-0.1, 0.1],
+pm.plot_simple_3D(
+    points_data_dict,
+    origin=jnp.array([0.0, 0.0]),
+    end=jnp.array([1,1]),
+    output_file="output.gif",
+    plot_params={
+        "scalars": "KE",
+        "cmap": "viridis",
+        "clim": [-60.0, 100.0],
+    }
 )
-
-pl.camera_position = "xy"
-pl.open_gif("./figures/animation_two_spheres_impact.gif")
-
-for i in range(100, 3000, 100):
-    data = jnp.load(f"./output/particles_{i}.npz")
-    positions = data["positions"]
-    mean_velocity = data["mean_velocity"]
-    points_3d = jnp.pad(data["positions"], [(0, 0), (0, 1)], mode="constant").__array__()
-    cloud.points = points_3d
-    cloud.point_data["mean_velocities"] = data["mean_velocity"]
-    pl.write_frame()
-pl.close()

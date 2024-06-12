@@ -61,6 +61,7 @@ class Solver:
     def solve(
         self: Self,
         num_steps: jnp.int32,
+        output_start_step: jnp.int32=0,
         output_step: jnp.int32 = 1,
         output_function: Callable = lambda x: None,
     ):
@@ -88,7 +89,7 @@ class Solver:
             solver = solver.update()
 
             jax.lax.cond(
-                step % output_step == 0,
+                (step % output_step == 0)&(output_start_step <= step),
                 lambda x: jax.experimental.io_callback(output_function, None, x),
                 lambda x: None,
                 (step, solver),

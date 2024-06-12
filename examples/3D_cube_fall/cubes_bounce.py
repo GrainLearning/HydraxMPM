@@ -8,13 +8,13 @@ import pyvista as pv
 
 domain_size = 10
 
-particles_per_cell = 4
+particles_per_cell = 2
 cell_size = (1 / 20) * domain_size
 
-
-output_steps = 1000
+output_steps = 100
 output_start = 0
-total_steps = 110000
+total_steps = 11000
+
 
 particle_spacing = cell_size / particles_per_cell
 
@@ -30,15 +30,27 @@ def create_block(block_start, block_size, spacing):
     return block
 
 # Create two blocks (cubes in 2D context)
-pos = create_block((5, 5, 5), 3, particle_spacing)
+block1 = create_block((3, 3, 3), 2, particle_spacing) + np.array([0.0, 0.0, 4.0])
 
-particles = pm.Particles.create(positions=pos, original_density=1000)
+block2 = create_block((3, 3, 3), 2, particle_spacing)
+
+pos = np.vstack([block1, block2])
+
+print(pos.shape)
+vels = jnp.zeros_like(pos).at[:len(block1),2].set(-0.2).at[len(block1):,2].set(0.2)
+
+particles = pm.Particles.create(
+    positions=pos,
+    velocities=vels,
+    original_density=1000)
+
+
 
 nodes = pm.Nodes.create(
-    origin=jnp.array([0.0, 0.0, 0.0]), 
+    origin=jnp.array([0.0, 0.0, 0.0]),
     end=jnp.ones(3)*domain_size,
     node_spacing=cell_size,
-    small_mass_cutoff=1e-6
+    small_mass_cutoff=1e-3
 )
 
 shapefunctions = pm.LinearShapeFunction.create(len(pos), 3)
@@ -51,13 +63,14 @@ gravity = pm.Gravity.create(gravity=jnp.array([0.000, 0.0, -0.0098]))
 
 box = pm.DirichletBox.create(nodes)
 
+
 usl = pm.USL.create(
     particles=particles,
     nodes=nodes,
     materials=[material],
-    forces=[gravity,box],
+    # forces=[gravity,box],
     shapefunctions=shapefunctions,
-    alpha=0.95,
+    alpha=0.99,
     dt=0.001,
 
 )
@@ -79,16 +92,16 @@ def debug_particles(
     positions = usl.particles.positions
     out_of_bounds = jnp.any(jnp.logical_or(positions < nodes.origin, positions > nodes.end))
     if out_of_bounds:
-        Exception(f"Instability detected: Particles out of bounds at step {step}")
-
+        print(f"Instability detected: Particles out of bounds at step at step {step}")
+        exit(0)
     # Check for NaN or Inf values
     if jnp.any(jnp.isnan(particles.stresses)) or jnp.any(jnp.isinf(particles.stresses)):
-        raise Exception(f"Instability detected: NaN or Inf value in stress {step}")
-
+        print(f"Instability detected: NaN or Inf value in stress at step {step}")
+        exit(0)
     # Check for extreme values
     if jnp.max(jnp.abs(particles.stresses)) > stress_limit:
-        raise Exception("Instability detected: Stress exceeds limit")
-
+        print(f"Instability detected: Stress exceeds limit at step {step}")
+        exit(0)
 
 points_data_dict = {
     "points" : [],
@@ -108,6 +121,7 @@ def save_particles(package):
 
 print("Running simulation")
 
+
 usl = usl.solve(num_steps=total_steps, 
                 output_start_step = output_start,
                 output_step=output_steps,
@@ -116,6 +130,9 @@ usl = usl.solve(num_steps=total_steps,
 
 for key, value in points_data_dict.items():
     points_data_dict[key] = np.array(value)
+
+
+
 
 pm.plot_simple_3D(
     points_data_dict,

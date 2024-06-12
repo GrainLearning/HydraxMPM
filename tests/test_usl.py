@@ -14,7 +14,7 @@ def test_create():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
-    material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
+    material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2)
 
     usl = pm.USL.create(
         particles=particles,
@@ -28,9 +28,8 @@ def test_create():
     assert isinstance(usl, pm.USL)
 
 
-def test_p2g():
-    """Unit test to perform particle-to-grid transfer."""
-    # 2D
+def test_p2g_2d():
+    """Unit test to perform particle-to-grid transfer for 2D."""
     particles = pm.Particles.create(
         positions=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
         velocities=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -46,7 +45,7 @@ def test_p2g():
         masses=jnp.array([0.1, 0.3]),
         volumes=jnp.array([0.7, 0.4]),
         volumes_original=jnp.array([0.7, 0.4]),
-        stresses=jnp.stack([jnp.eye(3)] * 2),
+        stresses=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
     )
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
@@ -70,7 +69,7 @@ def test_p2g():
 def test_p2g_3d():
     """Unit test to perform particle-to-grid transfer in 3D."""
     particles = pm.Particles.create(
-        positions=jnp.array([[0.1, 0.25, 0.25], [0.1, 0.25, 0.6]]),
+        positions=jnp.array([[0.1, 0.25, 0.3], [0.1, 0.25, 0.3]]),
         velocities=jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
     )
 
@@ -84,7 +83,7 @@ def test_p2g_3d():
         masses=jnp.array([0.1, 0.3]),
         volumes=jnp.array([0.7, 0.4]),
         volumes_original=jnp.array([0.7, 0.4]),
-        stresses=jnp.stack([jnp.eye(3)] * 2),
+        stresses=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
     )
 
     shapefunctions = pm.LinearShapeFunction.create(2, 3)
@@ -98,27 +97,28 @@ def test_p2g_3d():
         dt=0.1,
     )
     # note these values have not been verified analytically
-    expected_mass = jnp.array([0.13162498, 0.014625, 0.04387499, 0.004875, 0.13837501, 0.015375, 0.046125, 0.005125])
-    expected_node_moments = jnp.array(
-        [
-            [0.13162498, 0.13162498, 0.13162498],
-            [0.014625, 0.014625, 0.014625],
-            [0.04387499, 0.04387499, 0.04387499],
-            [0.004875, 0.004875, 0.004875],
-            [0.13837501, 0.13837501, 0.13837501],
-            [0.015375, 0.015375, 0.015375],
-            [0.046125, 0.046125, 0.046125],
-            [0.005125, 0.005125, 0.005125],
-        ]
-    )
+    expected_mass = jnp.array([0.189, 0.02100001, 0.063, 0.007, 0.081, 0.009, 0.027, 0.003])
 
     np.testing.assert_allclose(nodes.masses, expected_mass, rtol=1e-3)
+
+    expected_node_moments = jnp.array(
+        [
+            [0.189, 0.189, 0.189],
+            [0.02099999, 0.02099999, 0.02099999],
+            [0.063, 0.063, 0.063],
+            [0.007, 0.007, 0.007],
+            [0.081, 0.081, 0.081],
+            [0.009, 0.009, 0.009],
+            [0.027, 0.027, 0.027],
+            [0.003, 0.003, 0.003],
+        ]
+    )
 
     np.testing.assert_allclose(nodes.moments, expected_node_moments, rtol=1e-3)
 
 
-def test_g2p():
-    """Unit test to perform grid-to-particle transfer."""
+def test_g2p_2d():
+    """Unit test to perform grid-to-particle transfer for 2D."""
     particles = pm.Particles.create(
         positions=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
         velocities=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -128,7 +128,7 @@ def test_g2p():
         masses=jnp.array([0.1, 0.3]),
         volumes=jnp.array([0.7, 0.4]),
         volumes_original=jnp.array([0.7, 0.4]),
-        stresses=jnp.stack([jnp.eye(3)] * 2),
+        stresses=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
     )
 
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=1.0)
@@ -152,62 +152,113 @@ def test_g2p():
         dt=0.1,
     )
 
-    # # expected_velocities = jnp.array([[1.0, 1.0], [1.0, 1.0]])
-    # # expected_velgrads = jnp.array(
-    # #     [
-    # #         [[-3.0555546e00, -2.9802322e-08], [-1.1175871e-08, -1.4666667e00]],
-    # #         [[-3.0555546e00, -2.9802322e-08], [-1.1175871e-08, -1.4666667e00]],
-    # #     ]
-    # # )
-    # # expected_F = jnp.array(
-    # #     [
-    # #         [[6.9444454e-01, -2.9802323e-09], [-1.1175871e-09, 8.5333335e-01]],
-    # #         [[6.9444454e-01, -2.9802323e-09], [-1.1175871e-09, 8.5333335e-01]],
-    # #     ]
-    # # )
-    # # expected_volumes = jnp.array([0.41481486, 0.23703706])
-    # # expected_positions = jnp.array([[0.2, 0.35], [0.2, 0.35]])
+    expected_volumes = jnp.array([0.49855555, 0.2848889])
 
-    # # np.testing.assert_allclose(particles.velocities, expected_velocities, rtol=1e-3)
-    # # np.testing.assert_allclose(particles.velgrads, expected_velgrads, rtol=1e-3)
-    # # np.testing.assert_allclose(particles.F, expected_F, rtol=1e-3)
-    # # np.testing.assert_allclose(particles.volumes, expected_volumes, rtol=1e-3)
-    # # np.testing.assert_allclose(particles.positions, expected_positions, rtol=1e-3)
+    np.testing.assert_allclose(particles.volumes, expected_volumes, rtol=1e-3)
 
-    # #3D
-    # particles = pm.Particles.create(
-    #     positions=jnp.array([[0.1, 0.25, 0.25], [0.1, 0.25, 0.6]]),
-    #     velocities=jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
-    # )
+    expected_velocities = jnp.array([[1.0, 1.0], [1.0, 1.0]])
+    np.testing.assert_allclose(particles.velocities, expected_velocities, rtol=1e-3)
 
-    # particles = particles.replace(
-    #     masses=jnp.array([0.1, 0.3]),
-    #     volumes=jnp.array([0.7, 0.4]),
-    #     volumes_original=jnp.array([0.7, 0.4]),
-    #     stresses=jnp.stack([jnp.eye(3)] * 2),
-    # )
+    expected_positions = jnp.array([[0.2, 0.35], [0.2, 0.35]])
+    np.testing.assert_allclose(particles.positions, expected_positions, rtol=1e-3)
 
-    # nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=1.0)
+    expected_velocities = jnp.array([[1.0, 1.0], [1.0, 1.0]])
+    np.testing.assert_allclose(particles.velocities, expected_velocities, rtol=1e-3)
 
-    # shapefunctions = pm.LinearShapeFunction.create(2, 3)
+    expected_velgrads = jnp.array(
+        [[[-1.944444, -1.944444], [-0.9333334, -0.9333334]], [[-1.944444, -1.944444], [-0.9333334, -0.9333334]]]
+    )
 
-    # shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles)
+    np.testing.assert_allclose(particles.velgrads, expected_velgrads, rtol=1e-3)
+    expected_F = jnp.array(
+        [[[0.8055556, -0.1944444], [-0.09333334, 0.90666664]], [[0.8055556, -0.1944444], [-0.09333334, 0.90666664]]]
+    )
 
-    # nodes = pm.solvers.usl.p2g(
-    #     nodes=nodes,
-    #     particles=particles,
-    #     shapefunctions=shapefunctions,
-    #     dt=0.1,
-    # )
+    np.testing.assert_allclose(particles.F, expected_F, rtol=1e-3)
 
-    # particles = pm.solvers.usl.g2p(
-    #     particles=particles,
-    #     nodes=nodes,
-    #     shapefunctions=shapefunctions,
-    #     alpha=0.99,
-    #     dt=0.1,
-    # )
-    # # TODO add checks
+
+def test_g2p_3d():
+    """Unit test to perform grid to particle transfer in 3D."""
+    particles = pm.Particles.create(
+        positions=jnp.array([[0.1, 0.25, 0.3], [0.1, 0.25, 0.3]]),
+        velocities=jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
+    )
+
+    nodes = pm.Nodes.create(
+        origin=jnp.array([0.0, 0.0, 0.0]),
+        end=jnp.array([1.0, 1.0, 1.0]),
+        node_spacing=1.0,
+    )
+
+    particles = particles.replace(
+        masses=jnp.array([0.1, 0.3]),
+        volumes=jnp.array([0.7, 0.4]),
+        volumes_original=jnp.array([0.7, 0.4]),
+        stresses=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
+    )
+
+    shapefunctions = pm.LinearShapeFunction.create(2, 3)
+
+    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles)
+
+    nodes = pm.solvers.usl.p2g(
+        nodes=nodes,
+        particles=particles,
+        shapefunctions=shapefunctions,
+        dt=0.1,
+    )
+    particles = pm.solvers.usl.g2p(
+        particles=particles,
+        nodes=nodes,
+        shapefunctions=shapefunctions,
+        alpha=0.99,
+        dt=0.1,
+    )
+
+    expected_volumes = jnp.array([0.4402222222222, 0.25155553])
+
+    np.testing.assert_allclose(particles.volumes[:1], expected_volumes[:1], rtol=1e-3)
+
+    expected_velocities = jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]])
+    np.testing.assert_allclose(particles.velocities, expected_velocities, rtol=1e-3)
+
+    expected_positions = jnp.array([[0.2, 0.35, 0.4], [0.2, 0.35, 0.4]])
+
+    np.testing.assert_allclose(particles.positions, expected_positions, rtol=1e-3)
+
+    expected_velgrads = jnp.array(
+        [
+            [
+                [-1.9444444444444446, -1.9444444444444446, -1.9444444444444446],
+                [-0.9333333333333332, -0.9333333333333332, -0.9333333333333332],
+                [-0.8333333333333333, -0.8333333333333333, -0.8333333333333333],
+            ],
+            [
+                [-1.9444444444444446, -1.9444444444444446, -1.9444444444444446],
+                [-0.9333333333333332, -0.9333333333333332, -0.9333333333333332],
+                [-0.8333333333333333, -0.8333333333333333, -0.8333333333333333],
+            ],
+        ]
+    )
+
+    np.testing.assert_allclose(particles.velgrads, expected_velgrads, rtol=1e-3)
+
+    expected_F = jnp.array(
+        [
+            [
+                [0.8055556, -0.1944444, -0.1944444],
+                [-0.09333335, 0.90666664, -0.09333335],
+                [-0.08333334, -0.08333334, 0.9166667],
+            ],
+            [
+                [0.8055556, -0.1944444, -0.1944444],
+                [-0.09333335, 0.90666664, -0.09333335],
+                [-0.08333334, -0.08333334, 0.9166667],
+            ],
+        ]
+    )
+
+    np.testing.assert_allclose(particles.F, expected_F, rtol=1e-3)
 
 
 def test_update():
@@ -254,7 +305,7 @@ def test_solve():
 
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
-    material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
+    material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2)
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
@@ -267,6 +318,3 @@ def test_solve():
         step, usl = package  # unused intentionally
 
     usl = usl.solve(num_steps=10, output_step=2, output_function=some_callback)
-
-
-test_g2p()

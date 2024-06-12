@@ -148,7 +148,7 @@ class CubicShapeFunction(ShapeFunction):
             intr_ids=intr_ids,
             intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
             intr_shapef=jnp.zeros((num_particles * stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jax.numpy.zeros((num_particles * stencil_size, dim, 1), dtype=jnp.float32),
+            intr_shapef_grad=jax.numpy.zeros((num_particles * stencil_size, dim), dtype=jnp.float32),
             stencil=stencil,
         )
 
@@ -232,46 +232,7 @@ class CubicShapeFunction(ShapeFunction):
 
         intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, intr_species, nodes.inv_node_spacing)
         return self.replace(intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes)
-        # return self
-        # # 3. Calculate the shape functions
-        # basis, dbasis = self.vmap_cubic_shapefunction(
-        #     intr_dist.reshape(-1), intr_species, nodes.inv_node_spacing
-        # )
-
-        # basis = basis.reshape(-1, dim)
-        # dbasis = dbasis.reshape(-1, dim)
-        # if dim ==1:
-        #     intr_shapef = basis.reshape(-1, 1, 1)
-        #     intr_shapef_grad = dbasis.reshape(-1, dim, 1)
-
-        # if dim ==2:
-        #     N0 = basis[:, 0]
-        #     N1 = basis[:, 1]
-        #     dN0 = dbasis[:, 0]
-        #     dN1 = dbasis[:, 1]
-
-        #     intr_shapef = (N0 * N1).reshape(-1, 1, 1)
-
-        #     intr_shapef_grad = jax.numpy.array([dN0 * N1, N0 * dN1]).T.reshape(-1, dim, 1)
-        # else:
-        #     N0 = basis[:, 0]
-        #     N1 = basis[:, 1]
-        #     N2 =  basis[:, 2]
-        #     dN0 = dbasis[:, 0]
-        #     dN1 = dbasis[:, 1]
-        #     dN2 = dbasis[:, 2]
-        #     intr_shapef = (N0 * N1* N2).reshape(-1, 1, 1)
-        #     intr_shapef_grad = jax.numpy.array([
-        #         dN0 * N1 * dN2,
-        #         dN1 * N0 * dN2,
-        #         dN2 * N1 * dN0,
-        #         ]).T.reshape(-1, dim, 1)
-
-        # return self.replace(
-        #     intr_shapef=intr_shapef,
-        #     intr_shapef_grad=intr_shapef_grad,
-        #     intr_hashes=intr_hashes)
-
+     
     def validate(self: Self, solver) -> Self:
         """Verify the shape functions and gradients.
 
@@ -320,7 +281,24 @@ class CubicShapeFunction(ShapeFunction):
 
         basis, dbasis = jax.lax.switch(intr_species, spline_branches, (intr_dist, inv_node_spacing))
         intr_shapef = jnp.prod(basis)
-        intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
+        # intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
+        dim = basis.shape[0]
+        if dim ==2:
+            intr_shapef_grad = jnp.array(
+                [
+                dbasis[0]*basis[1],
+                dbasis[1]*basis[0],
+                ]
+            )
+        elif dim ==3:
+            intr_shapef_grad = jnp.array(
+                [
+                dbasis[0]*basis[1]*basis[2],
+                dbasis[1]*basis[0]*basis[2],
+                dbasis[2]*basis[0]*basis[1]]
+            )
+        else:
+            intr_shapef_grad = dbasis
 
         return intr_shapef, intr_shapef_grad
 
