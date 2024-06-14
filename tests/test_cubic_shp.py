@@ -23,7 +23,6 @@ def test_create():
 def test_calc_shp_2d():
     """Test the cubic shape function for 2D."""
     positions = jnp.array([[0.45, 0.21], [0.3, 0.4]])
-    particles = pm.Particles.create(positions=positions)
 
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1)
 
@@ -31,7 +30,7 @@ def test_calc_shp_2d():
 
     nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
+    shapefunction = shapefunction.calculate_shapefunction(nodes, positions)
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (32,))
 
     expected_shapef = [
@@ -115,7 +114,6 @@ def test_calc_shp_3d():
     """Test the cubic shape function for 3D."""
     # only test 1 particle here for clarity
     positions = jnp.array([[0.45, 0.21, 0.1]])
-    particles = pm.Particles.create(positions=positions)
 
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
 
@@ -123,7 +121,7 @@ def test_calc_shp_3d():
 
     nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
+    shapefunction = shapefunction.calculate_shapefunction(nodes, positions)
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (64,))
 
     expected_shapef = [

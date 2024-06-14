@@ -11,10 +11,19 @@ packages = [
 [tool.poetry.dependencies]
 python = "^3.10"
 numpy = "^1.26.4"
-pyvista = {extras = ["jupyter"], version = "^0.43.8"}
-ruff = "^0.4.3"
 jax = {extras = ["cpu"], version = "^0.4.28"}
-typing-extensions = "^4.11.0"
+typing-extensions = "^4.11.0" # type hinting of python 3.12
+optax = "^0.2.2" # optimizers for return mapping, element benchmarks etc.
+flax = "^0.8.4" # uses dataclass utilities for jax
+
+
+[tool.poetry.group.gpu.dependencies]
+jax = {extras = ["cuda12"], version = "^0.4.28"} # gpu version of Jax
+
+
+[tool.poetry.group.visuals.dependencies]
+ipykernel = "^6.29.4"
+matplotlib = "^3.9.0"
 jupyter = "^1.0.0"
 imageio = "^2.34.1"
 trame = "^3.6.0"
@@ -22,25 +31,13 @@ ipywidgets = "^8.1.2"
 trame-jupyter-extension = "^2.1.0"
 jupyterlab = ">=3"
 jupyter-server-proxy = "^4.1.2"
-xarray = {extras = ["vis"], version = "^2024.5.0"}
-matplotlib = "^3.9.0"
-optax = "^0.2.2"
-jaxopt = "^0.8.3"
-tensorflow = "^2.16.1"
-tensorboard-plugin-profile = "^2.15.1"
-equinox = "^0.11.4"
-flax = "^0.8.4"
-pyperf = "^2.7.0"
-
-[tool.poetry.group.gpu.dependencies]
-jax = {extras = ["cuda12"], version = "^0.4.28"}
-
+pyvista = {extras = ["jupyter"], version = "^0.43.8"}
 
 [tool.poetry.group.dev.dependencies]
+ruff = "^0.4.3"
 pytest = "^7.1.3"
-ipykernel = "^6.29.4"
 black = "^24.4.0"
-
+pyperf = "^2.7.0"
 
 [build-system]
 requires = ["poetry-core"]

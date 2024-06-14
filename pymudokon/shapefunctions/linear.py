@@ -50,7 +50,7 @@ class LinearShapeFunction(ShapeFunction):
         )
 
     @jax.jit
-    def calculate_shapefunction(self: Self, nodes: Nodes, particles: Particles) -> Self:
+    def calculate_shapefunction(self: Self, nodes: Nodes, positions: Array) -> Self:
         """Top level function to calculate the shape functions. Assumes `get_interactions` has been called.
 
         Args:
@@ -70,7 +70,7 @@ class LinearShapeFunction(ShapeFunction):
         # 1. Calculate the particle-node pair interactions
         # see `ShapeFunction class` for more details
         intr_dist, intr_hashes = self.vmap_intr(
-            self.intr_ids, particles.positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size, dim
+            self.intr_ids, positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size, dim
         )
 
         # 3. Calculate the shape functions

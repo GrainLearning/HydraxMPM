@@ -10,6 +10,7 @@ from .forces.dirichletbox import DirichletBox
 from .forces.forces import Forces
 from .forces.gravity import Gravity
 from .forces.nodewall import NodeWall
+from .forces.rigidparticles import RigidParticles
 
 # from .ip_benchmarks.plotting import plot_q_p, plot_strain_grid, plot_stress_grid, plot_tau_gamma
 from .ip_benchmarks.simpleshear import simple_shear
@@ -68,5 +69,6 @@ __all__ = [
     "get_pressure",
     "plot_simple_3D",
     "points_to_3D",
-    "NodeWall"
+    "NodeWall",
+    "RigidParticles"
 ]

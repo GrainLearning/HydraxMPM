@@ -24,7 +24,9 @@ def plot_simple_3D(
         output_file: str="output.gif",
         plot_params: Dict[str, Any] = None,
         camera_params: Dict[str, Any] = None,
-        theme="dark"
+        theme="dark",
+        points_data_rigid_dict: Dict[str, np.ndarray] = None,
+        plot_params_rigid: Dict[str, Any] = None
     ):
     pv.set_plot_theme(theme)
     num_iterations,num_points, dim = point_data_dict["points"].shape
@@ -77,6 +79,27 @@ def plot_simple_3D(
         color="white",
         style="wireframe"
     )
+
+    if points_data_rigid_dict is not None:
+        cloud_rigid = pv.PolyData(
+            points_to_3D(points_data_rigid_dict["points"][0],dim)
+        )
+        for key, value in points_data_rigid_dict.items():
+            if key == "points":
+                continue
+
+        cloud_rigid.point_data[key] = value[0]
+
+        if plot_params_rigid is None:
+            plot_params_rigid = {}
+        if "style" not in plot_params_rigid:
+            plot_params_rigid["style"] = "points"
+            
+        pl.add_mesh(
+            cloud_rigid,
+            **plot_params_rigid
+        )
+    
 
     if camera_params is None:
         camera_params = {}

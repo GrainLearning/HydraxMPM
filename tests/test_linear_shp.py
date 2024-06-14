@@ -23,13 +23,13 @@ def test_create():
 
 def test_calc_shp_2d():
     """Test the linear shape function for top level container input."""
-    particles = pm.Particles.create(positions=jnp.array([[0.45, 0.21], [0.8, 0.4]]))
+    positions=jnp.array([[0.45, 0.21], [0.8, 0.4]])
 
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1)
 
     shapefunction = pm.LinearShapeFunction.create(num_particles=2, dim=2)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
+    shapefunction = shapefunction.calculate_shapefunction(nodes, positions)
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (8,))
 
     expected_shapef = jnp.array([0.45000005, 0.04999995, 0.45000005, 0.04999995, 1.0, 0.0, 0.0, 0.0])
@@ -78,13 +78,13 @@ def test_calc_shp_2d():
 
 def test_calc_shp_3d():
     """Test the linear shape function for top level container input."""
-    particles = pm.Particles.create(positions=jnp.array([[0.45, 0.21, 0.1], [0.8, 0.4, 0.1]]))
+    positions=jnp.array([[0.45, 0.21, 0.1], [0.8, 0.4, 0.1]])
 
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 1.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
 
     shapefunction = pm.LinearShapeFunction.create(num_particles=2, dim=3)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes, particles)
+    shapefunction = shapefunction.calculate_shapefunction(nodes, positions)
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (16,))
     expected_shapef = jnp.array([0.45, 0.0, 0.45, 0.0, 0.05, 0.0, 0.05, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 

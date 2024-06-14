@@ -62,9 +62,6 @@ usl = pm.USL.create(
 
 )
 
-
-
-
 points_data_dict = {
     "points" : [],
     "KE":[]

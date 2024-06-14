@@ -308,7 +308,7 @@ class USL(Solver):
 
         particles = self.particles.refresh()
 
-        shapefunctions = self.shapefunctions.calculate_shapefunction(nodes=nodes, particles=particles)
+        shapefunctions = self.shapefunctions.calculate_shapefunction(nodes=nodes, positions=particles.positions)
 
         nodes = p2g(
             nodes=nodes,

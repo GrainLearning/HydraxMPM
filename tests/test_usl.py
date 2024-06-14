@@ -50,7 +50,7 @@ def test_p2g_2d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles)
+    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
     nodes = pm.solvers.usl.p2g(
         nodes=nodes,
@@ -88,7 +88,7 @@ def test_p2g_3d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 3)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles)
+    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
     nodes = pm.solvers.usl.p2g(
         nodes=nodes,
@@ -135,7 +135,7 @@ def test_g2p_2d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles)
+    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
     nodes = pm.solvers.usl.p2g(
         nodes=nodes,
@@ -199,7 +199,7 @@ def test_g2p_3d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 3)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles)
+    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
     nodes = pm.solvers.usl.p2g(
         nodes=nodes,

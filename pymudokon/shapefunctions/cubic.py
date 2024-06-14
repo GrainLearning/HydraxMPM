@@ -206,7 +206,7 @@ class CubicShapeFunction(ShapeFunction):
     def calculate_shapefunction(
         self: Self,
         nodes: Nodes,
-        particles: Particles,
+        positions: Array,
     ) -> Self:
         """Top level function to calculate the shape functions.
 
@@ -227,7 +227,7 @@ class CubicShapeFunction(ShapeFunction):
         # 1. Calculate the particle-node pair interactions
         # see `ShapeFunction class` for more details
         intr_dist, intr_hashes = self.vmap_intr(
-            self.intr_ids, particles.positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size, dim
+            self.intr_ids, positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size, dim
         )
 
         intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, intr_species, nodes.inv_node_spacing)
