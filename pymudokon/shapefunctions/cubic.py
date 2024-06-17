@@ -183,7 +183,7 @@ class CubicShapeFunction(ShapeFunction):
         """
         # TODO generalize
         # middle nodes
-        species = jax.numpy.zeros(nodes.grid_size).astype(jax.numpy.int32)
+        species = jax.numpy.zeros(nodes.grid_size).astype(jax.numpy.int32).T
 
         # # # boundary nodes 0 + h
         # species = species.at[1, 1:-1].set(1)
@@ -203,11 +203,7 @@ class CubicShapeFunction(ShapeFunction):
         return nodes.replace(species=species)
 
     @jax.jit
-    def calculate_shapefunction(
-        self: Self,
-        nodes: Nodes,
-        positions: Array,
-    ) -> Self:
+    def calculate_shapefunction(self: Self, nodes: Nodes, positions: Array) -> Self:
         """Top level function to calculate the shape functions.
 
         Args:
@@ -231,8 +227,12 @@ class CubicShapeFunction(ShapeFunction):
         )
 
         intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, intr_species, nodes.inv_node_spacing)
-        return self.replace(intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes)
-     
+
+        # return nodal distances for APIC
+        return self.replace(
+            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes
+        ), intr_dist
+
     def validate(self: Self, solver) -> Self:
         """Verify the shape functions and gradients.
 
@@ -283,19 +283,16 @@ class CubicShapeFunction(ShapeFunction):
         intr_shapef = jnp.prod(basis)
         # intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
         dim = basis.shape[0]
-        if dim ==2:
+        if dim == 2:
             intr_shapef_grad = jnp.array(
                 [
-                dbasis[0]*basis[1],
-                dbasis[1]*basis[0],
+                    dbasis[0] * basis[1],
+                    dbasis[1] * basis[0],
                 ]
             )
-        elif dim ==3:
+        elif dim == 3:
             intr_shapef_grad = jnp.array(
-                [
-                dbasis[0]*basis[1]*basis[2],
-                dbasis[1]*basis[0]*basis[2],
-                dbasis[2]*basis[0]*basis[1]]
+                [dbasis[0] * basis[1] * basis[2], dbasis[1] * basis[0] * basis[2], dbasis[2] * basis[0] * basis[1]]
             )
         else:
             intr_shapef_grad = dbasis

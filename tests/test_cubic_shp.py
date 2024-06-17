@@ -30,7 +30,7 @@ def test_calc_shp_2d():
 
     nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes, positions)
+    shapefunction, _ = shapefunction.calculate_shapefunction(nodes, positions)
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (32,))
 
     expected_shapef = [
@@ -121,7 +121,7 @@ def test_calc_shp_3d():
 
     nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction = shapefunction.calculate_shapefunction(nodes, positions)
+    shapefunction, _ = shapefunction.calculate_shapefunction(nodes, positions)
     np.testing.assert_allclose(shapefunction.intr_shapef.shape, (64,))
 
     expected_shapef = [

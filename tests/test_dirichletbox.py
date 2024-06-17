@@ -1,4 +1,4 @@
-"""Unit tests for the NodesContainer class."""
+"""Unit tests for the DirichletBox class."""
 
 import jax.numpy as jnp
 
@@ -6,7 +6,7 @@ import pymudokon as pm
 
 
 def test_init():
-    """Unit test to initialize the NodesContainer class."""
+    """Unit test to initialize the DirichletBox class."""
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
 
     box = pm.DirichletBox.create(nodes)
@@ -15,7 +15,7 @@ def test_init():
 
 
 def test_apply_on_node_moments():
-    """Unit test to initialize the NodesContainer class."""
+    """Unit to test update of DirichletBox."""
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1)
 
     box = pm.DirichletBox.create(
@@ -25,15 +25,4 @@ def test_apply_on_node_moments():
 
     box.apply_on_nodes_moments(nodes)
 
-    # # 3D fix
-    # nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
-
-    # box = pm.DirichletBox.create()
-
-    # box.apply_on_nodes_moments(nodes)
-
-    # assert isinstance(box, pm.DirichletBox)
-
-
-# test_init()
-test_apply_on_node_moments()
+    # passed the test if no error is raised

@@ -50,14 +50,18 @@ def test_p2g_2d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
+    shapefunctions, _ = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
-    nodes = pm.solvers.usl.p2g(
-        nodes=nodes,
+    usl = pm.USL.create(
         particles=particles,
+        nodes=nodes,
+        materials=[],  # no material
         shapefunctions=shapefunctions,
+        alpha=0.99,
         dt=0.1,
     )
+
+    nodes = usl.p2g(nodes=nodes, particles=particles, shapefunctions=shapefunctions)
 
     expected_mass = jnp.array([0.27, 0.03, 0.09, 0.01])
     np.testing.assert_allclose(nodes.masses, expected_mass, rtol=1e-3)
@@ -88,14 +92,18 @@ def test_p2g_3d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 3)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
+    shapefunctions, _ = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
-    nodes = pm.solvers.usl.p2g(
-        nodes=nodes,
+    usl = pm.USL.create(
         particles=particles,
+        nodes=nodes,
+        materials=[],  # no material
         shapefunctions=shapefunctions,
+        alpha=0.99,
         dt=0.1,
     )
+
+    nodes = usl.p2g(nodes=nodes, particles=particles, shapefunctions=shapefunctions)
     # note these values have not been verified analytically
     expected_mass = jnp.array([0.189, 0.02100001, 0.063, 0.007, 0.081, 0.009, 0.027, 0.003])
 
@@ -135,22 +143,20 @@ def test_g2p_2d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
+    shapefunctions, _ = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
-    nodes = pm.solvers.usl.p2g(
-        nodes=nodes,
-        particles=particles,
-        shapefunctions=shapefunctions,
-        dt=0.1,
-    )
-
-    particles = pm.solvers.usl.g2p(
+    usl = pm.USL.create(
         particles=particles,
         nodes=nodes,
+        materials=[],  # no material
         shapefunctions=shapefunctions,
         alpha=0.99,
         dt=0.1,
     )
+
+    nodes = usl.p2g(nodes=nodes, particles=particles, shapefunctions=shapefunctions)
+
+    particles = usl.g2p(particles=particles, nodes=nodes, shapefunctions=shapefunctions)
 
     expected_volumes = jnp.array([0.49855555, 0.2848889])
 
@@ -199,21 +205,20 @@ def test_g2p_3d():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 3)
 
-    shapefunctions = shapefunctions.calculate_shapefunction(nodes, particles.positions)
+    shapefunctions, _ = shapefunctions.calculate_shapefunction(nodes, particles.positions)
 
-    nodes = pm.solvers.usl.p2g(
-        nodes=nodes,
-        particles=particles,
-        shapefunctions=shapefunctions,
-        dt=0.1,
-    )
-    particles = pm.solvers.usl.g2p(
+    usl = pm.USL.create(
         particles=particles,
         nodes=nodes,
+        materials=[],  # no material
         shapefunctions=shapefunctions,
         alpha=0.99,
         dt=0.1,
     )
+
+    nodes = usl.p2g(nodes=nodes, particles=particles, shapefunctions=shapefunctions)
+
+    particles = usl.g2p(particles=particles, nodes=nodes, shapefunctions=shapefunctions)
 
     expected_volumes = jnp.array([0.4402222222222, 0.25155553])
 

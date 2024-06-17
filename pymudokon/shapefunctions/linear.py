@@ -76,7 +76,10 @@ class LinearShapeFunction(ShapeFunction):
         # 3. Calculate the shape functions
         intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, nodes.inv_node_spacing)
 
-        return self.replace(intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes)
+        # return nodal distancesm if needed
+        return self.replace(
+            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes
+        ), intr_dist
 
     @partial(jax.vmap, in_axes=(None, 0, None), out_axes=(0))
     def vmap_intr_shp(
@@ -105,23 +108,18 @@ class LinearShapeFunction(ShapeFunction):
         intr_shapef = jnp.prod(basis)
         # intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
         dim = basis.shape[0]
-        if dim ==2:
+        if dim == 2:
             intr_shapef_grad = jnp.array(
                 [
-                dbasis[0]*basis[1],
-                dbasis[1]*basis[0],
+                    dbasis[0] * basis[1],
+                    dbasis[1] * basis[0],
                 ]
             )
-        elif dim ==3:
+        elif dim == 3:
             intr_shapef_grad = jnp.array(
-                [
-                dbasis[0]*basis[1]*basis[2],
-                dbasis[1]*basis[0]*basis[2],
-                dbasis[2]*basis[0]*basis[1]]
+                [dbasis[0] * basis[1] * basis[2], dbasis[1] * basis[0] * basis[2], dbasis[2] * basis[0] * basis[1]]
             )
         else:
             intr_shapef_grad = dbasis
-
-
 
         return intr_shapef, intr_shapef_grad

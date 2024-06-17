@@ -1,192 +1,121 @@
-
-
-
-
 import pyvista as pv
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import numpy as np
 
-def points_to_3D(
-        points,
-        dim=2
-    ):
+
+def points_to_3D(points, dim=2):
     if dim == 3:
         return points
     return np.pad(points, [(0, 0), (0, 1)], mode="constant")
 
 
-def add_point_mesh(
-    positions: np.ndarray,
-    scalars: np.ndarray,
-    scalar_name: str,
-    params: Dict[str, Any],
-    plotter: pv.Plotter
-    ):
-    num_points, dim = positions.shape
+def add_cloud_mesh(
+    positions: np.ndarray, scalars: np.ndarray, scalar_name: str, params: Dict[str, Any], plotter: pv.Plotter
+):
+    num_points, dim = positions[0].shape
 
-    cloud = pv.PolyData(points_to_3D(positions,dim))
+    cloud = pv.PolyData(points_to_3D(positions[0], dim))
 
-    cloud.point_data[scalar_name] = scalars
+    if scalars is not None:
+        cloud.point_data[scalar_name] = scalars[0]
 
-    plotter.add_mesh(
-        cloud,
-        **params
-    )
+    if params is None:
+        params = {}
+
+    params.setdefault("style", "points")
+    params.setdefault("cmap", "inferno")
+    params.setdefault("show_edges", True)
+    params.setdefault("clim", [-0.1, 0.1])
+    params.setdefault("scalar_bar_args", dict(position_x=0.2, position_y=0.01))
+    params.setdefault("scalars", scalar_name)
+
+    plotter.add_mesh(cloud, **params)
     return plotter, cloud
 
 
+def update_cloud_mesh(iter: int, positions: np.ndarray, scalars: np.ndarray, scalar_name: str, cloud: pv.PolyData):
+    num_points, dim = positions[iter].shape
+    cloud.points = points_to_3D(positions[iter], dim)
+    if scalars is not None:
+        cloud.point_data[scalar_name] = scalars[iter]
+    return cloud
+
+
+def add_box_mesh(origin: np.ndarray, end: np.ndarray, params: Dict[str, Any], plotter: pv.Plotter):
+    if len(origin) == 2:  # dim==2
+        origin = np.pad(origin, [(0, 1)], mode="constant")
+        end = np.pad(end, [(0, 1)], mode="constant")
+
+    box = pv.Box(bounds=np.array(list(zip(origin, end))).flatten())
+
+    if params is None:
+        params = {}
+
+    params.setdefault("color", "white")
+    params.setdefault("style", "wireframe")
+
+    plotter.add_mesh(box, **params)
+    return plotter, box
+
+
+def set_camera(params: Dict[str, Any], dim: int, plotter: pv.Plotter):
+    if params is None:
+        params = {}
+    if dim == 2:
+        params.setdefault("camera_position", "xy")
+        params.setdefault("azimuth", 0)
+        params.setdefault("elevation", 0)
+        params.setdefault("zoom", 1.1)
+    else:
+        params.setdefault("camera_position", "xz")
+        params.setdefault("azimuth", 45)
+        params.setdefault("elevation", 30)
+        params.setdefault("zoom", 0.9)
+
+    plotter.camera_position = params["camera_position"]
+    plotter.camera.azimuth = params["azimuth"]
+    plotter.camera.elevation = params["elevation"]
+    plotter.camera.zoom(params["zoom"])
+    return plotter
+
+
 def plot_simple(
-        particles_positions: np.ndarray,
-        particles_scalars: np.ndarray,
-        particles_scalar_name: str,
-        theme: str = "dark",
-    ):
+    origin: np.ndarray,
+    end: np.ndarray,
+    particles_points: List[np.ndarray],
+    particles_scalars: List[np.ndarray] = None,
+    particles_scalar_name: str = None,
+    rigid_points: List[np.ndarray] = None,
+    box_plot_params: Dict[str, Any] = None,
+    particles_plot_params: Dict[str, Any] = None,
+    rigid_plot_params: Dict[str, Any] = None,
+    theme: str = "dark",
+    output_file: str = "output.gif",
+):
     pv.set_plot_theme(theme)
+
     pl = pv.Plotter()
+    pl, box = add_box_mesh(origin, end, box_plot_params, pl)
 
-    pl, cloud = add_point_mesh(
-        particles_positions,
-        particles_scalars,
-        particles_scalar_name,
-        dict(style="points", cmap="inferno", show_edges=True, clim=[-0.1, 0.1], scalar_bar_args=dict(position_x=0.2, position_y=0.01)),
+    pl, particles_cloud = add_cloud_mesh(
+        particles_points, particles_scalars, particles_scalar_name, particles_plot_params, pl
     )
-# def update_point_mesh(
-#         positions: np.ndarray,
-#         scalars: np.ndarray,
-#         scalar_name: str,
-#         plotter: pv.Plotter
-# )
 
+    if rigid_points is not None:
+        pl, rigid_cloud = add_cloud_mesh(rigid_points, None, None, rigid_plot_params, pl)
 
-# def plot_simple_3D(
-    #     point_data_dict: Dict[str, np.ndarray],
-    #     origin: np.ndarray,
-    #     end: np.ndarray,
-    #     output_file: str="output.gif",
-    #     plot_params: Dict[str, Any] = None,
-    #     camera_params: Dict[str, Any] = None,
-    #     theme="dark",
-    #     points_data_rigid_dict: Dict[str, np.ndarray] = None,
-    #     plot_params_rigid: Dict[str, Any] = None
-    # ):
-    # 
-    # num_iterations,num_points, dim = point_data_dict["points"].shape
-    
-    # if "points" not in point_data_dict:
-    #     raise ValueError("The point_data_dict must contain a key 'points' with the positions of the points")
+    pl = set_camera(particles_plot_params, particles_points[0].shape[1], pl)
 
+    pl.open_gif(output_file)
 
+    for iter in range(len(particles_points)):
+        particles_cloud = update_cloud_mesh(
+            iter, particles_points, particles_scalars[iter], particles_scalar_name, particles_cloud
+        )
 
-    # for key, value in point_data_dict.items():
-    #     if key == "points":
-    #         continue
+        if rigid_points is not None:
+            rigid_cloud = update_cloud_mesh(iter, rigid_points, None, None, rigid_cloud)
+        pl.write_frame()
 
-    #     cloud.point_data[key] = value[0]
-
-    # if dim == 2:
-    #     origin = np.pad(origin, [(0, 1)], mode="constant")
-    #     end = np.pad(end, [(0, 1)], mode="constant")
-
-    # box = pv.Box(bounds=np.array(list(zip(origin, end))).flatten())
-
-    # pl = pv.Plotter()
-    
-    # if plot_params is None:
-    #     plot_params = {}
-
-    # if "style" not in plot_params:
-    #     plot_params["style"] = "points"
-    
-    # if "cmap" not in plot_params:
-    #     plot_params["cmap"] = "inferno"
-    
-    # if "show_edges" not in plot_params:
-    #     plot_params["show_edges"] = True
-
-    # if "clim" not in plot_params:
-    #     plot_params["clim"] = [-0.1, 0.1]
-
-    # if "scalar_bar_args" not in plot_params:
-    #     plot_params["scalar_bar_args"] = dict( position_x=0.2, position_y=0.01)
-    # pl.add_mesh(
-    #     cloud,
-    #     **plot_params
-    # )
-
-    # pl.add_mesh(
-    #     box,
-    #     color="white",
-    #     style="wireframe"
-    # )
-
-    # if points_data_rigid_dict is not None:
-    #     cloud_rigid = pv.PolyData(
-    #         points_to_3D(points_data_rigid_dict["points"][0],dim)
-    #     )
-    #     for key, value in points_data_rigid_dict.items():
-    #         if key == "points":
-    #             continue
-
-    #     cloud_rigid.point_data[key] = value[0]
-
-    #     if plot_params_rigid is None:
-    #         plot_params_rigid = {}
-    #     if "style" not in plot_params_rigid:
-    #         plot_params_rigid["style"] = "points"
-            
-    #     pl.add_mesh(
-    #         cloud_rigid,
-    #         **plot_params_rigid
-    #     )
-    
-
-    # if camera_params is None:
-    #     camera_params = {}
-
-    # if "camera_position" not in camera_params:
-    #     if dim == 2:
-    #         camera_params["camera_position"] = "xy"
-    #     else:
-    #         camera_params["camera_position"] = "xz"
-    
-    # if "azimuth" not in camera_params:
-    #     if dim == 2:
-    #         camera_params["azimuth"] = 0
-    #     else:
-    #         camera_params["azimuth"] = 45
-    
-    # if "elevation" not in camera_params:
-    #     if dim == 2:
-    #         camera_params["elevation"] = 0
-    #     else:
-    #         camera_params["elevation"] = 30
-    
-    # if "zoom" not in camera_params:
-    #     if dim == 2:
-    #         camera_params["zoom"] = 1.1
-    #     else:
-    #         camera_params["zoom"] = 0.9
-        
-    
-
-    # pl.camera_position = camera_params["camera_position"]
-    # pl.camera.azimuth = camera_params["azimuth"]
-    # pl.camera.elevation = camera_params["elevation"]
-    # pl.camera.zoom(camera_params["zoom"])
-
-
-
-    # pl.open_gif(output_file)
-
-    # for iter in range(num_iterations):
-
-    #     cloud.points = points_to_3D(point_data_dict["points"][iter],dim)
-
-
-    #     if "scalars" in plot_params:
-    #         cloud.point_data[plot_params["scalars"]] = point_data_dict[plot_params["scalars"]][iter]
-
-    #     pl.write_frame()
-
-    # pl.close()
+    pl.close()

@@ -13,6 +13,7 @@ from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..shapefunctions.shapefunction import ShapeFunction
 
+
 @struct.dataclass
 class NodeWall:
     """Walls.
@@ -24,17 +25,17 @@ class NodeWall:
         type 3: slip in max direction of dim
 
     dim  0:x, 1:y, 2:z
-    
+
     """
+
     wall_type: jnp.int32
     wall_dim: jnp.int32
     node_ids: jnp.array
 
-
     @classmethod
-    def create(cls: Self, wall_type: jnp.int32, wall_dim:jnp.int32, node_ids: jnp.array) -> Self:
+    def create(cls: Self, wall_type: jnp.int32, wall_dim: jnp.int32, node_ids: jnp.array) -> Self:
         return cls(wall_type=wall_type, wall_dim=wall_dim, node_ids=node_ids)
-    
+
     @jax.jit
     def apply_on_nodes_moments(
         self: Self,
@@ -43,19 +44,20 @@ class NodeWall:
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
-            
-
         def stick_all(moments_nt):
             moments_nt = moments_nt.at[self.node_ids].set(0.0)
             return moments_nt
+
         def stick_x(moments_nt):
-            moments_nt = moments_nt.at[self.node_ids,  self.wall_dim].set(0.0)
+            moments_nt = moments_nt.at[self.node_ids, self.wall_dim].set(0.0)
             return moments_nt
+
         def slip_min(moments_nt):
-            moments_nt = moments_nt.at[self.node_ids,  self.wall_dim].min(0.0)
+            moments_nt = moments_nt.at[self.node_ids, self.wall_dim].min(0.0)
             return moments_nt
+
         def slip_max(moments_nt):
-            moments_nt = moments_nt.at[self.node_ids,  self.wall_dim].max(0.0)
+            moments_nt = moments_nt.at[self.node_ids, self.wall_dim].max(0.0)
             return moments_nt
 
         moments_nt = jax.lax.switch(
