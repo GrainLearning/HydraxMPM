@@ -1,12 +1,11 @@
-"""Gravity force on Nodes."""
+"""Module for the gravity force. Impose gravity on the nodes."""
 
 from functools import partial
 from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
-from jax import Array
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
@@ -14,27 +13,26 @@ from ..core.particles import Particles
 from ..shapefunctions.shapefunction import ShapeFunction
 
 
-@struct.dataclass
+@chex.dataclass(mappable_dataclass=False, frozen=True)
 class Gravity:
-    """Dataclass containing the state of the Gravity forces.
+    """Gravity force enforced on the background grid.
+
+    Example usage:
+        >>> import jax.numpy as jnp
+        >>> import pymudokon as pm
+        >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+        >>> grav = pm.Gravity.create(jnp.array([0.0, 9.8]))
+        >>> # add gravity to solver
 
     Attributes:
         gravity (Array): Gravity vector `(dim,)`.
     """
 
-    gravity: Array
+    gravity: chex.Array
 
     @classmethod
-    def create(cls: Self, gravity: Array) -> Self:
-        """Initialize Gravity force on Nodes.
-
-        Args:
-            cls (Gravity): Self reference.
-            gravity (Array): Gravity vector `(dim,)`.
-
-        Returns:
-            Gravity: Initialized Gravity force.
-        """
+    def create(cls: Self, gravity: chex.Array) -> Self:
+        """Initialize Gravity force on Nodes."""
         dim = gravity.shape[0]
         gravity.reshape(-1, dim)
         return cls(gravity=gravity)
@@ -47,47 +45,18 @@ class Gravity:
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
-        """Apply gravity on the nodes.
-
-        Args:
-            self (Self): Self reference.
-            nodes (Nodes): Nodes in the simulation.
-            particles (Particles, optional): MPM particles. Defaults to None.
-            shapefunctions (Interactions, optional): Shapefunctions. Defaults to None.
-            dt (jnp.float32, optional): Time step. Defaults to 0.0.
-
-        Returns:
-            Tuple[Nodes, Self]: Updated nodes and gravity force.
-
-        Example:
-            >>> import jax.numpy as jnp
-            >>> import pymudokon as pm
-            >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
-            >>> grav = pm.Gravity.create(jnp.array([0.0, 9.8]))
-            >>> nodes, grav = grav.apply_on_nodes_moments(nodes=nodes, dt=0.01)
-        """
-        moments, moments_nt = self.apply_gravity(nodes.moments, nodes.moments_nt, nodes.masses, self.gravity, dt)
+        """Apply gravity on the nodes."""
+        moments, moments_nt = self.apply_gravity(nodes.moments, nodes.moments_nt, nodes.masses, dt)
         return nodes.replace(
             moments_nt=moments_nt,
         ), self
 
-    @partial(jax.jit, static_argnames=["self", "gravity"])
+    @partial(jax.jit, static_argnames=["self"])
     def apply_gravity(
-        self, moments: Array, moments_nt: Array, masses: Array, gravity: Array, dt: jnp.float32
-    ) -> Tuple[Array, Array]:
-        """Apply gravity on the nodes.
-
-        Args:
-            moments (Array): Nodal moments `(num_nodes, dim)`.
-            moments_nt (Array): Nodal moments in the forward step `(num_nodes, dim)`.
-            masses (Array): Nodal masses `(num_nodes,)`.
-            gravity (Array): Gravity vector `(dim,)`.
-            dt (jnp.float32): Time step.
-
-        Returns:
-            Tuple[Array, Array]: Updated moments and moments_nt.
-        """
-        moment_gravity = masses.reshape(-1, 1) * gravity * dt
+        self, moments: chex.Array, moments_nt: chex.Array, masses: chex.Array, dt: jnp.float32
+    ) -> Tuple[chex.Array, chex.Array]:
+        """Apply gravity on the nodes moments."""
+        moment_gravity = masses.reshape(-1, 1) * self.gravity * dt
 
         moments_nt = moments_nt + moment_gravity
 

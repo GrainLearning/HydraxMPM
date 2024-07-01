@@ -1,13 +1,11 @@
 """Run two-sphere impact simulation."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 import pymudokon as pm
 
-import pyvista as pv
-
-import jax
 
 def create_circle(center: np.array, radius: float, cell_size: float, ppc: int = 2):
     """Generate a circle of particles.
@@ -60,10 +58,8 @@ usl = pm.USL.create(
     particles=particles, nodes=nodes, materials=[material], shapefunctions=shapefunctions, alpha=0.98, dt=0.001
 )
 
-points_data_dict = {
-    "points" : [],
-    "KE" : []
-}
+points_data_dict = {"points": [], "KE": []}
+
 
 @jax.tree_util.Partial
 def save_particles(package):
@@ -71,7 +67,10 @@ def save_particles(package):
     positions = usl.particles.positions
 
     points_data_dict["points"].append(positions)
-    KE = pm.get_KE( usl.particles.masses,usl.particles.velocities,)
+    KE = pm.get_KE(
+        usl.particles.masses,
+        usl.particles.velocities,
+    )
     points_data_dict["KE"].append(KE)
     print(KE.mean())
     print(f"output {steps}", end="\r")
@@ -83,14 +82,12 @@ usl = usl.solve(num_steps=3000, output_step=100, output_function=save_particles)
 for key, value in points_data_dict.items():
     points_data_dict[key] = np.array(value)
 
-pm.plot_simple_3D(
-    points_data_dict,
+
+pm.plot_simple(
     origin=jnp.array([0.0, 0.0]),
-    end=jnp.array([1,1]),
-    output_file="output.gif",
-    plot_params={
-        "scalars": "KE",
-        "cmap": "viridis",
-        "clim": [0.009, 0.0125],
-    }
+    end=jnp.array([1, 1]),
+    particles_points=points_data_dict["points"],
+    particles_scalars=points_data_dict["KE"],
+    particles_scalar_name="KE",
+    particles_plot_params={"point_size": 5, "clim": [0.009, 0.0125]},
 )

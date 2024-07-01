@@ -1,4 +1,4 @@
-"""Unit tests for the NodesContainer class."""
+"""Unit tests for rigid particles."""
 
 import jax.numpy as jnp
 import numpy as np
@@ -7,8 +7,7 @@ import pymudokon as pm
 
 
 def test_init():
-    """Unit test to initialize the NodesContainer class."""
-    # nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
+    """Unit test to initialize rigid particles."""
 
     rigid_particles = pm.RigidParticles.create(
         positions=jnp.array([[0.45, 0.21], [0.8, 0.4]]),
@@ -20,7 +19,7 @@ def test_init():
 
 
 def test_apply_on_node_moments():
-    """Unit test to initialize the NodesContainer class."""
+    """Unit test apply rigid particles on nodes moments."""
     nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
 
     particles = pm.Particles.create(positions=jnp.array([[0.2, 0.7]]), masses=jnp.array([1.0]))
@@ -77,7 +76,3 @@ def test_apply_on_node_moments():
         ]
     )
     np.testing.assert_allclose(nodes.moments_nt, expected_moments_nt)
-
-
-test_init()
-test_apply_on_node_moments()

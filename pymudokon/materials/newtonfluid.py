@@ -4,7 +4,7 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-from flax import struct
+import chex
 from jax import Array
 from typing_extensions import Self
 
@@ -42,7 +42,7 @@ def vmap_update(
     return -pressure * jnp.eye(3) + 2.0 * viscosity * dev_strain_rate
 
 
-@struct.dataclass
+@chex.dataclass
 class NewtonFluid(Material):
     """Constitutive model for a nearly incompressible Newtonian fluid.
 
@@ -55,7 +55,6 @@ class NewtonFluid(Material):
             parameter for the equation of state. Defaults to 7.0 (water).
     """
 
-    # TODO we can replace this with incremental form / or hyperelastic form
     K: jnp.float32
     viscosity: jnp.float32
     gamma: jnp.float32
@@ -80,7 +79,7 @@ class NewtonFluid(Material):
             >>> import pymudokon as pm
             >>> material = pm.NewtonFluid.register(K=1.0e6, viscosity=0.1)
         """
-        return cls(K=K, viscosity=viscosity, gamma=gamma)
+        return cls(K=K, viscosity=viscosity, gamma=gamma, stress_ref=None)
 
     @jax.jit
     def update_stress(

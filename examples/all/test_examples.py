@@ -1,4 +1,6 @@
-# """Integration test for two sphere impact example."""
+# Not implemented yet... idea is to run a test suit on examples
+#
+
 
 # import sys
 # import unittest

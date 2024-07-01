@@ -1,18 +1,29 @@
-"""Module for containing base class for the material."""
+"""Base class for materials in the simulation."""
 
 from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
 from typing_extensions import Self
 
 from ..core.particles import Particles
 
 
-@struct.dataclass
+@chex.dataclass
 class Material:
-    """Bass state for the materials."""
+    """Base material class.
+
+    Attributes:
+        stress_ref: Reference stress tensor.
+    """
+
+    stress_ref: chex.Array
+
+    @classmethod
+    def create(cls: Self, stress_ref: chex.Array = None) -> Self:
+        """Initialize the base material."""
+        return cls(stress_ref=stress_ref)
 
     @jax.jit
     def update_stress(
@@ -20,5 +31,5 @@ class Material:
         particles: Particles,
         dt: jnp.float32,  # potentially unused
     ) -> Tuple[Particles, Self]:
-        """Base update method for materials."""
+        """Placeholder for stress update."""
         return particles, self

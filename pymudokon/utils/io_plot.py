@@ -1,7 +1,7 @@
-import pyvista as pv
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 import numpy as np
+import pyvista as pv
 
 
 def points_to_3D(points, dim=2):

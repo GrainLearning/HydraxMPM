@@ -1,10 +1,10 @@
-"""Module for containing base class for the material."""
+"""Module containing base forces state."""
 
 from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
@@ -12,9 +12,14 @@ from ..core.particles import Particles
 from ..shapefunctions.shapefunction import ShapeFunction
 
 
-@struct.dataclass
+@chex.dataclass
 class Forces:
     """Force state for the material properties."""
+
+    @classmethod
+    def create(cls: Self) -> Self:
+        """Initialize the force state."""
+        return cls()
 
     @jax.jit
     def apply_on_particles(
@@ -24,7 +29,7 @@ class Forces:
         shapefunctions: ShapeFunction,
         dt: jnp.float32,
     ) -> Tuple[Particles, Self]:
-        """Apply the force on the particles."""
+        """Placeholder. Apply the force on the particles."""
         return particles, self
 
     @jax.jit
@@ -35,5 +40,5 @@ class Forces:
         shapefunctions: ShapeFunction,
         dt: jnp.float32,
     ) -> Tuple[Nodes, Self]:
-        """Apply the force on the nodes."""
+        """Placeholder. Apply the force on the nodes."""
         return nodes, self

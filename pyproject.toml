@@ -15,6 +15,7 @@ jax = {extras = ["cpu"], version = "^0.4.28"}
 typing-extensions = "^4.11.0" # type hinting of python 3.12
 optax = "^0.2.2" # optimizers for return mapping, element benchmarks etc.
 flax = "^0.8.4" # uses dataclass utilities for jax
+chex = "^0.1.86"
 
 
 [tool.poetry.group.gpu.dependencies]

@@ -1,16 +1,16 @@
 # def debug_particles(
-#         step: jnp.int32, 
+#         step: jnp.int32,
 #         particles: pm.Particles,
 #         stress_limit: jnp.float32 = 1e6,
 #     ):
 #     """
 #     First challenge is to narow down the iteration.
-    
+
 #     Second challenge is the find function causing the error.
 
 #     Third challenge is the find the memory location of the error.
 #     """
-    
+
 #     # Check out of bounds
 #     positions = usl.particles.positions
 #     out_of_bounds = jnp.any(jnp.logical_or(positions < nodes.origin, positions > nodes.end))

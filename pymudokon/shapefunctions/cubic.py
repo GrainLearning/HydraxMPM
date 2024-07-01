@@ -2,27 +2,22 @@
 
 References:
     - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
-    - [Gaussian Quadrature - Wikipedia](https://en.wikipedia.org/wiki/Gaussian_quadrature)
 """
-
-# TODO add test for cubic shape function
-# TODO add docstring for cubic shape function
 
 from functools import partial
 from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-from flax import struct
+import chex
 from jax import Array
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
-from ..core.particles import Particles
 from .shapefunction import ShapeFunction
 
 
-@struct.dataclass
+@chex.dataclass(mappable_dataclass=False, frozen=True)
 class CubicShapeFunction(ShapeFunction):
     """Cubic B-spline shape functions for the particle-node interactions."""
 
@@ -184,7 +179,7 @@ class CubicShapeFunction(ShapeFunction):
         # TODO generalize
         # middle nodes
         species = jax.numpy.zeros(nodes.grid_size).astype(jax.numpy.int32).T
-
+        # TODO fix this
         # # # boundary nodes 0 + h
         # species = species.at[1, 1:-1].set(1)
         # species = species.at[1:-1, 1].set(1)
@@ -220,10 +215,10 @@ class CubicShapeFunction(ShapeFunction):
         # repeat for each dimension
         intr_species = nodes.species.take(self.intr_hashes, axis=0).reshape(-1)
 
-        # 1. Calculate the particle-node pair interactions
+        # Calculate the particle-node pair interactions
         # see `ShapeFunction class` for more details
         intr_dist, intr_hashes = self.vmap_intr(
-            self.intr_ids, positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size, dim
+            self.intr_ids, positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size
         )
 
         intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, intr_species, nodes.inv_node_spacing)
@@ -281,13 +276,14 @@ class CubicShapeFunction(ShapeFunction):
 
         basis, dbasis = jax.lax.switch(intr_species, spline_branches, (intr_dist, inv_node_spacing))
         intr_shapef = jnp.prod(basis)
-        # intr_shapef_grad = dbasis * jnp.roll(basis, shift=-1)
+
         dim = basis.shape[0]
         if dim == 2:
             intr_shapef_grad = jnp.array(
                 [
                     dbasis[0] * basis[1],
                     dbasis[1] * basis[0],
+                    0.0,
                 ]
             )
         elif dim == 3:
@@ -295,7 +291,7 @@ class CubicShapeFunction(ShapeFunction):
                 [dbasis[0] * basis[1] * basis[2], dbasis[1] * basis[0] * basis[2], dbasis[2] * basis[0] * basis[1]]
             )
         else:
-            intr_shapef_grad = dbasis
+            intr_shapef_grad = jnp.array([dbasis, 0.0, 0.0])
 
         return intr_shapef, intr_shapef_grad
 

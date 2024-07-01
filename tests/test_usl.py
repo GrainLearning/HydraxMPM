@@ -172,12 +172,18 @@ def test_g2p_2d():
     np.testing.assert_allclose(particles.velocities, expected_velocities, rtol=1e-3)
 
     expected_velgrads = jnp.array(
-        [[[-1.944444, -1.944444], [-0.9333334, -0.9333334]], [[-1.944444, -1.944444], [-0.9333334, -0.9333334]]]
+        [
+            [[-1.944444, -1.944444, 0.0], [-0.9333334, -0.9333334, 0.0], [0.0, 0.0, 0.0]],
+            [[-1.944444, -1.944444, 0.0], [-0.9333334, -0.9333334, 0.0], [0.0, 0.0, 0.0]],
+        ]
     )
 
     np.testing.assert_allclose(particles.velgrads, expected_velgrads, rtol=1e-3)
     expected_F = jnp.array(
-        [[[0.8055556, -0.1944444], [-0.09333334, 0.90666664]], [[0.8055556, -0.1944444], [-0.09333334, 0.90666664]]]
+        [
+            [[0.8055556, -0.1944444, 0.0], [-0.09333334, 0.90666664, 0.0], [0.0, 0.0, 1.0]],
+            [[0.8055556, -0.1944444, 0.0], [-0.09333334, 0.90666664, 0.0], [0.0, 0.0, 1.0]],
+        ]
     )
 
     np.testing.assert_allclose(particles.F, expected_F, rtol=1e-3)
@@ -283,8 +289,8 @@ def test_update():
 
     shapefunctions = pm.LinearShapeFunction.create(2, 2)
 
-    material = pm.Material()
-    force = pm.Forces()
+    material = pm.Material.create()
+    force = pm.Forces.create()
 
     usl = pm.USL.create(
         particles=particles,

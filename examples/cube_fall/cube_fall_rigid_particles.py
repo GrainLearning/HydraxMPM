@@ -2,12 +2,12 @@
 # %%
 
 import timeit
+
+import jax
 import jax.numpy as jnp
 import numpy as np
-import jax
-import pymudokon as pm
 
-import pyvista as pv
+import pymudokon as pm
 
 domain_size = 10
 

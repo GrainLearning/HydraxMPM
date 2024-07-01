@@ -1,88 +1,75 @@
-"""Module for shapefunction base class.
-
-The interaction between node-particles are determined by a stencil.
-The stencil is a window/box around each particle with the relative position of the particle to the node.
-
-Shapefunctions use interactions which are an intermediate representation before transferring information
-from particles to nodes (or vice versa). These arrays are typically denoted as `intr_...` (interaction arrays).
-"""
+"""Module containing the shapefunction base class."""
 
 from functools import partial
 from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
 
 
-@struct.dataclass
+@chex.dataclass(mappable_dataclass=False, frozen=True)
 class ShapeFunction:
-    """Interaction state for the particle and node pairs.
+    """Shapefunction base class. Contains base method to calculate relative distances between particles and nodes.
 
-    Each shapefunction inherits this class.
+    Stores particle-node pair interaction arrays. Not to be used directly, but to be inherited by specific
+    shape functions.
 
     Attributes:
-        intr_hash (jax.Array): Cartesian hash of particle-node pair interactions
-            `(num_particles*stencil_size)`, type int32.
-        intr_shapef (jax.Array): Shape functions for the particle-node pair interactions
-            `(num_particles, stencil_size,1)`
-        intr_shapef_grad (jax.Array): Shape function gradients for the particle-node pair interactions
+        intr_hash: Cartesian spatial hash of particle-node pair interactions `(num_particles*stencil_size)`
+        intr_shapef: Shape functions for the particle-node pair interactions `(num_particles*stencil_size,1)`
+        intr_shapef_grad: Shape function gradients for the particle-node pair interactions
             `(num_particles, stencil_size, dim)`
+        intr_ids: Particle-node pair interaction ids `(num_particles*stencil_size)`
     """
 
-    intr_shapef: jax.Array
-    intr_shapef_grad: jax.Array
-    intr_hashes: jax.Array
-    intr_ids: jax.Array
-    stencil: jax.Array
+    intr_hashes: chex.Array
+    intr_shapef: chex.Array
+    intr_shapef_grad: chex.Array
+    intr_ids: chex.Array
+    stencil: chex.Array
 
     def set_boundary_nodes(self: Self, nodes: Nodes) -> Nodes:
+        """Placeholder method to set boundary nodes."""
         return nodes
 
-    @partial(jax.vmap, in_axes=(None, 0, None, None, None, None, None), out_axes=(0, 0))
+    @partial(jax.vmap, in_axes=(None, 0, None, None, None, None), out_axes=(0, 0))
     def vmap_intr(
         self: Self,
-        intr_id: jax.Array,
-        position: jax.Array,
-        origin: jax.Array,
+        intr_id: chex.ArrayBatched,
+        position: chex.Array,
+        origin: chex.Array,
         inv_node_spacing: jnp.float32,
         grid_size: jnp.int32,
-        dim: jnp.int32,
-    ) -> Tuple[jax.Array, jax.Array]:
-        """Vectorized mapping of particle-node pair interactions.
-
-        Position array is batched per particle via vmap shape (num_particles, dim) -> (dim,).
+    ) -> Tuple[chex.Array, chex.Array]:
+        """Calculate particle-node pair interaction distances and hashes. Only interaction ids are vectorized.
 
         Args:
             self: ShapeFunction class.
-            position (jax.Array):
-                Spatial coordinates of particle. Expects shape `(num_particles,dim)` vectorized to `(dim,)`.
-            origin (jax.Array): Grid origin. Expected shape `(dim,)` static.
-            inv_node_spacing (jnp.float32): Inverse of the node spacing, static.
-            grid_size (jnp.int32): Grid size/ total number of nodes about each axis. Expects shape `(dim,)`, static.
+            intr_id: Particle-node pair interaction ids.
+            position: Particle coordinates.
+            origin: Grid origin. Expected shape `(dim,)`.
+            inv_node_spacing: Inverse of the node spacing.
+            grid_size: Grid size/ total number of nodes about each axis. Expects shape `(dim,)`.
 
         Returns:
-            (Tuple[jax.Array, jax.Array, jax.Array]):
-                Tuple of particle-node pair interactions.
+            Tuple containing:
                 - intr_dist: Particle-node pair interaction distances.
                 - intr_hashes: Particle-node pair hash ids.
         """
         stencil_size, dim = self.stencil.shape
 
-        # Solution procedure:
-
-        # 0. Get particle and stencil ids
         particle_id = (intr_id / stencil_size).astype(jnp.int32)
         stencil_id = (intr_id % stencil_size).astype(jnp.int16)
 
-        # 1. Calculate the relative position of the particle to the node.
+        # Relative position of the particle to the node.
         particle_pos = position.at[particle_id].get()
         rel_pos = (particle_pos - origin) * inv_node_spacing
 
-        # 2. Calculate particle-node pair interaction distances.
+        # article-node pair interaction distances.
         stencil_pos = self.stencil.at[stencil_id].get()
         intr_n_pos = jnp.floor(rel_pos) + stencil_pos
 

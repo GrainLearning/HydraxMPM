@@ -60,7 +60,3 @@ def test_apply_on_node_moments():
         [[0, -1.0], [1.0, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
     )
     np.testing.assert_allclose(nodes.moments_nt, expected_moments_nt)
-
-
-test_init()
-test_apply_on_node_moments()

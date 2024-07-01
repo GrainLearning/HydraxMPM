@@ -1,9 +1,9 @@
+raise "This example is not working yet, some updates needed for APIC"
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 import pymudokon as pm
-import pyvista as pv
-import jax
 
 # dam
 dam_height = 2.0

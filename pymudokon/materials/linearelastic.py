@@ -1,70 +1,65 @@
-"""Implementation, state and functions for isotropic linear elastic material."""
+"""Isotropic linear elastic material and constitutive update."""
+# update stress benchmark
 
 from functools import partial
 from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
-from jax import Array
 from typing_extensions import Self
 
 from ..core.particles import Particles
 from .material import Material
 
 
-@struct.dataclass
+@chex.dataclass
 class LinearIsotropicElastic(Material):
-    """State for the isotropic linear elastic material.
+    """Small strain isotropic linear elastic material solved in incremental form.
 
     Attributes:
-        E (jnp.float32): Young's modulus.
-        nu (Array): Poisson's ratio.
-        G (Array): Shear modulus.
-        K (Array): Bulk modulus.
-        eps_e (Array): Elastic strain tensors `(number of particles,dim,dim)`.
+        E: Young's modulus.
+        nu: Poisson's ratio.
+        G: Shear modulus.
+        K: Bulk modulus.
+
+    Can be used as a standalone module or as part of the MPM solver.
+
+    Example usage as standalone module:
+        >>> # Create a linear elastic material  and 1 particles
+        >>> import pymudokon as pm
+        >>> material = pm.LinearIsotropicElastic.create(
+        ... 1000, 0.2, 1, stress_ref=jnp.zeros((1, 3, 3), dtype=jnp.float32))
+        >>> # Isotropic compression
+        >>> material.update_stress_benchmark(jnp.eye(2)*0.99, 0.5, 0.001)
     """
 
-    # TODO we can replace this with incremental form / or hyperelastic form
     E: jnp.float32
     nu: jnp.float32
     G: jnp.float32
     K: jnp.float32
     lam: jnp.float32
 
-    # arrays
-    stress_ref: Array
-
-
     @classmethod
-    def create(
-        cls: Self, E: jnp.float32, nu: jnp.float32, num_particles, stress_ref: Array = None
-    ) -> Self:
+    def create(cls: Self, E: jnp.float32, nu: jnp.float32, num_particles, stress_ref: chex.Array = None) -> Self:
         """Initialize the isotropic linear elastic material.
 
         Args:
-            E (jnp.float32): Young's modulus.
-            nu (jnp.float32): Poisson's ratio.
-            num_particles (jnp.int16): Number of particles.
-            dim (jnp.int16, optional): Dimension. Defaults to 3.
+            E: Young's modulus.
+            nu: Poisson's ratio.
+            num_particles: Number of particles.
+            stress_ref: Reference stress tensor. Defaults to empty.
 
         Returns:
             LinearIsotropicElastic: Initial state of the isotropic linear elastic material.
-
-        Example:
-            >>> # Create a linear elastic material for plane strain and 2 particles
-            >>> import pymudokon as pm
-            >>> material = pm.LinearIsotropicElastic.create(1000, 0.2, 2, 2)
         """
-
-
         G = E / (2.0 * (1.0 + nu))
         K = E / (3.0 * (1.0 - 2.0 * nu))
 
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
+        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
         if stress_ref is None:
             stress_ref = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)
-        
+
         return cls(E=E, nu=nu, G=G, K=K, lam=lam, stress_ref=stress_ref)
 
     @jax.jit
@@ -75,21 +70,16 @@ class LinearIsotropicElastic(Material):
     ) -> Tuple[Particles, Self]:
         """Update stress and strain for all particles.
 
-        Called by the MPM solver (e.g., see :func:`~usl.update`).
+        Called by the MPM solver.
 
         Args:
-            self (LinearIsotropicElastic): Self reference.
-            particles (ParticlesContainer): State of the particles prior to the update.
-
-            dt (jnp.float32): Time step.
+            self: Self reference.
+            particles: State of the particles prior to the update.
+            dt: Time step.
 
         Returns:
-            Tuple[ParticlesContainer, LinearIsotropicElastic]: Updated particles and material state.
+            Tuple: Updated particles and material state.
 
-        Example:
-            >>> import pymudokon as pm
-            >>> # ...  Assume particles and material are initialized
-            >>> particles, material = material.update_stress(particles, 0.001)
         """
         vel_grad = particles.velgrads
 
@@ -97,75 +87,48 @@ class LinearIsotropicElastic(Material):
 
         deps = 0.5 * (vel_grad + vel_grad_T) * dt
 
-        stresses = self.vmap_update(particles.stresses, deps, self.stress_ref, self.G, self.K)
+        stresses = self.vmap_update(particles.stresses, deps)
 
         particles = particles.replace(stresses=stresses)
 
         return particles, self
 
     @jax.jit
-    def update_stress_benchmark(
-        self: Self,
-        strain_rate: Array,
-        volumes: Array,
-        dt: jnp.float32,
-        update_history: bool = True,
-    ) -> Self:
+    def update_stress_benchmark(self: Self, strain_rate: chex.Array, volumes: chex.Array, dt: jnp.float32) -> Self:
         """Update stress for a single element benchmark.
 
         Args:
-            self (LinearIsotropicElastic): Self reference.
-            strain_rate (Array): Strain rate tensor `(dim,dim)`.
+            self: Self reference.
+            strain_rate: Strain rate tensor `(dim,dim)`.
             volumes: Volumes of the particles.
-            dt (jnp.float32): Time step.
-            update_history (bool, optional): Update the history. Defaults to True.
+            dt: Time step.
 
         Returns:
-            LinearIsotropicElastic: Updated material state.
-
-        Example:
-            >>> import pymudokon as pm
-            >>> import jax.numpy as jnp
-            >>> # ...  Assume material is initialized
-            >>> material = material.update_stress_benchmark(jnp.eye(2), 0.5, 0.001)
+            Self: Updated material state.
         """
-        raise NotImplementedError("feature not implemented")
+        raise NotImplementedError("feature not implemented yet.")
         deps = strain_rate * dt
         stress = self.vmap_update(self.eps_e, deps, self.stress_ref, self.G, self.K)
         return stress, self
 
-    @partial(jax.vmap, in_axes=(None, 0, 0, 0, None, None), out_axes=(0))
+    @partial(jax.vmap, in_axes=(None, 0, 0), out_axes=(0))
     def vmap_update(
-        self: Self, stresses_prev: Array, deps: Array, stress_ref: Array, G: jnp.float32, K: jnp.float32
-    ) -> Tuple[Array, Array]:
-        """Parallelized stress update for each particle.
-
-        Tensors are mapped per particle via vmap (num_particles, dim) -> (dim,).
+        self: Self,
+        stresses_prev: chex.ArrayBatched,
+        deps: chex.ArrayBatched,
+    ) -> chex.ArrayBatched:
+        """Vectorized stress update.
 
         Args:
-            eps_e_prev (Array): Vectorized previous elastic strain tensor `(number of particles,dimension,dimension)`.
-            deps (Array): Vectorized strain increment.
-                Shape of full tensor is `(number of particles,dimension,dimension)`.
-            G (jnp.float32): Shear modulus.
-            K (jnp.float32): Bulk modulus.
-            dt (jnp.float32): Time step.
+            self: Self reference.
+            stresses_prev: Previous stress tensor.
+            deps: Vectorized strain increment.
 
-        Returns:
-            Tuple[Array, Array]: Updated stress and elastic strain tensors.
-
-        Example:
-            >>> import pymudokon as pm
-            >>> import jax.numpy as jnp
-            >>> eps_e = jnp.ones((2, 2, 2), dtype=jnp.float32)
-            >>> deps = jnp.eye(3, dtype=jnp.float32)*0.001
-            >>> stress, eps_e = jax.vmap(vmap_update, in_axes=(0, 0, None, None), out_axes=(0, 0))(
-            ... eps_e, deps, 100, 100
-            ...)
+        Returns: Updated stress tensor
         """
         dim = deps.shape[0]
 
         if dim == 2:
             deps = jnp.pad(deps, ((0, 1), (0, 1)), mode="constant")
 
-        return stresses_prev + self.lam*jnp.trace(deps)*jnp.eye(3) + 2.0 * self.G*deps
-
+        return stresses_prev + self.lam * jnp.trace(deps) * jnp.eye(3) + 2.0 * self.G * deps

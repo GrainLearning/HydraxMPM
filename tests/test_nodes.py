@@ -1,4 +1,4 @@
-"""Unit tests for the Particles dataclass."""
+"""Unit tests for the Nodes dataclass."""
 
 import jax.numpy as jnp
 import numpy as np
@@ -22,7 +22,7 @@ def test_create(dim, exp_num_nodes):
 
 
 def test_refresh():
-    """Unit test to refresh/reset the state of the nodes."""
+    """Unit test to reset node state."""
     nodes = pm.Nodes.create(
         origin=jnp.zeros(3),
         end=jnp.ones(3),

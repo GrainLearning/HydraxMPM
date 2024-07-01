@@ -1,24 +1,25 @@
 """3D cube falling"""
+
+import jax
 import jax.numpy as jnp
 import numpy as np
-import jax
-import pymudokon as pm
 
-import pyvista as pv
+import pymudokon as pm
 
 domain_size = 10
 
 particles_per_cell = 2
 cell_size = (1 / 20) * domain_size
 
-output_steps = 100
+output_steps = 1000
 output_start = 0
-total_steps = 11000
+total_steps = 110000
 
 
 particle_spacing = cell_size / particles_per_cell
 
 print("Creating simulation")
+
 
 def create_block(block_start, block_size, spacing):
     """Create a block of particles in 3D space."""
@@ -29,6 +30,7 @@ def create_block(block_start, block_size, spacing):
     block = np.array(np.meshgrid(x, y, z)).T.reshape(-1, 3)
     return block
 
+
 # Create two blocks (cubes in 2D context)
 block1 = create_block((3, 3, 3), 2, particle_spacing) + np.array([0.0, 0.0, 4.0])
 
@@ -37,20 +39,13 @@ block2 = create_block((3, 3, 3), 2, particle_spacing)
 pos = np.vstack([block1, block2])
 
 print(pos.shape)
-vels = jnp.zeros_like(pos).at[:len(block1),2].set(-0.2).at[len(block1):,2].set(0.2)
+vels = jnp.zeros_like(pos).at[: len(block1), 2].set(-0.2).at[len(block1) :, 2].set(0.2)
 
-particles = pm.Particles.create(
-    positions=pos,
-    velocities=vels,
-    original_density=1000)
-
+particles = pm.Particles.create(positions=pos, velocities=vels, original_density=1000)
 
 
 nodes = pm.Nodes.create(
-    origin=jnp.array([0.0, 0.0, 0.0]),
-    end=jnp.ones(3)*domain_size,
-    node_spacing=cell_size,
-    small_mass_cutoff=1e-3
+    origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.ones(3) * domain_size, node_spacing=cell_size, small_mass_cutoff=1e-3
 )
 
 shapefunctions = pm.LinearShapeFunction.create(len(pos), 3)
@@ -72,22 +67,20 @@ usl = pm.USL.create(
     shapefunctions=shapefunctions,
     alpha=0.99,
     dt=0.0001,
-
 )
 
+
 def debug_particles(
-        step: jnp.int32, 
-        particles: pm.Particles,
-        stress_limit: jnp.float32 = 1e6,
-    ):
-    """
-    First challenge is to narow down the iteration.
-    
+    step: jnp.int32,
+    particles: pm.Particles,
+    stress_limit: jnp.float32 = 1e6,
+):
+    """First challenge is to narow down the iteration.
+
     Second challenge is the find function causing the error.
 
     Third challenge is the find the memory location of the error.
     """
-    
     # Check out of bounds
     positions = usl.particles.positions
     out_of_bounds = jnp.any(jnp.logical_or(positions < nodes.origin, positions > nodes.end))
@@ -103,48 +96,42 @@ def debug_particles(
         print(f"Instability detected: Stress exceeds limit at step {step}")
         exit(0)
 
-points_data_dict = {
-    "points" : [],
-    "KE":[]
-}
+
+points_data_dict = {"points": [], "KE": []}
+
+
 @jax.tree_util.Partial
 def save_particles(package):
     steps, usl = package
     positions = usl.particles.positions
 
     points_data_dict["points"].append(positions)
-    KE = pm.get_KE( usl.particles.masses,usl.particles.velocities,)
+    KE = pm.get_KE(
+        usl.particles.masses,
+        usl.particles.velocities,
+    )
     points_data_dict["KE"].append(KE)
- 
+
     print(f"output {steps}", end="\r")
+
 
 print("Running simulation")
 
-usl = usl.solve(num_steps=total_steps, 
-                output_start_step = output_start,
-                output_step=output_steps,
-                output_function=save_particles)
+usl = usl.solve(
+    num_steps=total_steps, output_start_step=output_start, output_step=output_steps, output_function=save_particles
+)
 
 
 for key, value in points_data_dict.items():
     points_data_dict[key] = np.array(value)
 
 
-
-
-pm.plot_simple_3D(
-    points_data_dict,
+pm.plot_simple(
     origin=jnp.array([0.0, 0.0, 0.0]),
     end=jnp.array([domain_size, domain_size, domain_size]),
-    output_file="output.gif",
-    plot_params={
-        "scalars": "KE",
-        "clim": [0.5, 1.5],
-        "render_points_as_spheres": True,
-        "point_size": 10,
-        "opacity": 0.5
-    },
-    camera_params = {
-        "zoom":1.1
-    }
+    particles_points=points_data_dict["points"],
+    particles_scalars=points_data_dict["KE"],
+    particles_scalar_name="KE",
+    rigid_points=points_data_dict["points"],
+    particles_plot_params={"point_size": 5},
 )

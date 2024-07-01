@@ -44,7 +44,7 @@ def test_vmap_intr():
         stencil=stencil,
         intr_ids=intr_ids,
     )
-    intr_dist, intr_hashes = shapefunction.vmap_intr(intr_ids, positions, origin, inv_node_spacing, grid_size, dim)
+    intr_dist, intr_hashes = shapefunction.vmap_intr(intr_ids, positions, origin, inv_node_spacing, grid_size)
     np.testing.assert_allclose(
         intr_dist,
         jnp.array(

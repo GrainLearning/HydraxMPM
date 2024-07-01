@@ -1,29 +1,44 @@
-"""Gravity force on Nodes."""
+"""Module for the imposing zero/non-zero boundaries at the edges of the domain."""
 
-from functools import partial
 from typing import List, Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
-from jax import Array
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
 from ..core.particles import Particles
 from ..shapefunctions.shapefunction import ShapeFunction
-
 from .nodewall import NodeWall
 
 
-@struct.dataclass
+@chex.dataclass
 class DirichletBox:
-    """Dirichlet boundary conditions with user defined values.
+    """Imposing zero/non-zero boundaries at the edges of the domain.
 
-    type 0: stick all directions
-    type 1: stick in the direction of dim
-    type 2: slip in min direction of dim
-    type 3: slip in max direction of dim
+    The type of boundary is defined by the boundary_types.
+
+    Supported boundary types:
+        type 0: stick all directions
+        type 1: stick in the direction of inward/outward normal
+        type 2: slip in min direction of inward normal
+        type 3: slip in max direction of outward normal
+
+    Example for 2D sticky floor and slip walls:
+    >>> import pymudokon as pm
+    >>> import jax.numpy as jnp
+    >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([5.0, 5.0]), node_spacing=1.0)
+    >>> dirichlet_box = pm.DirichletBox.create(
+    ... nodes, boundary_types=jnp.array([[2, 3], [0, 3]]), width=1)
+
+    Attributes:
+        wall_x0: Wall at the minimum x direction.
+        wall_x1: Wall at the maximum x direction.
+        wall_y0: Wall at the minimum y direction.
+        wall_y1: Wall at the maximum y direction.
+        wall_z0: Wall at the minimum z direction.
+        wall_z1: Wall at the maximum z direction.
     """
 
     wall_x0: NodeWall = None
@@ -35,8 +50,21 @@ class DirichletBox:
 
     @classmethod
     def create(cls: Self, nodes, boundary_types: List = None, width: int = 1) -> Self:
-        """Register the Dirichlet nodes."""
+        """Initialize the Dirichlet box, enfore boundary conditions on edge of the domain.
 
+        Args:
+            cls: Self reference_
+            nodes: Nodes state
+            boundary_types (optional): list of boundary types
+                0 - stick in all direction,
+                1 - stick in direction of inward/outward normal
+                2 - slip in direction of inward normal
+                3 - slip in direction of outward normal
+            width (optional): wall width. Defaults to 1.
+
+        Returns:
+            Self: Initialized Dirichlet box.
+        """
         dim = nodes.origin.shape[0]
 
         if boundary_types is None:
@@ -76,8 +104,6 @@ class DirichletBox:
             y0_ids = node_ids.at[:, 0:width].get().reshape(-1)
             y1_ids = node_ids.at[:, nodes.grid_size[1] - width :].get().reshape(-1)
 
-            print(x0_ids.shape, x1_ids.shape, y0_ids.shape, y1_ids.shape)
-            print(x0_ids[0], x1_ids[0])
             wall_x0 = NodeWall.create(wall_type=boundary_types[0, 0], wall_dim=0, node_ids=x0_ids)
             wall_x1 = NodeWall.create(wall_type=boundary_types[0, 1], wall_dim=0, node_ids=x1_ids)
             wall_y0 = NodeWall.create(wall_type=boundary_types[1, 0], wall_dim=1, node_ids=y0_ids)
@@ -105,8 +131,7 @@ class DirichletBox:
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
-        """Apply the force on the nodes."""
-
+        """Apply the boundary conditions on the nodes moments."""
         nodes, _ = self.wall_x0.apply_on_nodes_moments(nodes)
         nodes, _ = self.wall_x1.apply_on_nodes_moments(nodes)
         nodes, _ = self.wall_y0.apply_on_nodes_moments(nodes)

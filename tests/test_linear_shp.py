@@ -17,7 +17,7 @@ def test_create():
 
     np.testing.assert_allclose(
         shapefunction.intr_shapef_grad,
-        jnp.zeros((8, 2), dtype=jnp.float32),
+        jnp.zeros((8, 3), dtype=jnp.float32),
     )
 
 
@@ -38,38 +38,14 @@ def test_calc_shp_2d():
 
     expected_shapef_grad = jnp.array(
         [
-            [
-                -9.000001,
-                -5.0,
-            ],
-            [
-                -0.99999905,
-                5.0,
-            ],
-            [
-                9.000001,
-                -5.0,
-            ],
-            [
-                0.99999905,
-                5.0,
-            ],
-            [
-                -0.0,
-                -0.0,
-            ],
-            [
-                -0.0,
-                0.0,
-            ],
-            [
-                0.0,
-                -0.0,
-            ],
-            [
-                0.0,
-                0.0,
-            ],
+            [-9.000001, -5.0, 0.0],
+            [-0.99999905, 5.0, 0.0],
+            [9.000001, -5.0, 0.0],
+            [0.99999905, 5.0, 0.0],
+            [-0.0, -0.0, 0.0],
+            [-0.0, 0.0, 0.0],
+            [0.0, -0.0, 0.0],
+            [0.0, 0.0, 0.0],
         ]
     )
 
@@ -177,3 +153,6 @@ def test_calc_shp_3d():
     )
 
     np.testing.assert_allclose(expected_shapef_grad, shapefunction.intr_shapef_grad, rtol=1e-4)
+
+
+test_calc_shp_2d()

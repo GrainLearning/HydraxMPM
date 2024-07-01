@@ -4,7 +4,7 @@ from typing import Callable, List
 
 import jax
 import jax.numpy as jnp
-from flax import struct
+import chex
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
@@ -14,17 +14,19 @@ from ..materials.material import Material
 from ..shapefunctions.shapefunction import ShapeFunction
 
 
-@struct.dataclass
+@chex.dataclass
 class Solver:
-    """State of a solver.
+    """Base solver class.
+
+    A top level wrapper to manage the solver state make impure callback functions.
 
     Attributes:
-        particles  (Particles): Particles in the simulation.
-        nodes (Nodes): Nodes in the simulation.
-        shapefunctions (ShapeFunction): Shape functions in the simulation.
-        materials (List[Material]): List of materials in the simulation.
-        forces (List[int]): List of forces in the simulation.
-        dt (jnp.float32): Time step of the simulation.
+        particles: Particles in the simulation.
+        nodes: Nodes in the simulation.
+        shapefunctions: Shape functions in the simulation.
+        materials: List of materials in the simulation.
+        forces: List of forces in the simulation.
+        dt: Time step of the simulation.
     """
 
     particles: Particles
@@ -43,8 +45,8 @@ class Solver:
         """Solve the solver for `num_steps`.
 
         Args:
-            self (Solver): Self reference
-            num_steps (jnp.int32): Number of steps to solve for
+            self: Self reference
+            num_steps: Number of steps to solve for
 
         Returns:
             Solver: Updated solver
@@ -61,35 +63,28 @@ class Solver:
     def solve(
         self: Self,
         num_steps: jnp.int32,
-        output_start_step: jnp.int32=0,
+        output_start_step: jnp.int32 = 0,
         output_step: jnp.int32 = 1,
         output_function: Callable = lambda x: None,
     ):
         """Call the main solve loop of a solver.
 
         Args:
-            self (Self): Self reference
-            num_steps (jnp.int32): Number of steps to solve
-            output_steps (jnp.int32, optional): Number of output steps. Defaults to 1.
-            output_function (_type_, optional): Callback function called for every `output_step`.
+            self: Self reference
+            num_steps: Number of steps to solve
+            output_steps (optional): Number of output steps. Defaults to 1.
+            output_function (optional): Callback function called for every `output_step`.
                 Defaults to lambda x: x.
 
         Returns:
             Solver: Updated solver
-
-        Example:
-            >>> def some_callback(package):
-            ...     usl, step = package
-            ...     # do something with usl
-            ...     # e.g., print(usl.particles.positions)
-            >>> usl = usl.solve(num_steps=10, output_function=some_callback)
         """
 
         def body_loop(step, solver):
             solver = solver.update()
 
             jax.lax.cond(
-                (step % output_step == 0)&(output_start_step <= step),
+                (step % output_step == 0) & (output_start_step <= step),
                 lambda x: jax.experimental.io_callback(output_function, None, x),
                 lambda x: None,
                 (step, solver),
@@ -102,13 +97,4 @@ class Solver:
             body_loop,
             self,
         )
-        # def split_number(n, divisor):
-        #     return [divisor] * (n // divisor) + ([n % divisor] if n % divisor else [])
-
-        # segments = split_number(num_steps, output_steps)
-        # current_step = 0
-        # for steps in segments:
-        #     self = self.solve_n(steps)
-        #     current_step = current_step + steps
-        #     self = output_function((current_step, self))
         return solver

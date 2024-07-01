@@ -2,15 +2,14 @@
 
 References:
     - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
-    - # TODO add Sulsky paper
 """
 
 from functools import partial
-from typing import List
+from typing import List, Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-from flax import struct
 from typing_extensions import Self
 
 from ..core.nodes import Nodes
@@ -21,11 +20,22 @@ from ..shapefunctions.shapefunction import ShapeFunction
 from .solver import Solver
 
 
-@struct.dataclass
+@chex.dataclass
 class USL(Solver):
     """Explicit Update Stress Last (USL) MPM solver.
 
-    Inherits data from `Solver`.
+    Two node moment quantities are used related to FLIP-PIC mixture. One quantity updates the total velocity and
+    the other updates the increment.
+
+    Example:
+    >>> import pymudokon as pm
+    >>> # create particles, nodes, shapefunctions, materials, forces ...
+    >>> usl = pm.USL.create(particles, nodes, shapefunctions, materials)
+    >>> def some_callback(package):
+    ...     usl, step = package
+    ...     # do something with usl
+    ...     # e.g., print(usl.particles.positions)
+    >>> usl = usl.solve(num_steps=10, output_function=some_callback)
 
     Attributes:
         alpha: Flip & PIC ratio. Recommended value is 0.99
@@ -47,37 +57,17 @@ class USL(Solver):
         """Create a USL solver.
 
         Args:
-            cls (Self): self reference.
-            particles (Particles): Particles in the simulation.
-            nodes (Nodes): Nodes in the simulation.
-            shapefunctions (ShapeFunction): Shape functions in the simulation, e.g., `LinearShapeFunction`.
-            materials (List[Material]): List of materials in the simulation, e.g., `LinearIsotropicElastic`.
-            forces (List[Force], optional): List of forces. Defaults to None.
-            alpha (jnp.float32, optional): FLIP-PIC ratio. Defaults to 0.99.
-            dt (jnp.float32, optional): Time step. Defaults to 0.00001.
+            cls: self reference.
+            particles: Particles in the simulation.
+            nodes: Nodes in the simulation.
+            shapefunctions: Shape functions in the simulation, e.g., `LinearShapeFunction`.
+            materials: List of materials in the simulation, e.g., `LinearIsotropicElastic`.
+            forces (optional): List of forces. Defaults to None.
+            alpha (optional): FLIP-PIC ratio. Defaults to 0.99.
+            dt (optional): Time step. Defaults to 0.00001.
 
         Returns:
             USL: Initialized USL solver.
-
-        Example:
-            >>> import pymudokon as pm
-            >>> particles = pm.Particles.create(positions=jnp.array([[1.0, 2.0], [0.3, 0.1]]))
-            >>> nodes = pm.Nodes.create(
-            ...     origin=jnp.array([0.0, 0.0]),
-            ...     end=jnp.array([1.0, 1.0]),
-            ...     node_spacing=0.5,
-            ... )
-            >>> shapefunctions = pm.LinearShapeFunction.create(2, 2)
-            >>> material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2, dim=2)
-            >>> particles, nodes, shapefunctions = pm.Discretize(particles, nodes, shapefunctions)
-            >>> usl = pm.USL.create(
-            ...     particles=particles,
-            ...     nodes=nodes,
-            ...     shapefunctions=shapefunctions,
-            ...     materials=[material],
-            ...     alpha=0.1,
-            ...     dt=0.001,
-            ... )
         """
         if forces is None:
             forces = []
@@ -97,19 +87,22 @@ class USL(Solver):
         """Solve 1 iteration of USL MPM.
 
         Args:
-            self (Self): Current USL solver.
+            self: Current USL solver.
 
         Returns:
             Self: Updated USL solver.
         """
+        # Reset temporary quantities
         nodes = self.nodes.refresh()
-
         particles = self.particles.refresh()
 
+        # Calculate shape functions and its gradients
         shapefunctions, _ = self.shapefunctions.calculate_shapefunction(nodes=nodes, positions=particles.positions)
 
+        # Particle to grid transfer
         nodes = self.p2g(nodes=nodes, particles=particles, shapefunctions=shapefunctions)
 
+        # Calculate forces on nodes moments
         # for loop is statically unrolled, may result in large compile times
         # for many materials/forces
         forces = []
@@ -119,8 +112,10 @@ class USL(Solver):
             )
             forces.append(out_force)
 
+        # Grid to particle transfer
         particles = self.g2p(particles=particles, nodes=nodes, shapefunctions=shapefunctions)
 
+        # Stress update using constitutive models
         materials = []
         for mat in self.materials:
             particles, out_mat = mat.update_stress(particles=particles, dt=self.dt)
@@ -136,25 +131,29 @@ class USL(Solver):
 
     @jax.jit
     def p2g(self: Self, nodes: Nodes, particles: Particles, shapefunctions: ShapeFunction) -> Nodes:
+        """Particle to grid transfer function.
+
+        Procedure is as follows:
+        - Gather particle quantities to interactions.
+        - Scale masses, moments, and forces by shape functions.
+        - Calculate node internal force from scaled stresses, volumes.
+        - Sum interaction quantities to nodes.
+        """
         stencil_size, dim = self.shapefunctions.stencil.shape
 
-        padding = (0, 3 - dim)
-
         @partial(jax.vmap, in_axes=(0, 0, 0))
-        def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad):
+        def vmap_p2g(
+            intr_id: chex.ArrayBatched, intr_shapef: chex.ArrayBatched, intr_shapef_grad: chex.ArrayBatched
+        ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched]:
+            """Gather particle quantities to interactions."""
+            # out of scope quantities (e.g., particles., are static)
             particle_id = (intr_id / stencil_size).astype(jnp.int32)
+
             intr_masses = particles.masses.at[particle_id].get()
             intr_volumes = particles.volumes.at[particle_id].get()
             intr_velocities = particles.velocities.at[particle_id].get()
             intr_ext_forces = particles.forces.at[particle_id].get()
             intr_stresses = particles.stresses.at[particle_id].get()
-
-            intr_shapef_grad = jnp.pad(
-                intr_shapef_grad,
-                padding,
-                mode="constant",
-                constant_values=0,
-            )
 
             scaled_mass = intr_shapef * intr_masses
             scaled_moments = scaled_mass * intr_velocities
@@ -165,10 +164,13 @@ class USL(Solver):
 
             return scaled_mass, scaled_moments, scaled_total_force
 
+        # Get interaction id and respective particle belonging to interaction
+        # form a batched interaction
         scaled_mass, scaled_moments, scaled_total_force = vmap_p2g(
             shapefunctions.intr_ids, shapefunctions.intr_shapef, shapefunctions.intr_shapef_grad
         )
 
+        # Sum all interaction quantities.
         nodes_masses = nodes.masses.at[shapefunctions.intr_hashes].add(scaled_mass)
 
         nodes_moments = nodes.moments.at[shapefunctions.intr_hashes].add(scaled_moments)
@@ -184,29 +186,27 @@ class USL(Solver):
         """Grid to particle transfer.
 
         Procedure is as follows:
-        - Prepare shape functions and their gradients.
         - Calculate node velocities (by dividing moments with mass)
         - Scatter node quantities to particle-node interactions.
         - Calculate interaction velocities and velocity gradients.
         - Sum interaction quantities to particles.
-        - Update particle quantities
-        (e.g., velocities, positions, volumes, velocity gradients, deformation gradients, etc.)
-
-
-        Args:
-            Self: Current USL solver.
-
-        Returns:
-            Particles: Updated particles
+        (e.g., velocities, positions, volumes, velocity gradients, deformation gradients, ...)
         """
-        _, dim = self.shapefunctions.stencil.shape
+        num_interactions, dim = self.shapefunctions.stencil.shape
+
+        padding = (0, 3 - dim)
 
         @partial(jax.vmap, in_axes=(0, 0, 0))
-        def vmap_intr_scatter(intr_hashes, intr_shapef, intr_shapef_grad):
+        def vmap_intr_scatter(
+            intr_hashes: chex.ArrayBatched, intr_shapef: chex.ArrayBatched, intr_shapef_grad: chex.ArrayBatched
+        ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched]:
+            """Scatter quantities from nodes to interactions."""
+            # Unscopped quantities are static in JAX
             intr_masses = nodes.masses.at[intr_hashes].get()
             intr_moments = nodes.moments.at[intr_hashes].get()
             intr_moments_nt = nodes.moments_nt.at[intr_hashes].get()
 
+            # Small mass cutoff to avoid unphysical large velocities
             intr_vels = jax.lax.cond(
                 intr_masses > nodes.small_mass_cutoff,
                 lambda x: x / intr_masses,
@@ -226,32 +226,45 @@ class USL(Solver):
 
             intr_scaled_vels_nt = intr_shapef * intr_vels_nt
 
-            intr_scaled_velgrad = intr_shapef_grad.reshape(-1, 1) @ intr_vels_nt.reshape(-1, 1).T
+            # Pad velocities for plane strain
+            intr_vels_nt_padded = jnp.pad(
+                intr_vels_nt,
+                padding,
+                mode="constant",
+                constant_values=0,
+            )
+
+            intr_scaled_velgrad = intr_shapef_grad.reshape(-1, 1) @ intr_vels_nt_padded.reshape(-1, 1).T
 
             return intr_scaled_delta_vels, intr_scaled_vels_nt, intr_scaled_velgrad
 
         @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0, 0))
         def vmap_particles_update(
-            intr_delta_vels_reshaped,
-            intr_vels_nt_reshaped,
-            intr_velgrad_reshaped,
-            p_velocities,
-            p_positions,
-            p_F,
-            p_volumes_orig,
-        ):
-            # Update particle quantities
+            intr_delta_vels_reshaped: chex.ArrayBatched,
+            intr_vels_nt_reshaped: chex.ArrayBatched,
+            intr_velgrad_reshaped: chex.ArrayBatched,
+            p_velocities: chex.ArrayBatched,
+            p_positions: chex.ArrayBatched,
+            p_F: chex.ArrayBatched,
+            p_volumes_orig: chex.ArrayBatched,
+        ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched]:
+            """Update particle quantities by summing interaction quantities."""
             p_velgrads_next = jnp.sum(intr_velgrad_reshaped, axis=0)
-
-            # jax.debug.print("p_velgrads_next {}",p_velgrads_next)
 
             delta_vels = jnp.sum(intr_delta_vels_reshaped, axis=0)
             vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
+
             p_velocities_next = (1.0 - self.alpha) * vels_nt + self.alpha * (p_velocities + delta_vels)
 
             p_positions_next = p_positions + vels_nt * self.dt
 
-            p_F_next = (jnp.eye(dim) + p_velgrads_next * self.dt) @ p_F
+            if dim == 2:
+                p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
+
+            p_F_next = (jnp.eye(3) + p_velgrads_next * self.dt) @ p_F
+
+            if dim == 2:
+                p_F_next = p_F_next.at[2, 2].set(1)
 
             p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
             return p_velocities_next, p_positions_next, p_F_next, p_volumes_next, p_velgrads_next
@@ -260,11 +273,10 @@ class USL(Solver):
             shapefunctions.intr_hashes, shapefunctions.intr_shapef, shapefunctions.intr_shapef_grad
         )
 
-        # TODO make this cleaner
         p_velocities_next, p_positions_next, p_F_next, p_volumes_next, p_velgrads_next = vmap_particles_update(
-            intr_scaled_delta_vels.reshape(-1, *shapefunctions.stencil.shape),
-            intr_scaled_vels_nt.reshape(-1, *shapefunctions.stencil.shape),
-            intr_scaled_velgrad.reshape(-1, *shapefunctions.stencil.shape, shapefunctions.stencil.shape[1]),
+            intr_scaled_delta_vels.reshape(-1, num_interactions, dim),
+            intr_scaled_vels_nt.reshape(-1, num_interactions, dim),
+            intr_scaled_velgrad.reshape(-1, num_interactions, 3, 3),
             particles.velocities,
             particles.positions,
             particles.F,
