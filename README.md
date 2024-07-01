@@ -1,7 +1,7 @@
 
-Differentiable Material Point Method solver.  Solver is developed with [JAX](https://jax.readthedocs.io/en/latest/quickstart.html)
+Differentiable Material Point Method solver developed with [JAX](https://jax.readthedocs.io/en/latest/quickstart.html)
 
-This is a first test version trail version of the code. Basic shape functions, materials, forces, and solver added.
+This is a trail version of the code. Basic shape functions, materials, forces, and solver added.
 
 Installation instructions
 - Clone repository
