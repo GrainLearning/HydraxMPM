@@ -17,13 +17,14 @@ from .forces.nodewall import NodeWall
 from .forces.rigidparticles import RigidParticles
 
 # These will soon be added back
-# from .ip_benchmarks.simpleshear import simple_shear
+from .ip_benchmarks.simpleshear import simple_shear
 # from .solvers.usl_apic import USL_APIC
 # from .ip_benchmarks.triaxial import triaxial_compression
 # from .materials.modifiedcamclay import ModifiedCamClay
 
 
 from .materials.linearelastic import LinearIsotropicElastic
+from .materials.druckerprager import DruckerPrager
 from .materials.material import Material
 
 
@@ -53,6 +54,7 @@ __all__ = [
     "Nodes",
     "Particles",
     "LinearIsotropicElastic",
+    "DruckerPrager",
     "NewtonFluid",
     "CubicShapeFunction",
     "USL",
