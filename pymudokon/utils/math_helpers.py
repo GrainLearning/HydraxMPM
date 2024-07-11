@@ -86,7 +86,7 @@ def get_volumetric_strain(strain: jax.Array, dim=3):
         jax.Array: Volumetric strain `(num_samples,)`.
     """
     strain = strain.reshape(-1, dim, dim)
-    vmap_get_volumetric_strain = jax.vmap(lambda eps: -(jnp.trace(eps)), in_axes=(0))
+    vmap_get_volumetric_strain = jax.vmap(lambda eps: jnp.trace(eps), in_axes=(0))
     return vmap_get_volumetric_strain(strain)
 
 
@@ -95,7 +95,7 @@ def get_dev_strain(strain: jax.Array, volumetric_strain=None, dim=3):
     if volumetric_strain is None:
         volumetric_strain = get_volumetric_strain(strain)
 
-    vmap_get_dev_strain = jax.vmap(lambda eps, eps_v: eps + (1.0 / dim) * jnp.eye(3) * eps_v, in_axes=(0, 0))
+    vmap_get_dev_strain = jax.vmap(lambda eps, eps_v: eps - (1.0 / dim) * jnp.eye(3) * eps_v, in_axes=(0, 0))
     return vmap_get_dev_strain(strain, volumetric_strain)
 
 

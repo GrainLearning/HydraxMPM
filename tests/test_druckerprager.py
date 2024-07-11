@@ -8,7 +8,15 @@ import pymudokon as pm
 
 def test_create():
     """Unit test the initialization drucker prager material."""
-    material = pm.DruckerPrager.create(E=1000.0, nu=0.2, num_particles=2)
+    material = pm.DruckerPrager.create(
+        E=1000.0,
+        nu=0.2,
+        friction_angle=jnp.deg2rad(30.0),
+        dilatancy_angle=jnp.deg2rad(25.0),
+        cohesion=0.0,
+        H=0.1,
+        num_particles=2,
+    )
 
     assert isinstance(material, pm.DruckerPrager)
     np.testing.assert_allclose(material.E, 1000.0)
@@ -16,13 +24,28 @@ def test_create():
     np.testing.assert_allclose(material.G, 416.666667)
     np.testing.assert_allclose(material.K, 555.5555555555557)
 
+    np.testing.assert_allclose(material.eta, 0.69282037)
+    np.testing.assert_allclose(material.eta_hat, 0.56801546)
+
+    np.testing.assert_allclose(material.xi, 1.2)
+    np.testing.assert_allclose(material.c0, 0.0)
+
 
 def test_update_stress_update_benchmark():
-    material = pm.DruckerPrager.create(E=1000.0, nu=0.2, num_particles=1)
+    material = pm.DruckerPrager.create(
+        E=1000.0,
+        nu=0.2,
+        H=0.1,
+        friction_angle=jnp.deg2rad(30.0),
+        dilatancy_angle=jnp.deg2rad(25.0),
+        cohesion=0.0,
+    )
+    material.update_stress_benchmark(
+        strain_rate=jnp.eye(3).reshape(-1, 3, 3), volume_fraction=jnp.array([0.5]), dt=0.01
+    )
 
-    material.update_stress_benchmark(strain_rate=jnp.eye(3).reshape(-1, 3, 3), volumes=jnp.ones(1), dt=0.01)
 
-
+test_create()
 test_update_stress_update_benchmark()
 
 # def test_update_stress_3d():

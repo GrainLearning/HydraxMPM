@@ -1,43 +1,142 @@
-"""Implementation, state and functions for isotropic linear elastic material."""
+"""Implementation, non-associated Drucker-Prager model with isotropic linear elasticity, and linear hardening.
 
+[1] de Souza Neto, E.A., Peric, D. and Owen, D.R., 2011. Computational methods for plasticity.
+"""
+
+import warnings
 from functools import partial
 from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-import chex
 from typing_extensions import Self
 
 from .material import Material
 
+from ..core.particles import Particles
 
-# def yield_function(p, p_c, q, M):
-#     """Compute the modified Cam Clay yield function."""
-#     p_s = 0.5 * p_c
-#     return (p_s - p) ** 2 + (q / M) ** 2 - p_s**2
+
+def yield_function(J2: jnp.float32, p: jnp.float32, eta: jnp.float32, xi: jnp.float32, c: jnp.float32):
+    """Drucker-Prager yield function."""
+    return jnp.sqrt(J2) - eta * p - xi * c
 
 
 @chex.dataclass
 class DruckerPrager(Material):
-    eps_e: chex.Array
+    r"""Non-associated Drucker-Prager model.
+
+    The Drucker-Prager model is a smooth approximation to the Mohr-Coulomb model.
+
+    .. math::
+        f = \\sqrt{J_2} - \\eta p - \\xi c
+
+    where :math:`J_2` is the second invariant of the deviatoric stress tensor,
+    :math:`p` is the pressure,
+    :math:`\\eta` is the friction parameter, :math:`\\xi` is the cohesion parameter
+    and :math:`c` is the cohesion.
+
+    The non-associated plastic potential is adopted
+    .. math::
+        g = \\sqrt{J_2} - \\overline \\eta p
+
+    where :math:`\\overline \\eta` is the dilatancy parameter. Friction and dilatancy angles are in radians.
+    The values for \\eta \\overline \\eta and \\xi are determined by the cone approximation:
+
+    0 - Outer cone approximation (compressive Mohr-Coulomb cone) approaximation matches uniaxial compression
+        and biaxial tension.
+    1 - Inner cone approximation (tension Mohr-Coulomb cone) approximation matches uniaxial tension
+        and biaxial compression.
+    2 - Plain strain approximation
+
+    This formulation is in small strain and elastic law is  isotropic linear elasticity.
+
+    The implementation follows [1] with the exception that pressure and volumetric strain are positive in compression.
+
+    [1] de Souza Neto, E.A., Peric, D. and Owen, D.R., 2011. Computational methods for plasticity.
+
+    Usage in MPM simulatios:
+    >>> import pymudokon as pm
+    >>> material = pm.DruckerPrager.create(E=1.0e6, nu=0.3, friction_angle=30.0, dilatancy_angle=30.0, cohesion=1.0e3)
+    >>> # Add material to the simulation ...
+
+
+    Attributes:
+        E: Young's modulus.
+        nu: Poisson's ratio.
+        G: Shear modulus.
+        K: Bulk modulus.
+        eta: Mohr-Coulomb friction parameter.
+        eta_hat: Mohr-Coulomb dilatancy parameter.
+        xi: Mohr-Coulomb cohesion parameter.
+        c0: Initial cohesion parameter.
+        eps_acc: Accumulated plastic strain for linear hardening
+        eps_e: Elastic strain tensor.
+        H: Hardening modulus
+    """
+
     E: jnp.float32
     nu: jnp.float32
     G: jnp.float32
     K: jnp.float32
+
+    eps_e: chex.Array
+    eps_p_acc: chex.Array
+
+    eta: jnp.float32 = 0.0
+    eta_hat: jnp.float32 = 0.0
+
+    xi: jnp.float32 = 0.0
+    c0: jnp.float32 = 0.0
+
+    H: jnp.float32 = 0.0
 
     @classmethod
     def create(
         cls: Self,
         E: jnp.float32,
         nu: jnp.float32,
-        num_particles: jnp.int32 = 1,
+        friction_angle: jnp.float32,
+        dilatancy_angle: jnp.float32,
+        cohesion: jnp.float32,
+        H: jnp.float32 = 0.0,
+        cone_approximation: jnp.int32 = 0,
         stress_ref: chex.Array = None,
+        num_particles: jnp.int32 = 1,
         dim: jnp.int16 = 3,
     ) -> Self:
+        """Create a non-associated Drucker-Prager material model."""
+
+        def eta_outer(phi):
+            return 6 * jnp.sin(phi) / (jnp.sqrt(3) * (3 - jnp.sin(phi)))
+
+        def eta_inner(phi):
+            return 6 * jnp.sin(phi) / (jnp.sqrt(3) * (3 + jnp.sin(phi)))
+
+        def eta_plain_strain(phi):
+            return 3 * jnp.tan(phi) / jnp.sqrt(9 + 12 * jnp.tan(phi) ** 2)
+
+        def xi_outer(phi):
+            return 6 * jnp.cos(phi) / (jnp.sqrt(3) * (3 - jnp.sin(phi)))
+
+        def xi_inner(phi):
+            return 6 * jnp.cos(phi) / (jnp.sqrt(3) * (3 + jnp.sin(phi)))
+
+        def xi_plain_strain(phi):
+            return 3 / (9 + 12 * jnp.tan(phi) ** 2)
+
+        eta = jax.lax.switch(cone_approximation, [eta_outer, eta_inner, eta_plain_strain], friction_angle)
+
+        eta_hat = jax.lax.switch(cone_approximation, [eta_outer, eta_inner, eta_plain_strain], dilatancy_angle)
+
+        xi = jax.lax.switch(cone_approximation, [xi_outer, xi_inner, xi_plain_strain], friction_angle)
+
         K = E / (3.0 * (1.0 - 2.0 * nu))
         G = E / (2.0 * (1.0 + nu))
 
         eps_e = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
+
+        eps_p_acc = jnp.zeros(num_particles, dtype=jnp.float32)
 
         if stress_ref is None:
             stress_ref = jnp.zeros((num_particles, dim, dim), dtype=jnp.float32)
@@ -49,43 +148,63 @@ class DruckerPrager(Material):
             nu=nu,
             G=G,
             K=K,
+            eta=eta,
+            eta_hat=eta_hat,
+            xi=xi,
+            H=H,
+            c0=cohesion,
+            eps_p_acc=eps_p_acc,
         )
+
+    def update_stress(self: Self, particles: Particles, dt: jnp.float32) -> Tuple[Particles, Self]:
+        """Update stress and strain for all particles."""
+        vel_grad = particles.velgrads
+
+        vel_grad_T = jnp.transpose(vel_grad, axes=(0, 2, 1))
+
+        deps = 0.5 * (vel_grad + vel_grad_T) * dt
+        # Elastic step
+        s_tr, p_tr, eps_e_tr, s_ref, p_ref = self.vmap_elastic_trail_step(self.stress_ref, self.eps_e, deps)
+
+        # Plastic return mapping
+        stress_next, eps_p_acc_next, eps_e_next = self.vmap_plastic_return_mapping(
+            s_tr, p_tr, eps_e_tr, self.eps_p_acc, s_ref, p_ref
+        )
+
+        particles = particles.replace(stresses=stress_next)
+
+        return particles, self
 
     @jax.jit
     def update_stress_benchmark(
         self: Self,
         strain_rate: chex.Array,
-        volume: chex.Array,
+        volume_fraction: chex.Array,
         dt: jnp.float32,
-    ) -> Tuple[chex.Array, Self]:
-        chex.assert_shape(volume, (1,))
-
-        chex.assert_shape(strain_rate, (1, 3, 3))
-
-        chex.assert_shape(self.eps_e, (1, 3, 3))
-
-        chex.assert_shape(self.stress_ref, (1, 3, 3))
-
+    ) -> Tuple[Self, chex.Array]:
+        """Update stress using the Drucker-Prager model with single integration point benchmarks."""
         strain_rate = strain_rate.reshape(-1, 3, 3)
         deps = strain_rate * dt
 
-        # Elastic trail predictor step
+        # Elastic step
         s_tr, p_tr, eps_e_tr, s_ref, p_ref = self.vmap_elastic_trail_step(self.stress_ref, self.eps_e, deps)
 
-        return self.replace(eps_e=eps_e_tr), s_tr - p_tr * jnp.eye(3)
+        # Plastic return mapping
+        stress_next, eps_p_acc_next, eps_e_next = self.vmap_plastic_return_mapping(
+            s_tr, p_tr, eps_e_tr, self.eps_p_acc, s_ref, p_ref
+        )
 
-        # # Plastic return mapping
-        # stress_next, p_c_next, eps_e_next, eps_v_p_next = self.vmap_plastic_return_mapping(
-        #     s_tr, p_tr, self.p_c, eps_e_tr, self.eps_v_p, volumes, s_ref, p_ref
-        # )
-
-        # return stress_next, self.replace(eps_e=eps_e_next, p_c=p_c_next, eps_v_p=eps_v_p_next)
+        return self.replace(eps_e=eps_e_next, eps_p_acc=eps_p_acc_next), stress_next
 
     @partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(0, 0, 0, 0, 0))
     def vmap_elastic_trail_step(
-        self, stress_ref: chex.Array, eps_e_prev: chex.Array, deps_next: chex.Array
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
+        self, stress_ref: chex.ArrayBatched, eps_e_prev: chex.ArrayBatched, deps_next: chex.ArrayBatched
+    ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched]:
         dim = deps_next.shape[0]
+        # Reference stress and pressure
+        p_ref = -jnp.trace(stress_ref) / dim
+
+        s_ref = stress_ref + p_ref * jnp.eye(3)
 
         eps_e_tr = eps_e_prev + deps_next
 
@@ -95,14 +214,7 @@ class DruckerPrager(Material):
 
         s_tr = 2.0 * self.G * eps_e_d_tr
 
-        # pad for 3D stress tensor
-        if dim == 2:
-            s_tr = jnp.pad(s_tr, ((0, 1), (0, 1)), mode="constant")
-
         p_tr = self.K * eps_e_v_tr
-
-        p_ref = -jnp.trace(stress_ref) / dim
-        s_ref = stress_ref + p_ref * jnp.eye(3)
 
         p_tr = p_tr + p_ref
 
@@ -110,117 +222,121 @@ class DruckerPrager(Material):
 
         return s_tr, p_tr, eps_e_tr, s_ref, p_ref
 
-    # @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0, 0))
-    # def vmap_plastic_return_mapping(
-    #     self,
-    #     s_tr: Array,
-    #     p_tr: Array,
-    #     p_c_prev: Array,
-    #     eps_e_tr: Array,
-    #     eps_v_p_prev: Array,
-    #     volume: Array,
-    #     s_ref: Array,
-    #     p_ref: Array,
-    # ) -> Tuple[Array, Array, Array, Array]:
-    #     """Vectorized plastic return mapping algorithm for modified Cam-Clay.
+    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0))
+    def vmap_plastic_return_mapping(
+        self,
+        s_tr: chex.ArrayBatched,
+        p_tr: chex.ArrayBatched,
+        eps_e_tr: chex.ArrayBatched,
+        eps_p_acc: chex.ArrayBatched,
+        s_ref: chex.ArrayBatched,
+        p_ref: chex.ArrayBatched,
+    ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched]:
+        """Plastic implicit return mapping algorithm."""
+        J2_tr = jnp.sqrt(0.5 * (s_tr @ s_tr.T).trace())
 
-    #     Args:
-    #         s_tr (Array): Trail deviatoric stress tensor.
-    #         p_tr (Array): Trail pressure.
-    #         p_c_prev (Array): Preconsolidation pressure.
-    #         eps_e_tr (Array): Elastic strain tensor.
-    #         eps_v_p_prev (Array): Volumetric plastic strain.
-    #         volume (Array): Volume of the particles.
-    #         s_ref (Array): Reference deviatoric stress tensor.
-    #         p_ref (Array): Reference pressure.
+        c = self.c0 + self.H * eps_p_acc  # linear hardening
 
-    #     Returns:
-    #         Tuple[Array, Array, Array, Array]:
-    #             Tuple containing the updated stress, preconsolidation pressure, elastic strain tensor, plastic volumetric strain tensor.
-    #     """
-    #     specific_volume = volume / self.Vs
+        yf = yield_function(J2_tr, p_tr, self.eta, self.xi, c=c)
 
-    #     v_lam_tilde = specific_volume / (self.lam - self.kap)
+        is_ep = yf > 0
 
-    #     q_tr = jnp.sqrt(1.5 * (s_tr @ s_tr.T).trace())
+        def elastic_update() -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
+            """If yield function is negative, return elastic solution."""
+            stress = s_tr - p_tr * jnp.eye(3)
+            return stress, eps_p_acc, eps_e_tr
 
-    #     is_ep = yield_function(p_tr, p_c_prev, q_tr, self.M) > 0
+        def return_mapping():
+            """If yield function is positive, pull back to the yield surface."""
+            sol = 0.0
 
-    #     # The following variables are global and passed implicity to down to functions where used
-    #     # s_tr, p_tr, p_c_prev, eps_e_tr, eps_v_p_prev, volume, s_ref, p_ref, q_tr, is_ep
-    #     # self,v_lam_tilde, is_ep
+            R = 1.0
 
-    #     def accept_elas() -> Tuple[Array, Array, Array, Array]:
-    #         """If yield function is negative, return elastic solution."""
-    #         stress = s_tr - p_tr * jnp.eye(3)
-    #         return stress, p_c_prev, eps_e_tr, eps_v_p_prev
+            aux_data = p_tr, s_tr, eps_p_acc
 
-    #     def reduced_equation_system(sol: Array) -> Tuple[Array, Array]:
-    #         """Solve reduced system of equations for plastic return mapping."""
-    #         pmultp, eps_p_v_next = sol
+            def reduced_system_cone(sol):
+                """Reduced system for non-associated flow rule."""
+                p_multi = sol
+                # solve non associated flow rules
+                # volumetric plastic strain increment
+                deps_p_v = -p_multi * self.eta_hat
 
-    #         deps_p_v = eps_p_v_next - eps_v_p_prev
+                # deviatoric plastic strain increment
+                # flow vector is coaxial to deviatoric stress
+                deps_p_gamma = p_multi * s_tr / (2 * jnp.sqrt(J2_tr))
 
-    #         p_next = p_tr - self.K * deps_p_v
+                # Trail isotropic linear elastic law
+                p_next = p_tr - self.K * deps_p_v
+                s_next = s_tr - 2.0 * self.G * deps_p_gamma
 
-    #         q_next = (self.M**2 / (self.M**2 + 6.0 * self.G * pmultp)) * q_tr
+                # linear hardening
+                eps_p_acc_next = eps_p_acc + self.xi * deps_p_v
+                c = self.c0 + self.H * eps_p_acc_next
 
-    #         p_c_next = p_c_prev * (1.0 + v_lam_tilde * deps_p_v)
+                aux_data = p_next, s_next, eps_p_acc_next
+                R = yield_function(J2_tr, p_next, self.eta, self.xi, c=c)
 
-    #         p_s_next = 0.5 * p_c_next
+                # R = R / (self.E * p_next)
 
-    #         s_next = (self.M**2 / (self.M**2 + 6.0 * self.G * pmultp)) * s_tr
+                return R, aux_data
 
-    #         R = jnp.array(
-    #             [
-    #                 yield_function(p_next, p_c_next, q_next, self.M),
-    #                 eps_p_v_next - eps_v_p_prev + 2.0 * pmultp * (p_s_next - p_next),
-    #             ]
-    #         )
+            def reduced_system_apex(sol):
+                p_multi = sol
+                deps_p_v = -p_multi * self.eta_hat
+                p_next = p_tr - self.K * deps_p_v
+                eps_p_acc_next = eps_p_acc + self.xi * deps_p_v
+                c = self.c0 + self.H * eps_p_acc_next
+                R = yield_function(0, p_next, self.eta, self.xi, c=c)
 
-    #         aux_data = p_next, s_next, p_c_next, eps_p_v_next
+                # R = R / (self.E * p_next)
 
-    #         # normalize residual for convergence check
-    #         R = R.at[0].set(R[0] / (self.E * p_c_prev))
+                s_next = jnp.zeros((3, 3), dtype=jnp.float32)
 
-    #         conv = jnp.linalg.norm(R)
+                aux_data = p_next, s_next, eps_p_acc_next
 
-    #         return R, aux_data
+                return R, aux_data
 
-    #     def pull_to_yield_surface():
-    #         """Solve the plastic return mapping algorithm using Newton Rhapson method."""
-    #         sol = jnp.array([0.0, eps_v_p_prev])
+            def NewtonRhapson(step, carry):
+                """Newton-Raphson iteration cone."""
+                R, sol, aux_data = carry
 
-    #         R = jnp.array([1.0, 1.0])
+                R, aux_data = jax.lax.cond(
+                    is_cone,
+                    reduced_system_cone,
+                    reduced_system_apex,
+                    sol,
+                )
 
-    #         aux_data = p_tr, s_tr, p_c_prev, eps_v_p_prev
+                d, *_ = jax.lax.cond(
+                    is_cone,
+                    jax.jacfwd(reduced_system_cone, has_aux=True),
+                    jax.jacfwd(reduced_system_apex, has_aux=True),
+                    sol,
+                )
 
-    #         def body_loop(step, carry):
-    #             R, sol, aux_data = carry
+                # d, *_ = jax.jacfwd(reduced_system_cone, has_aux=True)(sol)
 
-    #             R, aux_data = reduced_equation_system(sol)
+                sol = sol - R / d
 
-    #             jac, *_ = jax.jacfwd(reduced_equation_system, has_aux=True)(sol)
-    #             inv_jac = jnp.linalg.inv(jac)
+                return R, sol, aux_data
 
-    #             sol = sol - inv_jac @ R
+            is_cone = True
+            R, sol, aux_data = jax.lax.fori_loop(0, 30, NewtonRhapson, (R, sol, aux_data))
 
-    #             return R, sol, aux_data
+            is_cone = False
+            R, sol, aux_data = jax.lax.cond(
+                J2_tr - self.G * sol >= 0,  # noqa: E999
+                lambda carry: carry,
+                lambda carry: jax.lax.fori_loop(0, 30, NewtonRhapson, carry),
+                (R, sol, aux_data),
+            )
 
-    #         # R, sol, aux_data = jax.lax.while_loop(
-    #         # lambda carry: is_ep & (jnp.abs(jnp.linalg.norm(carry[0])) > 1e-2),
-    #         # body_loop,
-    #         # (R, sol, aux_data)
-    #         # )
-    #         R, sol, aux_data = jax.lax.fori_loop(
-    #             0, 50, body_loop, (R, sol, aux_data)
-    #         )  # autodiff supported for static jax loops
+            p_next, s_next, eps_p_acc_next = aux_data
 
-    #         p_next, s_next, p_c_next, eps_p_v_next = aux_data
+            stress_next = s_next - p_next * jnp.eye(3)
 
-    #         stress = s_next - p_next * jnp.eye(3)
+            eps_e_next = (s_next - s_ref) / (2.0 * self.G) - (p_next - p_ref) / (3.0 * self.K) * jnp.eye(3)
 
-    #         eps_e_next = (s_next - s_ref) / (2.0 * self.G) - (p_next - p_ref) / (3.0 * self.K) * jnp.eye(3)
-    #         return stress, p_c_next, eps_e_next, eps_p_v_next
+            return stress_next, eps_p_acc_next, eps_e_next
 
-    #     return jax.lax.cond(is_ep, pull_to_yield_surface, accept_elas)
+        return jax.lax.cond(is_ep, return_mapping, elastic_update)
