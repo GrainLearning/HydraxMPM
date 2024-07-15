@@ -108,7 +108,7 @@ def get_gamma(strain: jax.Array, dev_strain=None, dim=3):
     return vmap_get_gamma(dev_strain)
 
 
-def get_KE(mass: jax.Array, vel: jax.Array):
+def get_KE(masses_stack: jax.Array, velocity_stack: jax.Array):
     """Get the kinetic energy from the mass and velocity of a node or particle.
 
     Args:
@@ -119,4 +119,4 @@ def get_KE(mass: jax.Array, vel: jax.Array):
         jax.Array: Kinetic energy `(num_samples,)`.
     """
     vmap_get_KE = jax.vmap(lambda m, v: 0.5 * m * jnp.sum(v**2, axis=-1), in_axes=(0, 0))
-    return vmap_get_KE(mass, vel)
+    return vmap_get_KE(masses_stack, velocity_stack)

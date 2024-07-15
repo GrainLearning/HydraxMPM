@@ -9,9 +9,9 @@ import jax.numpy as jnp
 from jax import Array
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from ..core.particles import Particles
-from ..shapefunctions.shapefunction import ShapeFunction
+from ..nodes.nodes import Nodes
+from ..particles.particles import Particles
+from ..shapefunctions.shapefunctions import ShapeFunction
 
 
 @chex.dataclass
@@ -47,7 +47,6 @@ class RigidParticles:
         """Initialize the rigid particles."""
         return cls(positions=positions, velocities=velocities, shapefunction=shapefunction)
 
-    @jax.jit
     def apply_on_nodes_moments(
         self: Self,
         nodes: Nodes,
@@ -79,7 +78,12 @@ class RigidParticles:
 
         nodes_normals = jnp.zeros_like(nodes.moments_nt).at[shapefunctions.intr_hashes].add(nr_intr_normal)
 
-        r_shapefunctions, _ = self.shapefunction.calculate_shapefunction(nodes, self.positions)
+        r_shapefunctions, _ = self.shapefunction.calculate_shapefunction(
+            origin=nodes.origin,
+            inv_node_spacing=nodes.inv_node_spacing,
+            grid_size=nodes.grid_size,
+            positions=self.positions,
+        )
 
         r_stencil_size, _ = r_shapefunctions.stencil.shape
 

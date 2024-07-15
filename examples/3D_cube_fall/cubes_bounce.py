@@ -11,11 +11,6 @@ domain_size = 10
 particles_per_cell = 2
 cell_size = (1 / 20) * domain_size
 
-output_steps = 1000
-output_start = 0
-total_steps = 110000
-
-
 particle_spacing = cell_size / particles_per_cell
 
 print("Creating simulation")
@@ -32,17 +27,15 @@ def create_block(block_start, block_size, spacing):
 
 
 # Create two blocks (cubes in 2D context)
-block1 = create_block((3, 3, 3), 2, particle_spacing) + np.array([0.0, 0.0, 4.0])
+block1 = create_block((3, 3, 3), 2, particle_spacing) + np.array([1.0, 1.0, 4.0])
 
 block2 = create_block((3, 3, 3), 2, particle_spacing)
 
 pos = np.vstack([block1, block2])
 
-print(pos.shape)
-vels = jnp.zeros_like(pos).at[: len(block1), 2].set(-0.2).at[len(block1) :, 2].set(0.2)
+vels = jnp.zeros_like(pos).at[: len(block1), 2].set(-0.12).at[len(block2) :, 2].set(-0.18)
 
 particles = pm.Particles.create(positions=pos, velocities=vels, original_density=1000)
-
 
 nodes = pm.Nodes.create(
     origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.ones(3) * domain_size, node_spacing=cell_size, small_mass_cutoff=1e-3
@@ -52,86 +45,38 @@ shapefunctions = pm.LinearShapeFunction.create(len(pos), 3)
 
 particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
 
-material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.3, num_particles=len(pos))
+material = pm.LinearIsotropicElastic.create(E=10000.0, nu=0.1, num_particles=len(pos))
 
-gravity = pm.Gravity.create(gravity=jnp.array([0.000, 0.0, -0.0098]))
+gravity = pm.Gravity.create(gravity=jnp.array([0.000, 0.0, -0.016]))
 
 box = pm.DirichletBox.create(nodes)
 
+solver = pm.USL.create(alpha=0.99, dt=0.0001)
 
-usl = pm.USL.create(
+
+carry, accumulate = pm.run_solver(
+    solver=solver,
     particles=particles,
     nodes=nodes,
-    materials=[material],
-    # forces=[gravity,box],
     shapefunctions=shapefunctions,
-    alpha=0.99,
-    dt=0.0001,
+    material_stack=[material],
+    forces_stack=[gravity, box],
+    num_steps=200000,
+    store_every=2000,
+    particles_keys=("positions", "velocities", "masses"),
 )
 
+positions_stack, velocities_stack, masses_stack = accumulate
 
-def debug_particles(
-    step: jnp.int32,
-    particles: pm.Particles,
-    stress_limit: jnp.float32 = 1e6,
-):
-    """First challenge is to narow down the iteration.
-
-    Second challenge is the find function causing the error.
-
-    Third challenge is the find the memory location of the error.
-    """
-    # Check out of bounds
-    positions = usl.particles.positions
-    out_of_bounds = jnp.any(jnp.logical_or(positions < nodes.origin, positions > nodes.end))
-    if out_of_bounds:
-        print(f"Instability detected: Particles out of bounds at step at step {step}")
-        exit(0)
-    # Check for NaN or Inf values
-    if jnp.any(jnp.isnan(particles.stresses)) or jnp.any(jnp.isinf(particles.stresses)):
-        print(f"Instability detected: NaN or Inf value in stress at step {step}")
-        exit(0)
-    # Check for extreme values
-    if jnp.max(jnp.abs(particles.stresses)) > stress_limit:
-        print(f"Instability detected: Stress exceeds limit at step {step}")
-        exit(0)
-
-
-points_data_dict = {"points": [], "KE": []}
-
-
-@jax.tree_util.Partial
-def save_particles(package):
-    steps, usl = package
-    positions = usl.particles.positions
-
-    points_data_dict["points"].append(positions)
-    KE = pm.get_KE(
-        usl.particles.masses,
-        usl.particles.velocities,
-    )
-    points_data_dict["KE"].append(KE)
-
-    print(f"output {steps}", end="\r")
-
-
-print("Running simulation")
-
-usl = usl.solve(
-    num_steps=total_steps, output_start_step=output_start, output_step=output_steps, output_function=save_particles
-)
-
-
-for key, value in points_data_dict.items():
-    points_data_dict[key] = np.array(value)
+# print(positions_stack.shape)
+KE_stack = pm.get_KE(masses_stack, velocities_stack)
 
 
 pm.plot_simple(
-    origin=jnp.array([0.0, 0.0, 0.0]),
-    end=jnp.array([domain_size, domain_size, domain_size]),
-    particles_points=points_data_dict["points"],
-    particles_scalars=points_data_dict["KE"],
-    particles_scalar_name="KE",
-    rigid_points=points_data_dict["points"],
-    particles_plot_params={"point_size": 5},
+    origin=nodes.origin,
+    end=nodes.end,
+    positions_stack=positions_stack,
+    scalars=KE_stack,
+    scalars_name="KE",
+    particles_plot_params={"clim": [jnp.min(KE_stack), jnp.max(KE_stack)], "point_size": 10},
 )

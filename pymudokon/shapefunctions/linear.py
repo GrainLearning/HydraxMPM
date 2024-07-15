@@ -8,8 +8,7 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from .shapefunction import ShapeFunction
+from .shapefunctions import ShapeFunction
 
 
 @chex.dataclass(mappable_dataclass=False, frozen=True)
@@ -52,6 +51,7 @@ class LinearShapeFunction(ShapeFunction):
             stencil = jnp.array(
                 [[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]]
             )
+
         stencil_size = stencil.shape[0]
 
         intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
@@ -64,8 +64,13 @@ class LinearShapeFunction(ShapeFunction):
             stencil=stencil,
         )
 
-    @jax.jit
-    def calculate_shapefunction(self: Self, nodes: Nodes, positions: chex.Array) -> Tuple[Self, chex.Array]:
+    def calculate_shapefunction(
+        self: Self,
+        origin: chex.Array,
+        inv_node_spacing: jnp.float32,
+        grid_size: chex.Array,
+        positions: chex.Array,
+    ) -> Tuple[Self, chex.Array]:
         """Calculate shape functions and its gradients.
 
         Args:
@@ -78,19 +83,20 @@ class LinearShapeFunction(ShapeFunction):
                 - Updated shape function state
                 - Interaction distances
         """
-        _, dim = self.stencil.shape
+        stencil_size, dim = self.stencil.shape
+
+        num_particles = positions.shape[0]
+
+        intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
 
         # Get relative interaction distances and hashes, see `ShapeFunction class` for more details
-        intr_dist, intr_hashes = self.vmap_intr(
-            self.intr_ids, positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size
-        )
+        intr_dist, intr_hashes = self.vmap_intr(intr_ids, positions, origin, inv_node_spacing, grid_size)
 
         # Get shape functions and gradients. Batched over intr_dist.
-        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, nodes.inv_node_spacing)
+        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, inv_node_spacing)
 
-        # Return updated state, and distances.
         return self.replace(
-            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes
+            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_ids=intr_ids, intr_hashes=intr_hashes
         ), intr_dist
 
     @partial(jax.vmap, in_axes=(None, 0, None), out_axes=(0))

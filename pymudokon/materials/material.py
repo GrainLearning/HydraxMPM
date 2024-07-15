@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.particles import Particles
+from ..particles.particles import Particles
 
 
 @chex.dataclass
@@ -25,7 +25,6 @@ class Material:
         """Initialize the base material."""
         return cls(stress_ref=stress_ref)
 
-    @jax.jit
     def update_stress(
         self: Self,
         particles: Particles,

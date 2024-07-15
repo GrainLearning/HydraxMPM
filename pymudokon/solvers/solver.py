@@ -1,100 +1,111 @@
 """Base solve module."""
 
-from typing import Callable, List
+import operator
+from functools import partial
+from typing import Callable, List, Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-import chex
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from ..core.particles import Particles
 from ..forces.forces import Forces
 from ..materials.material import Material
-from ..shapefunctions.shapefunction import ShapeFunction
+from ..nodes.nodes import Nodes
+from ..particles.particles import Particles
+from ..shapefunctions.shapefunctions import ShapeFunction
 
 
-@chex.dataclass
-class Solver:
-    """Base solver class.
+def scan(f, init, xs=None, reverse=False, unroll=1, store_every=1):
+    """https://github.com/google/jax/discussions/12157"""
+    store_every = operator.index(store_every)
+    assert store_every > 0
 
-    A top level wrapper to manage the solver state make impure callback functions.
+    kwds = dict(reverse=reverse, unroll=unroll)
 
-    Attributes:
-        particles: Particles in the simulation.
-        nodes: Nodes in the simulation.
-        shapefunctions: Shape functions in the simulation.
-        materials: List of materials in the simulation.
-        forces: List of forces in the simulation.
-        dt: Time step of the simulation.
-    """
+    if store_every == 1:
+        return jax.lax.scan(f, init, xs=xs, **kwds)
 
-    particles: Particles
-    nodes: Nodes
-    materials: List[Material]
-    forces: List[Forces]
-    shapefunctions: ShapeFunction
-    dt: jnp.float32
+    N, rem = divmod(len(xs), store_every)
 
-    def update(self: Self):
-        """Update the state of the solver."""
-        pass
+    if rem:
+        raise ValueError("store_every must evenly divide len(xs)")
 
-    @jax.jit
-    def solve_n(self: Self, num_steps: jnp.int32) -> Self:
-        """Solve the solver for `num_steps`.
+    xs = xs.reshape(N, store_every, *xs.shape[1:])
 
-        Args:
-            self: Self reference
-            num_steps: Number of steps to solve for
+    def f_outer(carry, xs):
+        carry, ys = jax.lax.scan(f, carry, xs=xs, **kwds)
+        jax.debug.print("step {} \r", xs[-1])
+        return carry, [yss[-1] for yss in ys]
 
-        Returns:
-            Solver: Updated solver
-        """
-        usl = jax.lax.fori_loop(
-            0,
-            num_steps,
-            lambda step, usl: usl.update(),
-            self,
+    return jax.lax.scan(f_outer, init, xs=xs, **kwds)
+
+
+@partial(jax.jit, static_argnums=(6, 7, 8, 9, 10, 11))
+def run_solver(
+    solver,
+    particles: Particles,
+    nodes: Nodes,
+    shapefunctions: ShapeFunction,
+    material_stack: List[Material],
+    forces_stack: List[Forces] = None,
+    num_steps: jnp.int32 = 1,
+    store_every: jnp.int32 = 1,
+    particles_keys: Tuple[str] = None,
+    nodes_keys: Tuple[str] = None,
+    materials_keys: Tuple[str] = None,
+    forces_keys: Tuple[str] = None,
+):
+    if forces_stack is None:
+        forces_stack = []
+
+    if particles_keys is None:
+        particles_keys = ()
+
+    if nodes_keys is None:
+        nodes_keys = ()
+
+    if materials_keys is None:
+        materials_keys = ()
+
+    if forces_keys is None:
+        forces_keys = ()
+
+    def scan_fn(carry, control):
+        step, solver, particles, nodes, shapefunctions, material_stack, forces_stack = carry
+
+        solver, particles, nodes, shapefunctions, material_stack, forces_stack = solver.update_experimental(
+            particles, nodes, shapefunctions, material_stack, forces_stack
         )
-        return usl
 
-    @jax.jit
-    def solve(
-        self: Self,
-        num_steps: jnp.int32,
-        output_start_step: jnp.int32 = 0,
-        output_step: jnp.int32 = 1,
-        output_function: Callable = lambda x: None,
-    ):
-        """Call the main solve loop of a solver.
+        carry = (step, solver, particles, nodes, shapefunctions, material_stack, forces_stack)
 
-        Args:
-            self: Self reference
-            num_steps: Number of steps to solve
-            output_steps (optional): Number of output steps. Defaults to 1.
-            output_function (optional): Callback function called for every `output_step`.
-                Defaults to lambda x: x.
+        accumulate = []
 
-        Returns:
-            Solver: Updated solver
-        """
+        for key in particles_keys:
+            accumulate.append(particles.get(key))
 
-        def body_loop(step, solver):
-            solver = solver.update()
+        for key in nodes_keys:
+            accumulate.append(nodes.get(key))
 
-            jax.lax.cond(
-                (step % output_step == 0) & (output_start_step <= step),
-                lambda x: jax.experimental.io_callback(output_function, None, x),
-                lambda x: None,
-                (step, solver),
-            )
-            return solver
+        for key in materials_keys:
+            for material in material_stack:
+                if key in material:
+                    accumulate.append(material.get(key))
 
-        solver = jax.lax.fori_loop(
-            0,
-            num_steps,
-            body_loop,
-            self,
-        )
-        return solver
+        for key in forces_keys:
+            for force in forces_stack:
+                if key in force:
+                    accumulate.append(force.get(key))
+
+        return carry, accumulate
+
+    xs = jnp.arange(num_steps)
+
+    return scan(
+        scan_fn,
+        (0, solver, particles, nodes, shapefunctions, material_stack, forces_stack),
+        xs=xs,
+        store_every=store_every,
+        unroll=1,
+    )

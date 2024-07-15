@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from ..core.particles import Particles
-from ..shapefunctions.shapefunction import ShapeFunction
+from ..nodes.nodes import Nodes
+from ..particles.particles import Particles
+from ..shapefunctions.shapefunctions import ShapeFunction
 from .nodewall import NodeWall
 
 
@@ -123,7 +123,6 @@ class DirichletBox:
             wall_z1=wall_z1,
         )
 
-    @jax.jit
     def apply_on_nodes_moments(
         self: Self,
         nodes: Nodes,

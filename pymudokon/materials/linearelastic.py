@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.particles import Particles
+from ..particles.particles import Particles
 from .material import Material
 
 
@@ -62,7 +62,6 @@ class LinearIsotropicElastic(Material):
 
         return cls(E=E, nu=nu, G=G, K=K, lam=lam, stress_ref=stress_ref)
 
-    @jax.jit
     def update_stress(
         self: Self,
         particles: Particles,
@@ -93,8 +92,9 @@ class LinearIsotropicElastic(Material):
 
         return particles, self
 
-    @jax.jit
-    def update_stress_benchmark(self: Self, strain_rate: chex.Array, volumes: chex.Array, dt: jnp.float32) -> Self:
+    def update_stress_benchmark(
+        self: Self, stress_prev: chex.Array, strain_rate: chex.Array, volumes: chex.Array, dt: jnp.float32
+    ) -> Self:
         """Update stress for a single element benchmark.
 
         Args:

@@ -14,7 +14,7 @@ from typing_extensions import Self
 
 from .material import Material
 
-from ..core.particles import Particles
+from ..particles.particles import Particles
 
 
 def yield_function(J2: jnp.float32, p: jnp.float32, eta: jnp.float32, xi: jnp.float32, c: jnp.float32):
@@ -175,15 +175,14 @@ class DruckerPrager(Material):
 
         return particles, self
 
-    @jax.jit
     def update_stress_benchmark(
         self: Self,
+        stress_prev: chex.Array,
         strain_rate: chex.Array,
         volume_fraction: chex.Array,
         dt: jnp.float32,
     ) -> Tuple[Self, chex.Array]:
         """Update stress using the Drucker-Prager model with single integration point benchmarks."""
-        strain_rate = strain_rate.reshape(-1, 3, 3)
         deps = strain_rate * dt
 
         # Elastic step

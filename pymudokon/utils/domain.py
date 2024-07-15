@@ -2,9 +2,9 @@
 
 from typing import Tuple
 
-from ..core.nodes import Nodes
-from ..core.particles import Particles
-from ..shapefunctions.shapefunction import ShapeFunction
+from ..nodes.nodes import Nodes
+from ..particles.particles import Particles
+from ..shapefunctions.shapefunctions import ShapeFunction
 
 
 def discretize(
@@ -24,10 +24,10 @@ def discretize(
     particles = particles.calculate_volume(nodes.node_spacing, ppc)
 
     # TODO make this a function within particles dataclass
-    particles = particles.replace(masses=particles.original_density * particles.volumes)
+    particles = particles.replace(masses=particles.density_ref * particles.volumes)
 
-    nodes = shapefunction.set_boundary_nodes(nodes)
+    # nodes = shapefunction.set_boundary_nodes(nodes)
 
-    shapefunction, _ = shapefunction.calculate_shapefunction(nodes, particles.positions)
+    # shapefunction, _ = shapefunction.calculate_shapefunction(nodes, particles.positions)
 
     return particles, nodes, shapefunction

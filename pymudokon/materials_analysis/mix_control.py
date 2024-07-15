@@ -12,10 +12,11 @@ from ..materials.material import Material
 
 def update_from_params(
     material: Material,
-    servo_params: Array,
-    strain_rate_control: Array,
-    mask: Array,
-    volume_fraction: Array,
+    stress: chex.Array,
+    servo_params: chex.Array,
+    strain_rate_control: chex.Array,
+    mask: chex.Array,
+    volume_fraction: chex.Array,
     dt: jnp.float32,
 ):
     trail_strain_rate = strain_rate_control
@@ -23,7 +24,7 @@ def update_from_params(
     trail_strain_rate = trail_strain_rate.at[mask].set(servo_params)
 
     material, trail_stress = material.update_stress_benchmark(
-        trail_strain_rate.reshape(1, 3, 3), jnp.array([volume_fraction]), dt
+        stress.reshape(1, 3, 3), trail_strain_rate.reshape(1, 3, 3), jnp.array([volume_fraction]), dt
     )
 
     trail_stress = trail_stress.reshape((3, 3))
@@ -31,9 +32,9 @@ def update_from_params(
     return material, trail_stress, trail_strain_rate
 
 
-def mixed_loss(servo_params, strain_rate_control: Array, mask, stress_control, dt, material, volume_fraction):
+def mixed_loss(servo_params, strain_rate_control: Array, mask, stress_control, dt, material, volume_fraction, stress):
     material, trail_stress, _ = update_from_params(
-        material, servo_params, strain_rate_control, mask, volume_fraction, dt
+        material, stress, servo_params, strain_rate_control, mask, volume_fraction, dt
     )
 
     loss = optax.losses.l2_loss(trail_stress.at[mask].get(), stress_control.at[mask].get())
@@ -48,6 +49,7 @@ def mix_control(
     stress_stack: chex.Array,
     mask: chex.Array,
     volume_fraction: jnp.float32,
+    stress_ref: chex.Array,
     dt: jnp.float32 | Array,
     learning_rate: float = 1e-3,
     num_opt_iter: int = 20,
@@ -57,12 +59,13 @@ def mix_control(
     chex.assert_shape(stress_stack, (None, 3, 3))
     chex.assert_shape(mask, (3, 3))
     chex.assert_shape(volume_fraction, ())
+    chex.assert_shape(stress_ref, (3, 3))
     chex.assert_shape(material.stress_ref, (1, 3, 3))
 
     servo_params = jnp.zeros((3, 3)).at[mask].get()
 
     def scan_fn(carry, control):
-        material, volume_fraction, servo_params = carry
+        material, stress, volume_fraction, servo_params = carry
         strain_rate_control, stress_control = control
 
         solver = optax.adabelief(learning_rate=learning_rate)
@@ -72,7 +75,7 @@ def mix_control(
         def run_solver_(i, carry):
             servo_params, opt_state = carry
             grad = jax.grad(mixed_loss)(
-                servo_params, strain_rate_control, mask, stress_control, dt, material, volume_fraction
+                servo_params, strain_rate_control, mask, stress_control, dt, material, volume_fraction, stress
             )
             updates, opt_state = solver.update(grad, opt_state)
             servo_params = optax.apply_updates(servo_params, updates)
@@ -81,15 +84,15 @@ def mix_control(
         servo_params, opt_state = jax.lax.fori_loop(0, num_opt_iter, run_solver_, (servo_params, opt_state))
 
         material, stress, strain_rate = update_from_params(
-            material, servo_params, strain_rate_control, mask, volume_fraction, dt
+            material, stress, servo_params, strain_rate_control, mask, volume_fraction, dt
         )
 
-        carry = (material, volume_fraction, servo_params)
-        accumulate = (material, volume_fraction, stress, strain_rate)
+        carry = (material, stress, volume_fraction, servo_params)
+        accumulate = (material, stress, volume_fraction, strain_rate)
         return carry, accumulate
 
     return jax.lax.scan(
         scan_fn,
-        (material, volume_fraction, servo_params),
+        (material, stress_ref, volume_fraction, servo_params),
         (strain_rate_stack, stress_stack),
     )

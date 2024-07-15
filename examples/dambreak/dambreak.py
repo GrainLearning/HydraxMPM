@@ -33,10 +33,6 @@ dt = 0.1 * cell_size / c
 
 particles_per_cell = 2
 
-total_steps = 20000
-output_steps = 1000
-print(cell_size, dt, total_steps)
-
 nodes = pm.Nodes.create(origin=origin, end=end, node_spacing=cell_size)
 
 sep = cell_size / particles_per_cell
@@ -58,46 +54,33 @@ water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=mu)
 gravity = pm.Gravity.create(gravity=jnp.array([0.0, g]))
 box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[3, 2], [3, 2]]))
 
-usl = pm.USL.create(
+
+solver = pm.USL.create(alpha=0.99, dt=dt)
+
+
+carry, accumulate = pm.run_solver(
+    solver=solver,
     particles=particles,
     nodes=nodes,
-    materials=[water],
-    forces=[gravity, box],
     shapefunctions=shapefunctions,
-    alpha=alpha,
-    dt=dt,
+    material_stack=[water],
+    forces_stack=[gravity, box],
+    num_steps=20000,
+    store_every=500,
+    particles_keys=("positions", "velocities", "masses"),
 )
 
-points_data_dict = {"points": [], "KE": []}
+print("Simulation done.. plotting might take a while")
 
+positions_stack, velocities_stack, masses_stack = accumulate
 
-@jax.tree_util.Partial
-def save_particles(package):
-    steps, usl = package
-    positions = usl.particles.positions
-
-    points_data_dict["points"].append(positions)
-    KE = pm.get_KE(
-        usl.particles.masses,
-        pm.points_to_3D(usl.particles.velocities),
-    )
-    points_data_dict["KE"].append(KE)
-    print(KE.mean())
-
-    print(f"output {steps}", end="\r")
-
-
-usl = usl.solve(num_steps=total_steps, output_step=output_steps, output_function=save_particles)
-
-
-for key, value in points_data_dict.items():
-    points_data_dict[key] = np.array(value)
+KE_stack = pm.get_KE(masses_stack, velocities_stack)
 
 pm.plot_simple(
-    origin=origin,
-    end=end,
-    particles_points=points_data_dict["points"],
-    particles_scalars=points_data_dict["KE"],
-    particles_scalar_name="KE",
-    particles_plot_params={"point_size": 5},
+    origin=nodes.origin,
+    end=nodes.end,
+    positions_stack=positions_stack,
+    scalars=KE_stack,
+    scalars_name="KE",
+    particles_plot_params={"clim": [jnp.min(KE_stack), jnp.max(KE_stack)], "point_size": 10},
 )

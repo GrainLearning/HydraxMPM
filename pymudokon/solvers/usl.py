@@ -12,126 +12,67 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from ..core.particles import Particles
 from ..forces.forces import Forces
-from ..materials.material import Material
-from ..shapefunctions.shapefunction import ShapeFunction
-from .solver import Solver
+from ..shapefunctions.linear import LinearShapeFunction
+from ..shapefunctions.shapefunctions import ShapeFunction
+from ..particles.particles import Particles
+from ..nodes.nodes import Nodes
 
 
 @chex.dataclass
-class USL(Solver):
-    """Explicit Update Stress Last (USL) MPM solver.
-
-    Two node moment quantities are used related to FLIP-PIC mixture. One quantity updates the total velocity and
-    the other updates the increment.
-
-    Example:
-    >>> import pymudokon as pm
-    >>> # create particles, nodes, shapefunctions, materials, forces ...
-    >>> usl = pm.USL.create(particles, nodes, shapefunctions, materials)
-    >>> def some_callback(package):
-    ...     usl, step = package
-    ...     # do something with usl
-    ...     # e.g., print(usl.particles.positions)
-    >>> usl = usl.solve(num_steps=10, output_function=some_callback)
-
-    Attributes:
-        alpha: Flip & PIC ratio. Recommended value is 0.99
-    """
-
+class USL:
     alpha: jnp.float32
+    dt: jnp.float32
 
     @classmethod
     def create(
-        cls: Self,
-        particles: Particles,
-        nodes: Nodes,
-        shapefunctions: ShapeFunction,
-        materials: List[Material],
-        forces: List[Forces] = None,
+        cls,
         alpha: jnp.float32 = 0.99,
         dt: jnp.float32 = 0.00001,
-    ) -> Self:
-        """Create a USL solver.
+    ):
+        return USL(alpha=alpha, dt=dt)
 
-        Args:
-            cls: self reference.
-            particles: Particles in the simulation.
-            nodes: Nodes in the simulation.
-            shapefunctions: Shape functions in the simulation, e.g., `LinearShapeFunction`.
-            materials: List of materials in the simulation, e.g., `LinearIsotropicElastic`.
-            forces (optional): List of forces. Defaults to None.
-            alpha (optional): FLIP-PIC ratio. Defaults to 0.99.
-            dt (optional): Time step. Defaults to 0.00001.
+    def update_experimental(self, particles, nodes, shapefunctions, material_stack, forces_stack):
+        nodes = nodes.refresh()
+        particles = particles.refresh()
 
-        Returns:
-            USL: Initialized USL solver.
-        """
-        if forces is None:
-            forces = []
-
-        return cls(
-            particles=particles,
-            nodes=nodes,
-            shapefunctions=shapefunctions,
-            materials=materials,
-            forces=forces,
-            alpha=alpha,
-            dt=dt,
+        shapefunctions, _ = shapefunctions.calculate_shapefunction(
+            origin=nodes.origin,
+            inv_node_spacing=nodes.inv_node_spacing,
+            grid_size=nodes.grid_size,
+            positions=particles.positions,
         )
 
-    @jax.jit
-    def update(self: Self) -> Self:
-        """Solve 1 iteration of USL MPM.
+        nodes = self.p2g(particles=particles, nodes=nodes, shapefunctions=shapefunctions)
 
-        Args:
-            self: Current USL solver.
-
-        Returns:
-            Self: Updated USL solver.
-        """
-        # Reset temporary quantities
-        nodes = self.nodes.refresh()
-        particles = self.particles.refresh()
-
-        # Calculate shape functions and its gradients
-        shapefunctions, _ = self.shapefunctions.calculate_shapefunction(nodes=nodes, positions=particles.positions)
-
-        # Particle to grid transfer
-        nodes = self.p2g(nodes=nodes, particles=particles, shapefunctions=shapefunctions)
-
-        # Calculate forces on nodes moments
-        # for loop is statically unrolled, may result in large compile times
-        # for many materials/forces
-        forces = []
-        for force in self.forces:
-            nodes, out_force = force.apply_on_nodes_moments(
+        # Apply forces here
+        new_forces_stack = []
+        for forces in forces_stack:
+            nodes, forces = forces.apply_on_nodes_moments(
                 particles=particles, nodes=nodes, shapefunctions=shapefunctions, dt=self.dt
             )
-            forces.append(out_force)
+            new_forces_stack.append(forces)
 
-        # Grid to particle transfer
-        particles = self.g2p(particles=particles, nodes=nodes, shapefunctions=shapefunctions)
-
-        # Stress update using constitutive models
-        materials = []
-        for mat in self.materials:
-            particles, out_mat = mat.update_stress(particles=particles, dt=self.dt)
-            materials.append(out_mat)
-
-        return self.replace(
+        particles = self.g2p(
             particles=particles,
             nodes=nodes,
-            materials=materials,
-            forces=forces,
             shapefunctions=shapefunctions,
         )
 
-    @jax.jit
-    def p2g(self: Self, nodes: Nodes, particles: Particles, shapefunctions: ShapeFunction) -> Nodes:
-        """Particle to grid transfer function.
+        new_material_stack = []
+        for material in material_stack:
+            particles, material = material.update_stress(particles=particles, dt=self.dt)
+            new_material_stack.append(material)
+
+        return self, particles, nodes, shapefunctions, new_material_stack, new_forces_stack
+
+    def p2g(
+        self: Self,
+        particles,
+        nodes,
+        shapefunctions,
+    ):
+        """Particle (MP)  to grid transfer function.
 
         Procedure is as follows:
         - Gather particle quantities to interactions.
@@ -139,7 +80,7 @@ class USL(Solver):
         - Calculate node internal force from scaled stresses, volumes.
         - Sum interaction quantities to nodes.
         """
-        stencil_size, dim = self.shapefunctions.stencil.shape
+        stencil_size, dim = shapefunctions.stencil.shape
 
         @partial(jax.vmap, in_axes=(0, 0, 0))
         def vmap_p2g(
@@ -171,28 +112,27 @@ class USL(Solver):
         )
 
         # Sum all interaction quantities.
-        nodes_masses = nodes.masses.at[shapefunctions.intr_hashes].add(scaled_mass)
+        nodes_masses = jnp.zeros_like(nodes.masses).at[shapefunctions.intr_hashes].add(scaled_mass)
 
-        nodes_moments = nodes.moments.at[shapefunctions.intr_hashes].add(scaled_moments)
+        nodes_moments = jnp.zeros_like(nodes.moments).at[shapefunctions.intr_hashes].add(scaled_moments)
 
-        nodes_forces = jnp.zeros_like(nodes.moments_nt).at[shapefunctions.intr_hashes].add(scaled_total_force)
+        nodes_forces = jnp.zeros_like(nodes.moments).at[shapefunctions.intr_hashes].add(scaled_total_force)
 
         nodes_moments_nt = nodes_moments + nodes_forces * self.dt
 
-        return nodes.replace(masses=nodes_masses, moments=nodes_moments, moments_nt=nodes_moments_nt)
+        return nodes.replace(
+            masses=nodes_masses,
+            moments=nodes_moments,
+            moments_nt=nodes_moments_nt,
+        )
 
-    @jax.jit
-    def g2p(self: Self, particles: Particles, nodes: Nodes, shapefunctions: ShapeFunction) -> Particles:
-        """Grid to particle transfer.
-
-        Procedure is as follows:
-        - Calculate node velocities (by dividing moments with mass)
-        - Scatter node quantities to particle-node interactions.
-        - Calculate interaction velocities and velocity gradients.
-        - Sum interaction quantities to particles.
-        (e.g., velocities, positions, volumes, velocity gradients, deformation gradients, ...)
-        """
-        num_interactions, dim = self.shapefunctions.stencil.shape
+    def g2p(
+        self,
+        particles: Particles,
+        nodes: Nodes,
+        shapefunctions: chex.Array,
+    ):
+        stencil_size, dim = shapefunctions.stencil.shape
 
         padding = (0, 3 - dim)
 
@@ -201,7 +141,6 @@ class USL(Solver):
             intr_hashes: chex.ArrayBatched, intr_shapef: chex.ArrayBatched, intr_shapef_grad: chex.ArrayBatched
         ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched, chex.ArrayBatched]:
             """Scatter quantities from nodes to interactions."""
-            # Unscopped quantities are static in JAX
             intr_masses = nodes.masses.at[intr_hashes].get()
             intr_moments = nodes.moments.at[intr_hashes].get()
             intr_moments_nt = nodes.moments_nt.at[intr_hashes].get()
@@ -274,9 +213,9 @@ class USL(Solver):
         )
 
         p_velocities_next, p_positions_next, p_F_next, p_volumes_next, p_velgrads_next = vmap_particles_update(
-            intr_scaled_delta_vels.reshape(-1, num_interactions, dim),
-            intr_scaled_vels_nt.reshape(-1, num_interactions, dim),
-            intr_scaled_velgrad.reshape(-1, num_interactions, 3, 3),
+            intr_scaled_delta_vels.reshape(-1, stencil_size, dim),
+            intr_scaled_vels_nt.reshape(-1, stencil_size, dim),
+            intr_scaled_velgrad.reshape(-1, stencil_size, 3, 3),
             particles.velocities,
             particles.positions,
             particles.F,

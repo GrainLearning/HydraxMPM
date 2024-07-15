@@ -8,7 +8,7 @@ import chex
 from jax import Array
 from typing_extensions import Self
 
-from ..core.particles import Particles
+from ..particles.particles import Particles
 from .material import Material
 
 
@@ -81,7 +81,6 @@ class NewtonFluid(Material):
         """
         return cls(K=K, viscosity=viscosity, gamma=gamma, stress_ref=None)
 
-    @jax.jit
     def update_stress(
         self: Self,
         particles: Particles,

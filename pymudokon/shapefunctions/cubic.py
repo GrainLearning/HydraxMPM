@@ -13,8 +13,7 @@ import chex
 from jax import Array
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from .shapefunction import ShapeFunction
+from .shapefunctions import ShapeFunction
 
 
 @chex.dataclass(mappable_dataclass=False, frozen=True)
@@ -143,62 +142,17 @@ class CubicShapeFunction(ShapeFunction):
             intr_ids=intr_ids,
             intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
             intr_shapef=jnp.zeros((num_particles * stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jax.numpy.zeros((num_particles * stencil_size, dim), dtype=jnp.float32),
+            intr_shapef_grad=jax.numpy.zeros((num_particles * stencil_size, 3), dtype=jnp.float32),
             stencil=stencil,
         )
 
-    def set_boundary_nodes(self: Self, nodes: Nodes) -> Nodes:
-        """Set the node species to ensure connectivity is correct.
-
-        The background grid is divided into 4 regions. Each region is stored within
-        the `nodes.species` array. Each region corresponds to different elements.
-        Boundary nodes are open to ensure Dirichlet boundary conditions.
-
-        The regions are:
-        - Boundary nodes (flag 3)
-        - Middle nodes (flag 0)
-        - Right boundary nodes (flag 2)
-        - Left boundary nodes (flag 1)
-
-        Args:
-            self (Self):
-                self reference
-            nodes (Nodes):
-                Background grid nodes
-
-        Returns:
-            Nodes:
-                Updated shape function state
-
-        Example:
-            >>> import pymudokon as pm
-            >>> nodes = pm.Nodes.create(grid_size=4, node_spacing=0.5)
-            >>> shapefunctions = pm.CubicShapeFunction.create(2, 2)
-            >>> nodes = shapefunctions.set_node_species(nodes)
-        """
-        # TODO generalize
-        # middle nodes
-        species = jax.numpy.zeros(nodes.grid_size).astype(jax.numpy.int32).T
-        # TODO fix this
-        # # # boundary nodes 0 + h
-        # species = species.at[1, 1:-1].set(1)
-        # species = species.at[1:-1, 1].set(1)
-
-        # # # boundary nodes L - h
-        # species = species.at[1:-1, -2].set(2)
-        # species = species.at[-2, 1:-1].set(2)
-
-        # # # boundary nodes
-        # species = species.at[0, :].set(3)  # xstart
-        # species = species.at[-1, :].set(3)  # xend
-        # species = species.at[:, 0].set(3)  # ystart
-        # species = species.at[:, -1].set(3)  # yend
-
-        species = species.reshape(-1)
-        return nodes.replace(species=species)
-
-    @jax.jit
-    def calculate_shapefunction(self: Self, nodes: Nodes, positions: Array) -> Self:
+    def calculate_shapefunction(
+        self: Self,
+        origin: chex.Array,
+        inv_node_spacing: jnp.float32,
+        grid_size: chex.Array,
+        positions: chex.Array,
+    ) -> Self:
         """Top level function to calculate the shape functions.
 
         Args:
@@ -210,22 +164,20 @@ class CubicShapeFunction(ShapeFunction):
             CubicShapeFunction:
                 Updated shape function state for the particle and node pairs.
         """
-        dim = self.stencil.shape[1]
+        stencil_size, dim = self.stencil.shape
 
-        # repeat for each dimension
-        intr_species = nodes.species.take(self.intr_hashes, axis=0).reshape(-1)
+        num_particles = positions.shape[0]
+
+        intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
 
         # Calculate the particle-node pair interactions
         # see `ShapeFunction class` for more details
-        intr_dist, intr_hashes = self.vmap_intr(
-            self.intr_ids, positions, nodes.origin, nodes.inv_node_spacing, nodes.grid_size
-        )
+        intr_dist, intr_hashes = self.vmap_intr(intr_ids, positions, origin, inv_node_spacing, grid_size)
 
-        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, intr_species, nodes.inv_node_spacing)
+        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, inv_node_spacing)
 
-        # return nodal distances for APIC
         return self.replace(
-            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_hashes=intr_hashes
+            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_ids=intr_ids, intr_hashes=intr_hashes
         ), intr_dist
 
     def validate(self: Self, solver) -> Self:
@@ -243,11 +195,10 @@ class CubicShapeFunction(ShapeFunction):
         # TODO check if 2,4,
         raise NotImplementedError("This method is not yet implemented.")
 
-    @partial(jax.vmap, in_axes=(None, 0, 0, None))
+    @partial(jax.vmap, in_axes=(None, 0, None))
     def vmap_intr_shp(
         self,
         intr_dist: Array,
-        intr_species: Array,
         inv_node_spacing: jax.numpy.float32,
     ) -> Tuple[Array, Array]:
         """Vectorized cubic shape function calculation.
@@ -274,7 +225,7 @@ class CubicShapeFunction(ShapeFunction):
             boundary_splines,  # species 3
         ]
 
-        basis, dbasis = jax.lax.switch(intr_species, spline_branches, (intr_dist, inv_node_spacing))
+        basis, dbasis = jax.lax.switch(0, spline_branches, (intr_dist, inv_node_spacing))
         intr_shapef = jnp.prod(basis)
 
         dim = basis.shape[0]

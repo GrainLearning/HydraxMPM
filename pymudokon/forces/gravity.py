@@ -8,12 +8,12 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Self
 
-from ..core.nodes import Nodes
-from ..core.particles import Particles
-from ..shapefunctions.shapefunction import ShapeFunction
+from ..nodes.nodes import Nodes
+from ..particles.particles import Particles
+from ..shapefunctions.shapefunctions import ShapeFunction
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@chex.dataclass
 class Gravity:
     """Gravity force enforced on the background grid.
 
@@ -37,7 +37,6 @@ class Gravity:
         gravity.reshape(-1, dim)
         return cls(gravity=gravity)
 
-    @jax.jit
     def apply_on_nodes_moments(
         self: Self,
         nodes: Nodes,
@@ -51,7 +50,6 @@ class Gravity:
             moments_nt=moments_nt,
         ), self
 
-    @partial(jax.jit, static_argnames=["self"])
     def apply_gravity(
         self, moments: chex.Array, moments_nt: chex.Array, masses: chex.Array, dt: jnp.float32
     ) -> Tuple[chex.Array, chex.Array]:

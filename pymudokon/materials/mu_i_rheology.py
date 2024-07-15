@@ -57,9 +57,9 @@ class MuI(Material):
             phi_c=phi_c,
         )
 
-    @jax.jit
     def update_stress_benchmark(
         self: Self,
+        stress_prev: chex.Array,
         strain_rate: chex.Array,
         volume_fraction: chex.Array,
         dt: jnp.float32,
