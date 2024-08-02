@@ -1,98 +1,141 @@
 """Base class for single integration point benchmark module"""
 
-from typing import Callable
+from functools import partial
+from typing import Tuple
 
+import chex
 import jax
 import jax.numpy as jnp
-import optax
-from jax import Array
-import chex
+import optimistix as optx
+
 from ..materials.material import Material
+from ..utils.math_helpers import get_phi_from_L
 
 
-def update_from_params(
-    material: Material,
-    stress: chex.Array,
-    servo_params: chex.Array,
-    strain_rate_control: chex.Array,
-    mask: chex.Array,
-    volume_fraction: chex.Array,
-    dt: jnp.float32,
-):
-    trail_strain_rate = strain_rate_control
-
-    trail_strain_rate = trail_strain_rate.at[mask].set(servo_params)
-
-    material, trail_stress = material.update_stress_benchmark(
-        stress.reshape(1, 3, 3), trail_strain_rate.reshape(1, 3, 3), jnp.array([volume_fraction]), dt
-    )
-
-    trail_stress = trail_stress.reshape((3, 3))
-
-    return material, trail_stress, trail_strain_rate
-
-
-def mixed_loss(servo_params, strain_rate_control: Array, mask, stress_control, dt, material, volume_fraction, stress):
-    material, trail_stress, _ = update_from_params(
-        material, stress, servo_params, strain_rate_control, mask, volume_fraction, dt
-    )
-
-    loss = optax.losses.l2_loss(trail_stress.at[mask].get(), stress_control.at[mask].get())
-
-    return jnp.mean(loss)
-
-
-# @jax.jit
+@partial(jax.jit, static_argnames=("output"))
 def mix_control(
     material: Material,
-    strain_rate_stack: chex.Array,
-    stress_stack: chex.Array,
-    mask: chex.Array,
-    volume_fraction: jnp.float32,
-    stress_ref: chex.Array,
-    dt: jnp.float32 | Array,
-    learning_rate: float = 1e-3,
-    num_opt_iter: int = 20,
+    dt: jnp.float32,
+    L_control_stack: chex.Array,
+    stress_control: chex.Array = None,
+    stress_mask_indices: chex.Array = None,
+    stress_ref: chex.Array = None,
+    F_ref: chex.Array = None,
+    phi_ref: jnp.float32 = None,
+    output: Tuple[str] = None,
 ) -> Material:
-    # supports only 1 integration point (particle)
-    chex.assert_shape(strain_rate_stack, (None, 3, 3))
-    chex.assert_shape(stress_stack, (None, 3, 3))
-    chex.assert_shape(mask, (3, 3))
-    chex.assert_shape(volume_fraction, ())
+    chex.assert_shape(phi_ref, ())
     chex.assert_shape(stress_ref, (3, 3))
-    chex.assert_shape(material.stress_ref, (1, 3, 3))
+    chex.assert_shape(L_control_stack, (None, 3, 3))
 
-    servo_params = jnp.zeros((3, 3)).at[mask].get()
+    if F_ref is None:
+        F_ref = jnp.eye(3)
+
+    if stress_ref is None:
+        stress_ref = jnp.zeros((3, 3))
+
+    if phi_ref is None:
+        phi_ref = 0.0
+
+    if output is None:
+        output = []
+
+    servo_params = None
+
+    if stress_mask_indices is not None:
+        stress_control_target = stress_control.at[stress_mask_indices].get()
+        servo_params = jnp.zeros_like(stress_control_target)
 
     def scan_fn(carry, control):
-        material, stress, volume_fraction, servo_params = carry
-        strain_rate_control, stress_control = control
+        (
+            material_prev,
+            stress_prev,
+            F_prev,
+            phi_prev,
+            step,
+            servo_params,
+        ) = carry
 
-        solver = optax.adabelief(learning_rate=learning_rate)
+        L_control = control
 
-        opt_state = solver.init(servo_params)
+        def update_from_params(L_next):
+            phi_next = phi_prev
 
-        def run_solver_(i, carry):
-            servo_params, opt_state = carry
-            grad = jax.grad(mixed_loss)(
-                servo_params, strain_rate_control, mask, stress_control, dt, material, volume_fraction, stress
+            F_next = (jnp.eye(3) + L_next * dt) @ F_prev
+
+            phi_next = get_phi_from_L(L_next, phi_prev, dt)
+
+            material_next, stress_next = material_prev.update(
+                stress_prev.reshape(1, 3, 3),
+                F_next.reshape(1, 3, 3),
+                L_next.reshape(1, 3, 3),
+                jnp.array([phi_next]),
+                dt,
             )
-            updates, opt_state = solver.update(grad, opt_state)
-            servo_params = optax.apply_updates(servo_params, updates)
-            return servo_params, opt_state
 
-        servo_params, opt_state = jax.lax.fori_loop(0, num_opt_iter, run_solver_, (servo_params, opt_state))
+            stress_next = stress_next.reshape((3, 3))
 
-        material, stress, strain_rate = update_from_params(
-            material, stress, servo_params, strain_rate_control, mask, volume_fraction, dt
+            aux = (F_next, L_next, phi_next, material_next)
+            return stress_next, aux
+
+        def servo_controller(sol, args):
+            L_next = L_control.at[stress_mask_indices].set(sol)
+
+            stress_next, aux = update_from_params(L_next)
+
+            stress_guess = stress_next.at[stress_mask_indices].get()
+
+            R = stress_guess - stress_control_target
+
+            return R, (stress_next, *aux)
+
+        if stress_mask_indices is None:
+            stress_next, aux_next = update_from_params(L_control)
+
+        else:
+            params = servo_params
+            solver = optx.Newton(rtol=1e-8, atol=1e-1)
+
+            sol = optx.root_find(
+                servo_controller,
+                solver,
+                params,
+                throw=False,
+                has_aux=True,
+                max_steps=10,
+            )
+            stress_next, *aux_next = sol.aux
+
+        F_next, L_next, phi_next, material_next = aux_next
+
+        carry = (
+            material_next,
+            stress_next,
+            F_next,
+            phi_next,
+            step + 1,
+            servo_params,
         )
 
-        carry = (material, stress, volume_fraction, servo_params)
-        accumulate = (material, stress, volume_fraction, strain_rate)
+        accumulate = []
+
+        for key in output:
+            if key == "stress":
+                accumulate.append(stress_next)
+            elif key == "F":
+                accumulate.append(F_next)
+            elif key == "L":
+                accumulate.append(L_next)
+            elif key == "phi":
+                accumulate.append(phi_next)
+            elif key in material_next:
+                accumulate.append(jnp.squeeze(material_next[key]))
         return carry, accumulate
 
-    return jax.lax.scan(
+    carry, accumulate = jax.lax.scan(
         scan_fn,
-        (material, stress_ref, volume_fraction, servo_params),
-        (strain_rate_stack, stress_stack),
+        (material, stress_ref, F_ref, phi_ref, 0, servo_params),  # carry
+        (L_control_stack),  # control
     )
+
+    return carry, accumulate

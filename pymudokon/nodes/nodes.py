@@ -1,10 +1,10 @@
-"""State and functions for managing the Material Point Method (MPM) background grid nodes."""
+"""State and functions for the background MPM grid nodes."""
 # TODO: Add support for Sparse grid. This feature is currently experimental in JAX.
 
-import chex
-import jax
-import jax.numpy as jnp
 from typing_extensions import Self
+
+import chex
+import jax.numpy as jnp
 
 
 @chex.dataclass
@@ -12,6 +12,21 @@ class Nodes:
     """Background grid nodes of MPM solver.
 
     Cartesian grid nodes currently supported. To be used with the MPM solver.
+
+    Attributes:
+        origin: Start coordinates of domain `(dim,)`.
+        end: End coordinates of domain `(dim,)`.
+        node_spacing: Spacing between each node in the grid.
+        small_mass_cutoff: Cut-off value for small masses to avoid unphysical
+            large velocities,
+        defaults to 1e-12.
+        num_nodes_total: Total number of nodes in the grid (derived attribute).
+        grid_size: Size of the grid (derived attribute).
+        inv_node_spacing: Inverse of the node spacing (derived attribute).
+        mass_stack: Nodal masses `(num_nodes_total,)`.
+        moment_stack: Nodal moments `(num_nodes_total, dim)`.
+        moment_nt_stack: Nodal moments in forward step `(num_nodes_total, dim)`.
+        species_stack: Node types. i.e., type of nodes, etc. cubic shape functions
 
     Example:
     >>> import pymudokon as pm
@@ -22,19 +37,6 @@ class Nodes:
     >>> small_mass_cutoff = 1e-10
     >>> nodes = pm.Nodes.create(origin, end, node_spacing, small_mass_cutoff)
     >>> # ... use nodes in MPM solver
-
-    Attributes:
-        origin: Start coordinates of domain `(dim,)`.
-        end: End coordinates of domain `(dim,)`.
-        node_spacing: Spacing between each node in the grid.
-        small_mass_cutoff: Cut-off value for small masses to avoid unphysical large velocities, defaults to 1e-12.
-        num_nodes_total: Total number of nodes in the grid (derived attribute).
-        grid_size: Size of the grid (derived attribute).
-        inv_node_spacing: Inverse of the node spacing (derived attribute).
-        masses: Nodal masses `(num_nodes_total,)`.
-        moments: Nodal moments `(num_nodes_total, dim)`.
-        moments_nt: Nodal moments in forward step `(num_nodes_total, dim)`.
-        species: Node types. i.e., type of nodes, etc. cubic shape functions
     """
 
     origin: chex.Array
@@ -45,10 +47,10 @@ class Nodes:
     grid_size: chex.Array
     inv_node_spacing: jnp.float32
 
-    masses: chex.Array
-    moments: chex.Array
-    moments_nt: chex.Array
-    species: chex.Array
+    mass_stack: chex.Array
+    moment_stack: chex.Array
+    moment_nt_stack: chex.Array
+    species_stack: chex.Array
 
     @classmethod
     def create(
@@ -66,7 +68,8 @@ class Nodes:
             end: End coordinates of domain box `(dim,)`.
             node_spacing: Spacing between each node in the grid.
             small_mass_cutoff (optional):
-                Small masses threshold to avoid unphysical large velocities, defaults to 1e-10.
+                Small masses threshold to avoid unphysical large velocities,
+                defaults to 1e-10.
 
         Returns:
             Nodes: Updated node state.
@@ -95,10 +98,10 @@ class Nodes:
             num_nodes_total=num_nodes_total,
             grid_size=grid_size,
             inv_node_spacing=inv_node_spacing,
-            masses=jnp.zeros((num_nodes_total)).astype(jnp.float32),
-            moments=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
-            moments_nt=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
-            species=jnp.zeros(num_nodes_total).astype(jnp.int32),
+            mass_stack=jnp.zeros((num_nodes_total)).astype(jnp.float32),
+            moment_stack=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
+            moment_nt_stack=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
+            species_stack=jnp.zeros(num_nodes_total).astype(jnp.int32),
         )
 
     def refresh(self: Self) -> Self:
@@ -111,7 +114,7 @@ class Nodes:
             Nodes: Updated node state.
         """
         return self.replace(
-            masses=self.masses.at[:].set(0.0),
-            moments=self.moments.at[:].set(0.0),
-            moments_nt=self.moments_nt.at[:].set(0.0),
+            mass_stack=self.mass_stack.at[:].set(0.0),
+            moment_stack=self.moment_stack.at[:].set(0.0),
+            moment_nt_stack=self.moment_nt_stack.at[:].set(0.0),
         )

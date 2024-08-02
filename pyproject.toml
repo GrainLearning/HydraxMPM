@@ -16,6 +16,9 @@ typing-extensions = "^4.11.0" # type hinting of python 3.12
 optax = "^0.2.2" # optimizers for return mapping, element benchmarks etc.
 flax = "^0.8.4" # uses dataclass utilities for jax
 chex = "^0.1.86"
+optimistix = "^0.0.7"
+extensysplots = "^1.0.2"
+scienceplots = "^2.1.1"
 
 
 [tool.poetry.group.gpu.dependencies]
@@ -45,29 +48,27 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 
-[tool.ruff]
-line-length = 120
 
+[tool.ruff.lint.isort]
+combine-as-imports = true
+extra-standard-library = ["typing_extensions"]
+lines-after-imports = 2
+order-by-type = false
 
 [tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
     "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "N",  # PEP8 naming convetions
-    "D"  # pydocstyle
+    "I001",  # isort
 ]
 ignore = [
     "C901",  # too complex
     "W191",  # indentation contains tabs
-
+    "E741",  # ambiguous variable name
     "N806", # argument name should be lowercase
     "N803", # argument name should be lowercase
 ]
-
+fixable = ["I001", "F401"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

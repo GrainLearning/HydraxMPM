@@ -8,7 +8,7 @@ import pymudokon as pm
 
 def test_create():
     """Unit test the initialization of the isotropic linear elastic material."""
-    material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2, num_particles=2)
+    material = pm.LinearIsotropicElastic.create(E=1000.0, nu=0.2)
 
     assert isinstance(material, pm.LinearIsotropicElastic)
     np.testing.assert_allclose(material.E, 1000.0)
@@ -19,14 +19,14 @@ def test_create():
 
 def test_update_stress_3d():
     """Unit test the isotropic linear elastic material for 3d."""
-    particles = pm.Particles.create(positions=jnp.array([[0.1, 0.1, 0.0]]))
+    particles = pm.Particles.create(position_stack=jnp.array([[0.1, 0.1, 0.0]]))
 
-    particles = particles.replace(velgrads=jnp.stack([jnp.eye(3) * 0.1]))
+    particles = particles.replace(L_stack=jnp.stack([jnp.eye(3) * 0.1]))
 
-    material = pm.LinearIsotropicElastic.create(E=0.1, nu=0.1, num_particles=1)
+    material = pm.LinearIsotropicElastic.create(E=0.1, nu=0.1)
 
-    particles, material = material.update_stress(particles, 0.1)
-    expected_stresses = jnp.array(
+    particles, material = material.update_from_particles(particles, 0.1)
+    expected_stress_stack = jnp.array(
         [
             [
                 [
@@ -44,34 +44,34 @@ def test_update_stress_3d():
         ]
     )
 
-    np.testing.assert_allclose(particles.stresses, expected_stresses)
+    np.testing.assert_allclose(particles.stress_stack, expected_stress_stack)
 
 
 def test_update_stress_2d():
     """Unit test the isotropic linear elastic material for 2d."""
-    particles = pm.Particles.create(positions=jnp.array([[0.1, 0.1]]))
+    particles = pm.Particles.create(position_stack=jnp.array([[0.1, 0.1]]))
 
-    particles = particles.replace(velgrads=jnp.stack([jnp.eye(2) * 0.1]))
+    particles = particles.replace(L_stack=jnp.stack([jnp.eye(3) * 0.1]))
 
-    material = pm.LinearIsotropicElastic.create(E=0.1, nu=0.1, num_particles=1)
+    material = pm.LinearIsotropicElastic.create(E=0.1, nu=0.1)
 
-    particles, material = material.update_stress(particles, 0.1)
-    expected_stresses = jnp.array(
+    particles, material = material.update_from_particles(particles, 0.1)
+    expected_stress_stack = jnp.array(
         [
             [
                 [
-                    0.00113636,
+                    0.00125,
                     0.0,
                     0.0,
                 ],
                 [
                     0.0,
-                    0.00113636,
+                    0.00125,
                     0.0,
                 ],
-                [0.0, 0.0, 0.00022727],
+                [0.0, 0.0, 0.00125],
             ]
         ]
     )
 
-    np.testing.assert_allclose(particles.stresses, expected_stresses, rtol=1e-3)
+    np.testing.assert_allclose(particles.stress_stack, expected_stress_stack, rtol=1e-3)

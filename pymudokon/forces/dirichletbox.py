@@ -1,11 +1,11 @@
 """Module for the imposing zero/non-zero boundaries at the edges of the domain."""
 
 from typing import List, Tuple
+from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
-from typing_extensions import Self
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -25,13 +25,6 @@ class DirichletBox:
         type 2: slip in min direction of inward normal
         type 3: slip in max direction of outward normal
 
-    Example for 2D sticky floor and slip walls:
-    >>> import pymudokon as pm
-    >>> import jax.numpy as jnp
-    >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([5.0, 5.0]), node_spacing=1.0)
-    >>> dirichlet_box = pm.DirichletBox.create(
-    ... nodes, boundary_types=jnp.array([[2, 3], [0, 3]]), width=1)
-
     Attributes:
         wall_x0: Wall at the minimum x direction.
         wall_x1: Wall at the maximum x direction.
@@ -39,6 +32,14 @@ class DirichletBox:
         wall_y1: Wall at the maximum y direction.
         wall_z0: Wall at the minimum z direction.
         wall_z1: Wall at the maximum z direction.
+
+    Example for 2D sticky floor and slip walls:
+    >>> import pymudokon as pm
+    >>> import jax.numpy as jnp
+    >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]),
+        end=jnp.array([5.0, 5.0]), node_spacing=1.0)
+    >>> dirichlet_box = pm.DirichletBox.create(
+    ... nodes, boundary_types=jnp.array([[2, 3], [0, 3]]), width=1)
     """
 
     wall_x0: NodeWall = None
@@ -50,7 +51,7 @@ class DirichletBox:
 
     @classmethod
     def create(cls: Self, nodes, boundary_types: List = None, width: int = 1) -> Self:
-        """Initialize the Dirichlet box, enfore boundary conditions on edge of the domain.
+        """Initialize the Dirichlet box to enfore boundary conditions on domain edge.
 
         Args:
             cls: Self reference_
@@ -70,44 +71,78 @@ class DirichletBox:
         if boundary_types is None:
             boundary_types = jnp.zeros(dim).repeat(2).reshape(dim, 2).astype(jnp.int32)
 
-        node_ids = jnp.arange(nodes.num_nodes_total).reshape(nodes.grid_size).astype(jnp.int32).T
+        node_id_stack = (
+            jnp.arange(nodes.num_nodes_total).reshape(nodes.grid_size).astype(jnp.int32)
+        )
 
         if dim == 3:
-            x0_ids = jax.lax.slice(node_ids, (0, 0, 0), (width, nodes.grid_size[1], nodes.grid_size[2]))
+            x0_ids = jax.lax.slice(
+                node_id_stack,
+                (0, 0, 0),
+                (width, nodes.grid_size[1], nodes.grid_size[2]),
+            )
             x1_ids = jax.lax.slice(
-                node_ids,
+                node_id_stack,
                 (nodes.grid_size[0] - width, 0, 0),
                 (nodes.grid_size[0], nodes.grid_size[1], nodes.grid_size[2]),
             )
-            y0_ids = jax.lax.slice(node_ids, (0, 0, 0), (nodes.grid_size[0], width, nodes.grid_size[2]))
+            y0_ids = jax.lax.slice(
+                node_id_stack,
+                (0, 0, 0),
+                (nodes.grid_size[0], width, nodes.grid_size[2]),
+            )
             y1_ids = jax.lax.slice(
-                node_ids,
+                node_id_stack,
                 (0, nodes.grid_size[1] - width, 0),
                 (nodes.grid_size[0], nodes.grid_size[1], nodes.grid_size[2]),
             )
-            z0_ids = jax.lax.slice(node_ids, (0, 0, 0), (nodes.grid_size[0], nodes.grid_size[1], width))
+            z0_ids = jax.lax.slice(
+                node_id_stack,
+                (0, 0, 0),
+                (nodes.grid_size[0], nodes.grid_size[1], width),
+            )
             z1_ids = jax.lax.slice(
-                node_ids,
+                node_id_stack,
                 (0, 0, nodes.grid_size[2] - width),
                 (nodes.grid_size[0], nodes.grid_size[1], nodes.grid_size[2]),
             )
-            wall_x0 = NodeWall.create(wall_type=boundary_types[0, 0], wall_dim=0, node_ids=x0_ids)
-            wall_x1 = NodeWall.create(wall_type=boundary_types[0, 1], wall_dim=0, node_ids=x1_ids)
-            wall_y0 = NodeWall.create(wall_type=boundary_types[1, 0], wall_dim=1, node_ids=y0_ids)
-            wall_y1 = NodeWall.create(wall_type=boundary_types[1, 1], wall_dim=1, node_ids=y1_ids)
-            wall_z0 = NodeWall.create(wall_type=boundary_types[2, 0], wall_dim=2, node_ids=z0_ids)
-            wall_z1 = NodeWall.create(wall_type=boundary_types[2, 1], wall_dim=2, node_ids=z1_ids)
+            wall_x0 = NodeWall.create(
+                wall_type=boundary_types[0, 0], wall_dim=0, node_id_stack=x0_ids
+            )
+            wall_x1 = NodeWall.create(
+                wall_type=boundary_types[0, 1], wall_dim=0, node_id_stack=x1_ids
+            )
+            wall_y0 = NodeWall.create(
+                wall_type=boundary_types[1, 0], wall_dim=1, node_id_stack=y0_ids
+            )
+            wall_y1 = NodeWall.create(
+                wall_type=boundary_types[1, 1], wall_dim=1, node_id_stack=y1_ids
+            )
+            wall_z0 = NodeWall.create(
+                wall_type=boundary_types[2, 0], wall_dim=2, node_id_stack=z0_ids
+            )
+            wall_z1 = NodeWall.create(
+                wall_type=boundary_types[2, 1], wall_dim=2, node_id_stack=z1_ids
+            )
 
         elif dim == 2:
-            x0_ids = node_ids.at[0:width, :].get().reshape(-1)
-            x1_ids = node_ids.at[nodes.grid_size[0] - width :, :].get().reshape(-1)
-            y0_ids = node_ids.at[:, 0:width].get().reshape(-1)
-            y1_ids = node_ids.at[:, nodes.grid_size[1] - width :].get().reshape(-1)
+            x0_ids = node_id_stack.at[0:width, :].get().reshape(-1)
+            x1_ids = node_id_stack.at[nodes.grid_size[0] - width :, :].get().reshape(-1)
+            y0_ids = node_id_stack.at[:, 0:width].get().reshape(-1)
+            y1_ids = node_id_stack.at[:, nodes.grid_size[1] - width :].get().reshape(-1)
 
-            wall_x0 = NodeWall.create(wall_type=boundary_types[0, 0], wall_dim=0, node_ids=x0_ids)
-            wall_x1 = NodeWall.create(wall_type=boundary_types[0, 1], wall_dim=0, node_ids=x1_ids)
-            wall_y0 = NodeWall.create(wall_type=boundary_types[1, 0], wall_dim=1, node_ids=y0_ids)
-            wall_y1 = NodeWall.create(wall_type=boundary_types[1, 1], wall_dim=1, node_ids=y1_ids)
+            wall_x0 = NodeWall.create(
+                wall_type=boundary_types[0, 0], wall_dim=0, node_id_stack=x0_ids
+            )
+            wall_x1 = NodeWall.create(
+                wall_type=boundary_types[0, 1], wall_dim=0, node_id_stack=x1_ids
+            )
+            wall_y0 = NodeWall.create(
+                wall_type=boundary_types[1, 0], wall_dim=1, node_id_stack=y0_ids
+            )
+            wall_y1 = NodeWall.create(
+                wall_type=boundary_types[1, 1], wall_dim=1, node_id_stack=y1_ids
+            )
             wall_z0 = None
             wall_z1 = None
 

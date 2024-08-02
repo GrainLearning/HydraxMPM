@@ -5,14 +5,20 @@ import pyvista as pv
 
 
 def points_to_3D(points, dim=2):
+    """Convert 2D points to 3D points."""
     if dim == 3:
         return np.array(points)
     return np.pad(points, [(0, 0), (0, 1)], mode="constant")
 
 
 def add_cloud_mesh(
-    positions: np.ndarray, scalars: np.ndarray, scalar_name: str, params: Dict[str, Any], plotter: pv.Plotter
+    positions: np.ndarray,
+    scalars: np.ndarray,
+    scalar_name: str,
+    params: Dict[str, Any],
+    plotter: pv.Plotter,
 ):
+    """Add point cloud to plotter."""
     num_points, dim = positions[0].shape
 
     cloud = pv.PolyData(points_to_3D(positions[0], dim))
@@ -34,7 +40,10 @@ def add_cloud_mesh(
     return plotter, cloud
 
 
-def add_box_mesh(origin: np.ndarray, end: np.ndarray, params: Dict[str, Any], plotter: pv.Plotter):
+def add_box_mesh(
+    origin: np.ndarray, end: np.ndarray, params: Dict[str, Any], plotter: pv.Plotter
+):
+    """Add box mesh to plotter."""
     if len(origin) == 2:  # dim==2
         origin = np.pad(origin, [(0, 1)], mode="constant")
         end = np.pad(end, [(0, 1)], mode="constant")
@@ -52,6 +61,7 @@ def add_box_mesh(origin: np.ndarray, end: np.ndarray, params: Dict[str, Any], pl
 
 
 def set_camera(params: Dict[str, Any], dim: int, plotter: pv.Plotter):
+    """Set camera position and zoom for 2D or 3D plots."""
     if params is None:
         params = {}
     if dim == 2:
@@ -85,15 +95,38 @@ def plot_simple(
     theme: str = "default",
     output_file: str = "output.gif",
 ):
+    """Pyvista wrapper to plot MPM simulation.
+
+    Args:
+        origin (np.ndarray): Domain origin
+        end (np.ndarray): Domain end
+        positions_stack (List[np.ndarray]): List of particle positions
+        scalars (List[np.ndarray], optional): List of scalars. Defaults to None.
+        scalars_name (str, optional): Name of scalar. Defaults to None.
+        rigid_positions_stack (List[np.ndarray], optional):
+            List of rigid particle positions. Defaults to None.
+        box_plot_params (Dict[str, Any], optional):
+            Plot params of domain boundary. Defaults to None.
+        particles_plot_params (Dict[str, Any], optional):
+            Plot params of particles. Defaults to None.
+        rigid_plot_params (Dict[str, Any], optional):
+            Plot params of rigid particles. Defaults to None.
+        theme (str, optional): Pyvista theme to plot. Defaults to "default".
+        output_file (str, optional): Output file name. Defaults to "output.gif".
+    """
     pv.set_plot_theme(theme)
 
     pl = pv.Plotter()
     pl, box = add_box_mesh(origin, end, box_plot_params, pl)
 
-    pl, particles_cloud = add_cloud_mesh(positions_stack, scalars, scalars_name, particles_plot_params, pl)
+    pl, particles_cloud = add_cloud_mesh(
+        positions_stack, scalars, scalars_name, particles_plot_params, pl
+    )
 
     if rigid_positions_stack is not None:
-        pl, rigid_cloud = add_cloud_mesh(rigid_positions_stack, None, None, rigid_plot_params, pl)
+        pl, rigid_cloud = add_cloud_mesh(
+            rigid_positions_stack, None, None, rigid_plot_params, pl
+        )
 
     pl = set_camera(particles_plot_params, positions_stack[0].shape[1], pl)
 

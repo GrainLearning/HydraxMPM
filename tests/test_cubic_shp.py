@@ -9,31 +9,43 @@ import pymudokon as pm
 def test_create():
     """Test creation of cubic shape function."""
     shapefunction = pm.CubicShapeFunction.create(num_particles=2, dim=2)
-
     assert isinstance(shapefunction, pm.CubicShapeFunction)
 
-    np.testing.assert_allclose(shapefunction.intr_shapef, jnp.zeros(32, dtype=jnp.float32))
+    np.testing.assert_allclose(
+        shapefunction.intr_shapef_stack, jnp.zeros(32, dtype=jnp.float32)
+    )
 
     np.testing.assert_allclose(
-        shapefunction.intr_shapef_grad,
-        jnp.zeros((32, 2), dtype=jnp.float32),
+        shapefunction.intr_shapef_grad_stack,
+        jnp.zeros((32, 3), dtype=jnp.float32),
     )
 
 
 def test_calc_shp_2d():
     """Test the cubic shape function for 2D."""
-    positions = jnp.array([[0.45, 0.21], [0.3, 0.4]])
+    position_stack = jnp.array([[0.45, 0.21], [0.3, 0.4]])
 
-    nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1)
+    # nodes = pm.Nodes.create(
+    #     origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.1
+    # )
+
+    origin = jnp.array([0.0, 0.0])
+    end = jnp.array([1.0, 1.0])
+    node_spacing = 0.1
+
+    grid_size = ((end - origin) / node_spacing + 1).astype(jnp.int32)
 
     shapefunction = pm.CubicShapeFunction.create(num_particles=2, dim=2)
 
-    nodes = shapefunction.set_boundary_nodes(nodes)
+    shapefunction, _ = shapefunction.calculate_shapefunction(
+        origin=origin,
+        inv_node_spacing=10,
+        grid_size=grid_size,
+        position_stack=position_stack,
+    )
+    np.testing.assert_allclose(shapefunction.intr_shapef_stack.shape, (32,))
 
-    shapefunction, _ = shapefunction.calculate_shapefunction(nodes, positions)
-    np.testing.assert_allclose(shapefunction.intr_shapef.shape, (32,))
-
-    expected_shapef = [
+    expected_shapef_stack = [
         2.5312577e-03,
         5.8218818e-02,
         5.8218818e-02,
@@ -68,11 +80,11 @@ def test_calc_shp_2d():
         1.4210855e-14,
     ]
 
-    np.testing.assert_allclose(expected_shapef, shapefunction.intr_shapef)
+    np.testing.assert_allclose(expected_shapef_stack, shapefunction.intr_shapef_stack)
 
-    np.testing.assert_allclose(jnp.prod(shapefunction.intr_shapef, axis=0), 0)
+    np.testing.assert_allclose(jnp.prod(shapefunction.intr_shapef_stack, axis=0), 0)
 
-    expected_shapef_grad = [
+    expected_shapef_grad_stack = [
         [-1.5187517e-01, -8.4375188e-02, 0.0],
         [-7.5937581e-01, -1.9406257e00, 0.0],
         [7.5937581e-01, -1.9406257e00, 0.0],
@@ -107,24 +119,33 @@ def test_calc_shp_2d():
         [-0.0000000e00, -0.0000000e00, 0.0],
     ]
 
-    np.testing.assert_allclose(expected_shapef_grad, shapefunction.intr_shapef_grad)
+    np.testing.assert_allclose(
+        expected_shapef_grad_stack, shapefunction.intr_shapef_grad_stack
+    )
 
 
 def test_calc_shp_3d():
     """Test the cubic shape function for 3D."""
     # only test 1 particle here for clarity
-    positions = jnp.array([[0.45, 0.21, 0.1]])
+    position_stack = jnp.array([[0.45, 0.21, 0.1]])
+    origin = jnp.array([0.0, 0.0, 0.0])
+    end = jnp.array([1.0, 1.0, 1.0])
+    node_spacing = 0.1
 
-    nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0, 0.0]), end=jnp.array([1.0, 1.0, 1.0]), node_spacing=0.1)
+    grid_size = ((end - origin) / node_spacing + 1).astype(jnp.int32)
 
-    shapefunction = pm.CubicShapeFunction.create(num_particles=1, dim=3)
+    shapefunction = pm.CubicShapeFunction.create(num_particles=2, dim=3)
 
-    nodes = shapefunction.set_boundary_nodes(nodes)
+    shapefunction, _ = shapefunction.calculate_shapefunction(
+        origin=origin,
+        inv_node_spacing=10,
+        grid_size=grid_size,
+        position_stack=position_stack,
+    )
 
-    shapefunction, _ = shapefunction.calculate_shapefunction(nodes, positions)
-    np.testing.assert_allclose(shapefunction.intr_shapef.shape, (64,))
+    np.testing.assert_allclose(shapefunction.intr_shapef_stack.shape, (64,))
 
-    expected_shapef = [
+    expected_shapef_stack = [
         4.2187618e-04,
         1.6875052e-03,
         4.2187632e-04,
@@ -191,11 +212,11 @@ def test_calc_shp_3d():
         -4.1359586e-13,
     ]
 
-    np.testing.assert_allclose(expected_shapef, shapefunction.intr_shapef)
+    np.testing.assert_allclose(expected_shapef_stack, shapefunction.intr_shapef_stack)
 
-    np.testing.assert_allclose(jnp.prod(shapefunction.intr_shapef, axis=0), 0)
+    np.testing.assert_allclose(jnp.prod(shapefunction.intr_shapef_stack, axis=0), 0)
 
-    expected_shapef_grad = [
+    expected_shapef_grad_stack = [
         [-2.5312522e-02, -1.4062528e-02, -1.2656288e-02],
         [-1.0125011e-01, -5.6250125e-02, -0.0000000e00],
         [-2.5312532e-02, -1.4062533e-02, 1.2656288e-02],
@@ -262,4 +283,6 @@ def test_calc_shp_3d():
         [-2.4815705e-11, -1.2417646e-10, 0.0000000e00],
     ]
 
-    np.testing.assert_allclose(expected_shapef_grad, shapefunction.intr_shapef_grad)
+    np.testing.assert_allclose(
+        expected_shapef_grad_stack, shapefunction.intr_shapef_grad_stack
+    )

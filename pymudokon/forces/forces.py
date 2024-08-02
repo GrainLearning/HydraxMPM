@@ -1,11 +1,10 @@
 """Module containing base forces state."""
 
-from typing import Tuple
+
+from typing_extensions import Self
 
 import chex
-import jax
-import jax.numpy as jnp
-from typing_extensions import Self
+
 
 # from ..core.nodes import Nodes
 # from ..core.particles import Particles

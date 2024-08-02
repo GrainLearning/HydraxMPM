@@ -2,11 +2,11 @@
 
 from functools import partial
 from typing import Tuple
+from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
-from typing_extensions import Self
 
 from .shapefunctions import ShapeFunction
 
@@ -19,15 +19,17 @@ class LinearShapeFunction(ShapeFunction):
 
     C0 continuous and suffers cell crossing instability.
 
-    The shapefunction forms part of the solver class. However, it can be used as a standalone module.
+    The shapefunction forms part of the solver class. However, it can be used as a
+    standalone module.
 
     Example:
     >>> import pymudokon as pm
     >>> import jax.numpy as jnp
-    >>> positions = jnp.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]])
-    >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([5.0, 5.0]), node_spacing=1.0
+    >>> positions = jnp.array(
+        [[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]])
+    >>> nodes = pm.Nodes.create(
+        origin=jnp.array([0.0, 0.0]), end=jnp.array([5.0, 5.0]), node_spacing=1.0)
     >>> linear_shp = pm.LinearShapeFunction.create(num_particles=len(positions), dim=2)
-    >>> linear_shp, intr_dist = linear_shp.calculate_shapefunction(nodes, positions)
     """
 
     @classmethod
@@ -49,18 +51,31 @@ class LinearShapeFunction(ShapeFunction):
             stencil = jnp.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
         if dim == 3:
             stencil = jnp.array(
-                [[0, 0, 0], [0, 0, 1], [1, 0, 0], [1, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [1, 1, 1]]
+                [
+                    [0, 0, 0],
+                    [0, 0, 1],
+                    [1, 0, 0],
+                    [1, 0, 1],
+                    [0, 1, 0],
+                    [0, 1, 1],
+                    [1, 1, 0],
+                    [1, 1, 1],
+                ]
             )
 
         stencil_size = stencil.shape[0]
 
-        intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
+        intr_id_stack = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
 
         return cls(
-            intr_ids=intr_ids,
-            intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            intr_shapef=jnp.zeros((num_particles * stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jnp.zeros((num_particles * stencil_size, 3), dtype=jnp.float32),  # 3 is for plane strain
+            intr_id_stack=intr_id_stack,
+            intr_hash_stack=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
+            intr_shapef_stack=jnp.zeros(
+                (num_particles * stencil_size), dtype=jnp.float32
+            ),
+            intr_shapef_grad_stack=jnp.zeros(
+                (num_particles * stencil_size, 3), dtype=jnp.float32
+            ),
             stencil=stencil,
         )
 
@@ -69,14 +84,16 @@ class LinearShapeFunction(ShapeFunction):
         origin: chex.Array,
         inv_node_spacing: jnp.float32,
         grid_size: chex.Array,
-        positions: chex.Array,
+        position_stack: chex.Array,
     ) -> Tuple[Self, chex.Array]:
         """Calculate shape functions and its gradients.
 
         Args:
             self: Shape function at previous state
-            nodes: Nodes state containing grid size and inv_node_spacing
-            positions: coordinates on the grid
+            origin: start coordinates of the grid
+            inv_node_spacing: 1/node_spacing (inverse node spacing/ grid spacing)
+            grid_size: Number of nodes in each axis
+            position_stack: All coordinates on the grid
 
         Returns:
             Tuple:
@@ -85,19 +102,33 @@ class LinearShapeFunction(ShapeFunction):
         """
         stencil_size, dim = self.stencil.shape
 
-        num_particles = positions.shape[0]
+        num_particles = position_stack.shape[0]
 
-        intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
+        intr_id_stack = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
 
-        # Get relative interaction distances and hashes, see `ShapeFunction class` for more details
-        intr_dist, intr_hashes = self.vmap_intr(intr_ids, positions, origin, inv_node_spacing, grid_size)
+        # Get relative interaction distances and hashes, see `ShapeFunction class`
+        intr_dist_stack, intr_hash_stack = self.vmap_intr(
+            intr_id_stack, position_stack, origin, inv_node_spacing, grid_size
+        )
 
         # Get shape functions and gradients. Batched over intr_dist.
-        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, inv_node_spacing)
+        intr_shapef_stack, intr_shapef_grad_stack = self.vmap_intr_shp(
+            intr_dist_stack, inv_node_spacing
+        )
+
+        intr_dist_3d_stack = jnp.pad(
+            intr_dist_stack,
+            [(0, 0), (0, 3 - dim)],
+            mode="constant",
+            constant_values=0,
+        )
 
         return self.replace(
-            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_ids=intr_ids, intr_hashes=intr_hashes
-        ), intr_dist
+            intr_shapef_stack=intr_shapef_stack,
+            intr_shapef_grad_stack=intr_shapef_grad_stack,
+            intr_id_stack=intr_id_stack,
+            intr_hash_stack=intr_hash_stack,
+        ), intr_dist_3d_stack
 
     @partial(jax.vmap, in_axes=(None, 0, None), out_axes=(0))
     def vmap_intr_shp(
@@ -116,7 +147,9 @@ class LinearShapeFunction(ShapeFunction):
         """
         abs_intr_dist = jnp.abs(intr_dist)
         basis = jnp.where(abs_intr_dist < 1.0, 1.0 - abs_intr_dist, 0.0)
-        dbasis = jnp.where(abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0)
+        dbasis = jnp.where(
+            abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0
+        )
 
         intr_shapef = jnp.prod(basis)
 
@@ -131,7 +164,11 @@ class LinearShapeFunction(ShapeFunction):
             )
         elif dim == 3:
             intr_shapef_grad = jnp.array(
-                [dbasis[0] * basis[1] * basis[2], dbasis[1] * basis[0] * basis[2], dbasis[2] * basis[0] * basis[1]]
+                [
+                    dbasis[0] * basis[1] * basis[2],
+                    dbasis[1] * basis[0] * basis[2],
+                    dbasis[2] * basis[0] * basis[1],
+                ]
             )
         else:
             intr_shapef_grad = jnp.array([dbasis, 0.0, 0.0])

@@ -18,9 +18,6 @@ mu = 0.001
 g = -9.81
 
 
-# USL
-alpha = 0.999
-
 # background grid
 origin, end = jnp.array([0.0, 0.0]), jnp.array([6.0, 6.0])
 
@@ -31,6 +28,16 @@ cell_size = 6 / 69
 c = np.sqrt(bulk_modulus / rho)
 dt = 0.1 * cell_size / c
 
+
+is_apic = False
+
+if is_apic:
+    # alpha = 0.0
+    pass
+else:
+    solver = pm.USL.create(alpha=0.99, dt=dt)
+
+
 particles_per_cell = 2
 
 nodes = pm.Nodes.create(origin=origin, end=end, node_spacing=cell_size)
@@ -39,24 +46,25 @@ sep = cell_size / particles_per_cell
 x = np.arange(0, dam_length + sep, sep) + 3.5 * sep
 y = np.arange(0, dam_height + sep, sep) + 3.5 * sep
 xv, yv = np.meshgrid(x, y)
-pnts = np.array(list(zip(xv.flatten(), yv.flatten()))).astype(np.float64)
+pnts_stack = np.array(list(zip(xv.flatten(), yv.flatten()))).astype(np.float64)
+particles = pm.Particles.create(position_stack=jnp.array(pnts_stack))
 
-particles = pm.Particles.create(positions=jnp.array(pnts), original_density=rho)
+nodes = pm.Nodes.create(
+    origin=origin, end=end, node_spacing=cell_size, small_mass_cutoff=1e-12
+)
 
-nodes = pm.Nodes.create(origin=origin, end=end, node_spacing=cell_size, small_mass_cutoff=1e-12)
+shapefunctions = pm.CubicShapeFunction.create(len(pnts_stack), 2)
 
-shapefunctions = pm.CubicShapeFunction.create(len(pnts), 2)
-
-particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions, ppc=particles_per_cell)
+particles, nodes, shapefunctions = pm.discretize(
+    particles, nodes, shapefunctions, ppc=particles_per_cell, density_ref=rho
+)
 
 water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=mu)
 
 gravity = pm.Gravity.create(gravity=jnp.array([0.0, g]))
-box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[3, 2], [3, 2]]))
-
-
-solver = pm.USL.create(alpha=0.99, dt=dt)
-
+# Fix this
+# box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[3, 2], [3, 2]]))
+box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[0, 0], [0, 0]]))
 
 carry, accumulate = pm.run_solver(
     solver=solver,
@@ -67,20 +75,22 @@ carry, accumulate = pm.run_solver(
     forces_stack=[gravity, box],
     num_steps=20000,
     store_every=500,
-    particles_keys=("positions", "velocities", "masses"),
+    particles_output=("position_stack", "velocity_stack", "mass_stack"),
 )
 
 print("Simulation done.. plotting might take a while")
 
-positions_stack, velocities_stack, masses_stack = accumulate
+positions_stack, velocity_stack, mass_stack = accumulate
 
-KE_stack = pm.get_KE(masses_stack, velocities_stack)
 
 pm.plot_simple(
     origin=nodes.origin,
     end=nodes.end,
     positions_stack=positions_stack,
-    scalars=KE_stack,
-    scalars_name="KE",
-    particles_plot_params={"clim": [jnp.min(KE_stack), jnp.max(KE_stack)], "point_size": 10},
+    scalars=velocity_stack,
+    scalars_name="Velocity magnitude",
+    particles_plot_params={
+        "clim": [jnp.min(velocity_stack), jnp.max(velocity_stack)],
+        "point_size": 10,
+    },
 )

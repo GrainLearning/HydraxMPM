@@ -29,10 +29,10 @@ def test_refresh():
         node_spacing=0.5,
     )
 
-    nodes = nodes.replace(masses=jnp.ones(9).astype(jnp.float32))
+    nodes = nodes.replace(mass_stack=jnp.ones(9).astype(jnp.float32))
 
-    np.testing.assert_allclose(nodes.masses, jnp.ones(9))
+    np.testing.assert_allclose(nodes.mass_stack, jnp.ones(9))
 
     nodes = nodes.refresh()
 
-    np.testing.assert_allclose(nodes.masses, jnp.zeros(9))
+    np.testing.assert_allclose(nodes.mass_stack, jnp.zeros(9))

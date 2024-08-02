@@ -1,6 +1,6 @@
-import vtk
-import pyvista as pv
 import numpy as np
+import pyvista as pv
+import vtk
 
 
 def sample_points_on_surface(mesh_path, distance=0.001, plot=False):
@@ -57,8 +57,6 @@ def sample_points_in_volume(mesh_path, num_points=1000):
     np.random.seed(4355412)
 
     bounds = geometry.GetBounds()
-
-    print(f"Bounds uniform random grid: {bounds[0]}, {bounds[1]} {bounds[2]}, {bounds[3]} {bounds[4]}, {bounds[5]}")
 
     # Generate random points within the bounding box of the polydata
     points = vtk.vtkPoints()

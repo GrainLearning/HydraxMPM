@@ -1,5 +1,4 @@
 """Two cubes falling featuring rough domain walls, gravity and cubic shape functions"""
-# %%
 
 import timeit
 
@@ -9,7 +8,6 @@ import numpy as np
 
 import pymudokon as pm
 
-# jax.config.update("jax_platform_name", "cpu")
 domain_size = 10
 
 particles_per_cell = 2
@@ -35,20 +33,34 @@ block1 = create_block((1, 1), 2, particle_spacing)
 block2 = create_block((7.5, 6.3), 2, particle_spacing)
 block3 = create_block((2.8, 7), 2, particle_spacing)
 block4 = create_block((5, 3.8), 2, particle_spacing)
+
 # Stack all the positions together
-pos = np.vstack([block1, block2, block3, block4])
-print("pos.shape", pos.shape)
-particles = pm.Particles.create(positions=pos, original_density=1000)
+position_stack = np.vstack([block1, block2, block3, block4])
 
-nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([domain_size, domain_size]), node_spacing=cell_size)
+particles = pm.Particles.create(position_stack=position_stack)
 
-print("nodes.num_nodes", len(nodes.moments))
 
-shapefunctions = pm.CubicShapeFunction.create(len(pos), 2)
-particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
+nodes = pm.Nodes.create(
+    origin=jnp.array([0.0, 0.0]),
+    end=jnp.array([domain_size, domain_size]),
+    node_spacing=cell_size,
+)
 
-material = pm.LinearIsotropicElastic.create(E=10000.0, nu=0.1, num_particles=len(pos))
 
+#  original_density=1000
+print(
+    "number of particles {} number of nodes {}".format(
+        len(position_stack), len(nodes.moment_stack)
+    )
+)
+
+shapefunctions = pm.CubicShapeFunction.create(len(position_stack), 2)
+
+particles, nodes, shapefunctions = pm.discretize(
+    particles, nodes, shapefunctions, density_ref=1000
+)
+
+material = pm.LinearIsotropicElastic.create(E=10000.0, nu=0.1)
 
 gravity = pm.Gravity.create(gravity=jnp.array([0.00, -0.0098]))
 
@@ -69,7 +81,7 @@ carry, accumulate = pm.run_solver(
     forces_stack=[gravity, box],
     num_steps=120000,
     store_every=1000,
-    particles_keys=("positions", "velocities", "masses"),
+    particles_output=("position_stack", "velocity_stack", "mass_stack"),
 )
 
 print("Simulation done.. plotting might take a while")
@@ -82,7 +94,10 @@ pm.plot_simple(
     origin=nodes.origin,
     end=nodes.end,
     positions_stack=positions_stack,
-    scalars=KE_stack,
-    scalars_name="KE",
-    particles_plot_params={"clim": [jnp.min(KE_stack), jnp.max(KE_stack)], "point_size": 10},
+    scalars=velocities_stack,
+    scalars_name="Velocity magnitude",
+    particles_plot_params={
+        "clim": [jnp.min(velocities_stack), jnp.max(velocities_stack)],
+        "point_size": 10,
+    },
 )

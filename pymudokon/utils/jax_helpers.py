@@ -1,6 +1,6 @@
-import jax
-
 import operator
+
+import jax
 
 
 def scan_kth(f, init, xs=None, reverse=False, unroll=1, store_every=1):

@@ -2,12 +2,12 @@
 
 from functools import partial
 from typing import Tuple
+from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 from jax import Array
-from typing_extensions import Self
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -20,32 +20,44 @@ class RigidParticles:
 
     The rigid particles are used to impose boundary conditions on the grid.
 
+    Attributes:
+        position_stack: Positions of the rigid particles.
+        velocity_stack: Velocities of the rigid particles.
+        shapefunction: Shape function to interpolate the rigid particles on the grid.
+
     Example usage:
     >>> import jax.numpy as jnp
     >>> import pymudokon as pm
-    >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5)
+    >>> nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]),
+    ... end=jnp.array([1.0, 1.0]), node_spacing=0.5)
     >>> shapefunction = pm.LinearShapeFunction.create(nodes)
     >>> rigid_particles = pm.RigidParticles.create(
-    ...     positions=jnp.array([[0.0, 0.0], [0.5, 0.5]]),
-    ...     velocities=jnp.array([[0.0, 0.0], [0.0, 0.0]]),
+    ...     position_stack=jnp.array([[0.0, 0.0], [0.5, 0.5]]),
+    ...     velocity_stack=jnp.array([[0.0, 0.0], [0.0, 0.0]]),
     ...     shapefunction=shapefunction,
     ... )
     >>> # add rigid particles to solver
 
-    Attributes:
-        positions: Positions of the rigid particles.
-        velocities: Velocities of the rigid particles.
-        shapefunction: Shape function to interpolate the rigid particles on the grid.
+
     """
 
-    positions: Array
-    velocities: Array
+    position_stack: Array
+    velocity_stack: Array
     shapefunction: ShapeFunction
 
     @classmethod
-    def create(cls: Self, positions: Array, velocities: Array, shapefunction: ShapeFunction) -> Self:
+    def create(
+        cls: Self,
+        position_stack: Array,
+        velocity_stack: Array,
+        shapefunction: ShapeFunction,
+    ) -> Self:
         """Initialize the rigid particles."""
-        return cls(positions=positions, velocities=velocities, shapefunction=shapefunction)
+        return cls(
+            position_stack=position_stack,
+            velocity_stack=velocity_stack,
+            shapefunction=shapefunction,
+        )
 
     def apply_on_nodes_moments(
         self: Self,
@@ -58,7 +70,8 @@ class RigidParticles:
 
         Procedure:
             - Get the normals of the non-rigid particles on the grid.
-            - Get the velocities on the grid due to the velocities of the rigid particles.
+            - Get the velocities on the grid due to the velocities of the
+                rigid particles.
             - Get contacting nodes and apply the velocities on the grid.
         """
         # nr denotes non-rigid particles, r denotes rigid particles
@@ -70,40 +83,64 @@ class RigidParticles:
         ) -> chex.ArrayBatched:
             """Get the normals of the non-rigid particles on the grid."""
             nr_particle_id = (intr_id / nr_stencil_size).astype(jnp.int32)
-            nr_intr_masses = particles.masses.at[nr_particle_id].get()
+            nr_intr_masses = particles.mass_stack.at[nr_particle_id].get()
             nr_intr_normal = (intr_shapef_grad * nr_intr_masses).at[:dim].get()
             return nr_intr_normal
 
-        nr_intr_normal = vmap_nr_p2g_grid_normals(shapefunctions.intr_ids, shapefunctions.intr_shapef_grad)
+        nr_intr_normal_stack = vmap_nr_p2g_grid_normals(
+            shapefunctions.intr_id_stack, shapefunctions.intr_shapef_grad_stack
+        )
 
-        nodes_normals = jnp.zeros_like(nodes.moments_nt).at[shapefunctions.intr_hashes].add(nr_intr_normal)
+        nodes_normal_stack = (
+            jnp.zeros_like(nodes.moment_nt_stack)
+            .at[shapefunctions.intr_hash_stack]
+            .add(nr_intr_normal_stack)
+        )
 
         r_shapefunctions, _ = self.shapefunction.calculate_shapefunction(
             origin=nodes.origin,
             inv_node_spacing=nodes.inv_node_spacing,
             grid_size=nodes.grid_size,
-            positions=self.positions,
+            position_stack=self.position_stack,
         )
 
         r_stencil_size, _ = r_shapefunctions.stencil.shape
 
         @partial(jax.vmap, in_axes=(0, 0))
-        def vmap_rp2g_velocities(intr_id: chex.ArrayBatched, intr_shapef: chex.ArrayBatched) -> chex.ArrayBatched:
-            """Get velocities on the grid due to the velocities of the rigid particles."""
+        def vmap_rp2g_velocities(
+            intr_id: chex.ArrayBatched, intr_shapef: chex.ArrayBatched
+        ) -> chex.ArrayBatched:
+            """Get velocities on the grid from velocities of the rigid particles."""
             particle_id = (intr_id / r_stencil_size).astype(jnp.int32)
-            intr_velocities = self.velocities.at[particle_id].get()
+            intr_velocities = self.velocity_stack.at[particle_id].get()
             r_scaled_velocity = intr_shapef * intr_velocities
             return r_scaled_velocity
 
-        r_scaled_velocity = vmap_rp2g_velocities(r_shapefunctions.intr_ids, r_shapefunctions.intr_shapef)
+        r_scaled_velocity_stack = vmap_rp2g_velocities(
+            r_shapefunctions.intr_id_stack, r_shapefunctions.intr_shapef_stack
+        )
 
-        r_nodes_velocities = jnp.zeros_like(nodes.moments_nt).at[r_shapefunctions.intr_hashes].add(r_scaled_velocity)
+        r_nodes_velocity_stack = (
+            jnp.zeros_like(nodes.moment_nt_stack)
+            .at[r_shapefunctions.intr_hash_stack]
+            .add(r_scaled_velocity_stack)
+        )
 
-        r_nodes_contact_mask = jnp.zeros_like(nodes.masses, dtype=bool).at[r_shapefunctions.intr_hashes].set(True)
+        r_nodes_contact_mask_stack = (
+            jnp.zeros_like(nodes.mass_stack, dtype=bool)
+            .at[r_shapefunctions.intr_hash_stack]
+            .set(True)
+        )
 
         @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0))
-        def vmap_nodes(node_moments_nt, nodes_masses, nodes_normals, r_nodes_velocities, r_nodes_contact_mask):
-            """Apply the velocities on the grid due to the velocities of the rigid particles."""
+        def vmap_nodes(
+            node_moments_nt,
+            nodes_masses,
+            nodes_normals,
+            r_nodes_velocities,
+            r_nodes_contact_mask,
+        ):
+            """Apply the velocities on the grid from the rigid particles."""
             # skip the nodes with small mass, due to numerical instability
             nodes_vel_nt = jax.lax.cond(
                 nodes_masses > nodes.small_mass_cutoff,
@@ -121,7 +158,8 @@ class RigidParticles:
             )
 
             # check if the velocity direction of the normal and apply contact
-            # dot product is 0 when the vectors are orthogonal and 1 when they are parallel
+            # dot product is 0 when the vectors are orthogonal
+            # and 1 when they are parallel
             # if othogonal no contact is happening
             # if parallel the contact is happening
             criteria = jnp.dot(nodes_vel_nt - r_nodes_velocities, nodes_normals)
@@ -137,8 +175,16 @@ class RigidParticles:
 
             return node_moments_nt
 
-        moments_nt = vmap_nodes(nodes.moments_nt, nodes.masses, nodes_normals, r_nodes_velocities, r_nodes_contact_mask)
+        moment_nt_stack = vmap_nodes(
+            nodes.moment_nt_stack,
+            nodes.mass_stack,
+            nodes_normal_stack,
+            r_nodes_velocity_stack,
+            r_nodes_contact_mask_stack,
+        )
 
-        r_positions_next = self.positions + self.velocities * dt
+        r_positions_next_stack = self.position_stack + self.velocity_stack * dt
 
-        return nodes.replace(moments_nt=moments_nt), self.replace(positions=r_positions_next)
+        return nodes.replace(moment_nt_stack=moment_nt_stack), self.replace(
+            position_stack=r_positions_next_stack
+        )

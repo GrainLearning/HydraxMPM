@@ -1,3 +1,5 @@
+raise NotImplementedError("This module is not implemented yet.")
+
 # def debug_particles(
 #         step: jnp.int32,
 #         particles: pm.Particles,
@@ -13,12 +15,14 @@
 
 #     # Check out of bounds
 #     positions = usl.particles.positions
-#     out_of_bounds = jnp.any(jnp.logical_or(positions < nodes.origin, positions > nodes.end))
+#     out_of_bounds = jnp.any(
+# jnp.logical_or(positions < nodes.origin, positions > nodes.end))
 #     if out_of_bounds:
 #         Exception(f"Instability detected: Particles out of bounds at step {step}")
 
 #     # Check for NaN or Inf values
-#     if jnp.any(jnp.isnan(particles.stresses)) or jnp.any(jnp.isinf(particles.stresses)):
+#     if jnp.any(jnp.isnan(particles.stresses))
+# or jnp.any(jnp.isinf(particles.stresses)):
 #         raise Exception(f"Instability detected: NaN or Inf value in stress {step}")
 
 #     # Check for extreme values

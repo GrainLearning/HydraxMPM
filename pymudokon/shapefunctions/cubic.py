@@ -1,17 +1,18 @@
 """Module for containing the cubic shape functions.
 
 References:
-    - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
+    - De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory,
+    implementation, and applications.'
 """
 
 from functools import partial
 from typing import Tuple
+from typing_extensions import Self
 
+import chex
 import jax
 import jax.numpy as jnp
-import chex
 from jax import Array
-from typing_extensions import Self
 
 from .shapefunctions import ShapeFunction
 
@@ -136,13 +137,17 @@ class CubicShapeFunction(ShapeFunction):
 
         stencil_size = stencil.shape[0]
 
-        intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
+        intr_id_stack = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
 
         return cls(
-            intr_ids=intr_ids,
-            intr_hashes=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            intr_shapef=jnp.zeros((num_particles * stencil_size), dtype=jnp.float32),
-            intr_shapef_grad=jax.numpy.zeros((num_particles * stencil_size, 3), dtype=jnp.float32),
+            intr_id_stack=intr_id_stack,
+            intr_hash_stack=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
+            intr_shapef_stack=jnp.zeros(
+                (num_particles * stencil_size), dtype=jnp.float32
+            ),
+            intr_shapef_grad_stack=jax.numpy.zeros(
+                (num_particles * stencil_size, 3), dtype=jnp.float32
+            ),
             stencil=stencil,
         )
 
@@ -151,49 +156,38 @@ class CubicShapeFunction(ShapeFunction):
         origin: chex.Array,
         inv_node_spacing: jnp.float32,
         grid_size: chex.Array,
-        positions: chex.Array,
-    ) -> Self:
-        """Top level function to calculate the shape functions.
-
-        Args:
-            self (CubicShapeFunction):
-                Shape function at previous state
-            nodes (Nodes):
-                Nodes state containing grid size and inv_node_spacing
-        Returns:
-            CubicShapeFunction:
-                Updated shape function state for the particle and node pairs.
-        """
+        position_stack: chex.Array,
+    ) -> Tuple[Self, Array]:
+        """Calculate shape functions and its gradients."""
         stencil_size, dim = self.stencil.shape
 
-        num_particles = positions.shape[0]
+        num_particles = position_stack.shape[0]
 
-        intr_ids = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
+        intr_id_stack = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
 
         # Calculate the particle-node pair interactions
         # see `ShapeFunction class` for more details
-        intr_dist, intr_hashes = self.vmap_intr(intr_ids, positions, origin, inv_node_spacing, grid_size)
+        intr_dist_stack, intr_hash_stack = self.vmap_intr(
+            intr_id_stack, position_stack, origin, inv_node_spacing, grid_size
+        )
 
-        intr_shapef, intr_shapef_grad = self.vmap_intr_shp(intr_dist, inv_node_spacing)
+        intr_shapef_stack, intr_shapef_grad_stack = self.vmap_intr_shp(
+            intr_dist_stack, inv_node_spacing
+        )
+
+        intr_dist_3d_stack = jnp.pad(
+            intr_dist_stack,
+            [(0, 0), (0, 3 - dim)],
+            mode="constant",
+            constant_values=0,
+        )
 
         return self.replace(
-            intr_shapef=intr_shapef, intr_shapef_grad=intr_shapef_grad, intr_ids=intr_ids, intr_hashes=intr_hashes
-        ), intr_dist
-
-    def validate(self: Self, solver) -> Self:
-        """Verify the shape functions and gradients.
-
-        Args:
-            self (Self):
-                Self reference
-            solver (BaseSolver):
-                Solver class
-        Returns:
-            Self:
-                Updated solver class
-        """
-        # TODO check if 2,4,
-        raise NotImplementedError("This method is not yet implemented.")
+            intr_shapef_stack=intr_shapef_stack,
+            intr_shapef_grad_stack=intr_shapef_grad_stack,
+            intr_id_stack=intr_id_stack,
+            intr_hash_stack=intr_hash_stack,
+        ), intr_dist_3d_stack
 
     @partial(jax.vmap, in_axes=(None, 0, None))
     def vmap_intr_shp(
@@ -225,7 +219,9 @@ class CubicShapeFunction(ShapeFunction):
             boundary_splines,  # species 3
         ]
 
-        basis, dbasis = jax.lax.switch(0, spline_branches, (intr_dist, inv_node_spacing))
+        basis, dbasis = jax.lax.switch(
+            0, spline_branches, (intr_dist, inv_node_spacing)
+        )
         intr_shapef = jnp.prod(basis)
 
         dim = basis.shape[0]
@@ -239,7 +235,11 @@ class CubicShapeFunction(ShapeFunction):
             )
         elif dim == 3:
             intr_shapef_grad = jnp.array(
-                [dbasis[0] * basis[1] * basis[2], dbasis[1] * basis[0] * basis[2], dbasis[2] * basis[0] * basis[1]]
+                [
+                    dbasis[0] * basis[1] * basis[2],
+                    dbasis[1] * basis[0] * basis[2],
+                    dbasis[2] * basis[0] * basis[1],
+                ]
             )
         else:
             intr_shapef_grad = jnp.array([dbasis, 0.0, 0.0])
@@ -248,6 +248,7 @@ class CubicShapeFunction(ShapeFunction):
 
 
 def middle_splines(package) -> Tuple[Array, Array]:
+    """Splines for inner nodes."""
     intr_dist, inv_node_spacing = package
     conditions = [
         (intr_dist >= 1.0) & (intr_dist < 2.0),
@@ -275,8 +276,7 @@ def middle_splines(package) -> Tuple[Array, Array]:
 
 
 def boundary_padding_end_splines(package) -> Tuple[Array, Array]:
-    #     #     # left side of the boundary L - h
-
+    """Splines for nodes at the boundary (end)."""
     intr_dist, inv_node_spacing = package
     conditions = [
         (intr_dist >= 0.0) & (intr_dist < 1.0),
@@ -301,6 +301,7 @@ def boundary_padding_end_splines(package) -> Tuple[Array, Array]:
 
 
 def boundary_padding_start_splines(package) -> Tuple[Array, Array]:
+    """Splines for nodes at the boundary (start)."""
     intr_dist, inv_node_spacing = package
     conditions = [
         (intr_dist >= 1.0) & (intr_dist < 2.0),
@@ -325,6 +326,7 @@ def boundary_padding_start_splines(package) -> Tuple[Array, Array]:
 
 
 def boundary_splines(package) -> Tuple[Array, Array]:
+    """Splines at edge of the boundary."""
     intr_dist, inv_node_spacing = package
     conditions = [
         (intr_dist >= 1.0) & (intr_dist < 2.0),

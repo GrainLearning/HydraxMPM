@@ -1,133 +1,110 @@
 """State and functions for the material points (called particles)."""
 # TODO: Add support for different initial volume calculation ratios.
 
-import chex
-import jax
-import jax.numpy as jnp
 from typing_extensions import Self
+
+import chex
+import jax.numpy as jnp
 
 
 @chex.dataclass
 class Particles:
-    """Material points State
+    """Material points state.
+
+    Attributes:
+        position_stack: Spatial coordinate vectors `(num_particles, dimension)`.
+        velocity_stack: Spatial velocity vectors `(num_particles, dimension)`.
+        force_stack: External force vectors `(num_particles, dimension)`.
+        mass_stack: Masses `(num_particles,)`.
+        volume_stack: Current volumes  `(num_particles,)`.
+        volume0_stack: Original volumes `(num_particles,)`.
+        L_stack: Velocity gradient tensors `(num_particles, 3, 3)`.
+        stress_stack: Cauchy stress tensors `(num_particles, 3, 3)`.
+        F_stack: Deformation gradient tensors `(num_particles, 3, 3)`.
+        id_stack: Particle IDs `(num_particles,)`.
 
     Example usage:
-            >>> # create two particles with constant velocities in 2D plane strain problem
+            >>> # create two particles with constant velocities in 2D plane strain
             >>> import pymudokon as pm
             >>> import jnp as jnp
             >>> particles = pm.Particles.register(
-            >>>     positions = jnp.array([[0.0, 0.0], [1.0, 1.0]]),
-            >>>     velocities = jnp.array([[0.0, 0.0], [1.0, 2.0]]
+            >>>     position_stack = jnp.array([[0.0, 0.0], [1.0, 1.0]]),
+            >>>     velocity_stack = jnp.array([[0.0, 0.0], [1.0, 2.0]]
             >>> )
 
-        One might need to discretize particles on the grid before using them in the MPM solver.
+        One might need to discretize particles on the grid before using them in the
+        MPM solver.
 
-        This can be done either using a utility function in `pm.discretize` or by calling directly:
+        This can be done either using a utility function in `pm.discretize` or by
+        calling directly:
             >>> # ... create particles
-            >>> particles = particles.calculate_volume(node_spacing = 0.5, particles_per_cell = 2)
+            >>> particles = particles.calculate_volume(
+                node_spacing = 0.5, particles_per_cell = 2)
             >>> # ... use particles in MPM solver
 
-    Attributes:
-        original_density: Original density.
-        positions: Spatial coordinate vectors `(num_particles, dimension)`.
-        velocities: Spatial velocity vectors `(num_particles, dimension)`.
-        forces: External force vectors `(num_particles, dimension)`.
-        masses: Masses `(num_particles,)`.
-        species: Material ID or type `(num_particles,)`.
-        volumes: Current volumes  `(num_particles,)`.
-        volumes_original: Original volumes `(num_particles,)`.
-        velgrads: Velocity gradient tensors `(num_particles, 3, 3)`.
-        stresses: Cauchy stress tensors `(num_particles, 3, 3)`.
-        F: Deformation gradient tensors `(num_particles, 3, 3)`.
+
     """
 
-    positions: chex.Array
-    velocities: chex.Array
-    forces: chex.Array
-    masses: chex.Array
-    volumes: chex.Array
-    volumes_original: chex.Array
-    velgrads: chex.Array
-    stresses: chex.Array
-    F: chex.Array
-    ids: chex.Array
-    density_ref: jnp.float32
+    position_stack: chex.Array
+    velocity_stack: chex.Array
+    force_stack: chex.Array
+    mass_stack: chex.Array
+    volume_stack: chex.Array
+    volume0_stack: chex.Array
+    L_stack: chex.Array
+    stress_stack: chex.Array
+    F_stack: chex.Array
+    id_stack: chex.Array
 
     @classmethod
     def create(
         cls: Self,
-        positions: chex.Array,
-        velocities: chex.Array = None,
-        masses: chex.Array = None,
-        volumes: chex.Array = None,
-        velgrads: chex.Array = None,
-        stresses: chex.Array = None,
-        forces: chex.Array = None,
-        F: chex.Array = None,
-        original_density: jnp.float32 = 1.0,
+        position_stack: chex.Array,
+        velocity_stack: chex.Array = None,
+        mass_stack: chex.Array = None,
+        volume_stack: chex.Array = None,
+        L_stack: chex.Array = None,
+        stress_stack: chex.Array = None,
+        force_stack: chex.Array = None,
+        F_stack: chex.Array = None,
     ) -> Self:
-        """Initialize particles state.
+        """Create the initial state of the particles."""
+        num_particles, dim = position_stack.shape
 
-        Expects arrays of the same length (i.e., first dimension of num_particles) for all the input arrays.
+        if velocity_stack is None:
+            velocity_stack = jnp.zeros((num_particles, dim))
 
-        Args:
-            cls: self type reference
-            positions: Spatial coordinate vectors `(num_particles, dims)`.
-            velocities (optional): Velocity vectors `(num_particles, dims)`, defaults to zeros.
-            forces (optional): External force vectors `(num_particles, dims)`, defaults to zeros.
-            masses (optional): Masses array `(num_particles, )` defaults to zeros.
-            species (optional): Material ID or type of the particle `(num_particles, )`, defaults to zeros.
-            volumes (optional): Volumes `(num_particles, )`, defaults to zeros.
-            velgrads (optional): Velocity gradient tensors `(num_particles, dims, dims )`, defaults to zeros.
-            stresses (optional): Cauchy stress tensors `(num_particles, 3, 3 )`, defaults to zeros.
-            F ( optional): Deformation gradient tensors `(num_particles, 3, 3)`, defaults identity matrices.
-            original_density (optional): Original density (Scalar). Defaults to 1.0.
+        if force_stack is None:
+            force_stack = jnp.zeros((num_particles, dim))
 
-        Returns:
-            Particles: Updated state for the MPM particles.
-        )
-        """
-        num_particles, dim = positions.shape
+        if mass_stack is None:
+            mass_stack = jnp.zeros((num_particles))
 
-        if velocities is None:
-            velocities = jnp.zeros((num_particles, dim))
+        if volume_stack is None:
+            volume_stack = jnp.zeros((num_particles))
 
-        if forces is None:
-            forces = jnp.zeros((num_particles, dim))
+        volume0_stack = volume_stack
 
-        if masses is None:
-            masses = jnp.zeros((num_particles))
+        if L_stack is None:
+            L_stack = jnp.zeros((num_particles, 3, 3))
 
-        if volumes is None:
-            volumes = jnp.zeros((num_particles))
+        if stress_stack is None:
+            stress_stack = jnp.zeros((num_particles, 3, 3))
 
-        volumes_original = volumes
-
-        if velgrads is None:
-            velgrads = jnp.zeros((num_particles, 3, 3))
-
-        if stresses is None:
-            stresses = jnp.zeros((num_particles, 3, 3))
-
-        if F is None:
-            F = jnp.stack([jnp.eye(3)] * num_particles)
-
-        density_ref = original_density
-
-        stress_ref = stresses
+        if F_stack is None:
+            F_stack = jnp.stack([jnp.eye(3)] * num_particles)
 
         return cls(
-            positions=positions,
-            velocities=velocities,
-            masses=masses,
-            volumes=volumes,
-            volumes_original=volumes_original,
-            velgrads=velgrads,
-            stresses=stresses,
-            forces=forces,
-            F=F,
-            density_ref=density_ref,
-            ids=jnp.arange(num_particles),
+            position_stack=position_stack,
+            velocity_stack=velocity_stack,
+            mass_stack=mass_stack,
+            volume_stack=volume_stack,
+            volume0_stack=volume0_stack,
+            L_stack=L_stack,
+            stress_stack=stress_stack,
+            force_stack=force_stack,
+            F_stack=F_stack,
+            id_stack=jnp.arange(num_particles),
         )
 
     def calculate_volume(
@@ -135,9 +112,10 @@ class Particles:
         node_spacing: jnp.float32,
         particles_per_cell: jnp.int32,
     ) -> Self:
-        """Calculate the particles' volumes given a node spacing and number of particles per cell.
+        """Calculate the particles' initial volumes.
 
-        Should be called after initialization, and before updating state with the MPM solver.
+        Should be called after initialization, and before updating state
+        with the MPM solver.
 
         Assumes each cell should have the same number of particles and volume ratio.
 
@@ -150,13 +128,15 @@ class Particles:
         Returns:
             Particles: Updated particles state.
         """
-        num_particles, dim = self.positions.shape
+        num_particles, dim = self.position_stack.shape
 
-        volumes = jnp.ones(num_particles) * (node_spacing**dim) / particles_per_cell
+        volume_stack = (
+            jnp.ones(num_particles) * (node_spacing**dim) / particles_per_cell
+        )
 
-        volumes_original = volumes
+        volume0_stack = volume_stack
 
-        return self.replace(volumes=volumes, volumes_original=volumes_original)
+        return self.replace(volume_stack=volume_stack, volume0_stack=volume0_stack)
 
     def refresh(self) -> Self:
         """Refresh the state of the particles.
@@ -169,4 +149,4 @@ class Particles:
         Returns:
             Particles: Updated state for the MPM particles.
         """
-        return self.replace(velgrads=self.velgrads.at[:].set(0.0))
+        return self.replace(L_stack=self.L_stack.at[:].set(0.0))

@@ -1,5 +1,4 @@
 """Two cubes falling featuring rough domain walls, gravity and cubic shape functions"""
-# %%
 
 import timeit
 
@@ -40,26 +39,31 @@ pos = np.vstack([block1, block2, block3, block4])
 
 rigid_x = jnp.arange(0, domain_size / 1.5, particle_spacing / 2)
 
-rigid_pos = jnp.zeros((len(rigid_x), 2))
+rigid_pos_stack = jnp.zeros((len(rigid_x), 2))
 
-rigid_pos = rigid_pos.at[:, 0].set(rigid_x)
+rigid_pos_stack = rigid_pos_stack.at[:, 0].set(rigid_x)
 
-rigid_pos = rigid_pos.at[:, 1].set(0.5)
+rigid_pos_stack = rigid_pos_stack.at[:, 1].set(0.5)
 
-rigid_velocities = jnp.zeros((len(rigid_x), 2)).at[:, 1].set(0.05)
+rigid_velocity_sack = jnp.zeros((len(rigid_x), 2)).at[:, 1].set(0.05)
 
 # Stack all the positions together
 print("pos.shape", pos.shape)
-particles = pm.Particles.create(positions=pos, original_density=1000)
+particles = pm.Particles.create(position_stack=pos)
 
-nodes = pm.Nodes.create(origin=jnp.array([0.0, 0.0]), end=jnp.array([domain_size, domain_size]), node_spacing=cell_size)
+nodes = pm.Nodes.create(
+    origin=jnp.array([0.0, 0.0]),
+    end=jnp.array([domain_size, domain_size]),
+    node_spacing=cell_size,
+)
 
-print("nodes.num_nodes", len(nodes.moments))
 
 shapefunctions = pm.CubicShapeFunction.create(len(pos), 2)
-particles, nodes, shapefunctions = pm.discretize(particles, nodes, shapefunctions)
+particles, nodes, shapefunctions = pm.discretize(
+    particles, nodes, shapefunctions, density_ref=1000
+)
 
-material = pm.LinearIsotropicElastic.create(E=10000.0, nu=0.1, num_particles=len(pos))
+material = pm.LinearIsotropicElastic.create(E=10000.0, nu=0.1)
 
 
 gravity = pm.Gravity.create(gravity=jnp.array([0.0, -0.0098]))
@@ -70,7 +74,9 @@ box = pm.DirichletBox.create(
 )
 
 rigid_particle_wall = pm.RigidParticles(
-    positions=rigid_pos, velocities=rigid_velocities, shapefunction=pm.LinearShapeFunction.create(len(rigid_pos), 2)
+    position_stack=rigid_pos_stack,
+    velocity_stack=rigid_velocity_sack,
+    shapefunction=pm.LinearShapeFunction.create(len(rigid_pos_stack), 2),
 )
 
 solver = pm.USL.create(alpha=0.99, dt=0.003)
@@ -85,22 +91,28 @@ carry, accumulate = pm.run_solver(
     forces_stack=[gravity, box, rigid_particle_wall],
     num_steps=60000,
     store_every=1000,
-    particles_keys=("positions", "velocities", "masses"),
-    forces_keys=("positions",),
+    particles_output=("position_stack", "stress_stack"),
+    forces_output=("position_stack",),
 )
 
 
-positions_stack, velocities_stack, masses_stack, rigid_positions_stack = accumulate
+positions_stack, stress_stack, rigid_positions_stack = accumulate
 
-KE_stack = pm.get_KE(masses_stack, velocities_stack)
 
+pressure_stack = jax.vmap(pm.get_pressure_stack)(stress_stack)
 
 pm.plot_simple(
     origin=nodes.origin,
     end=nodes.end,
     positions_stack=positions_stack,
     rigid_positions_stack=rigid_positions_stack,
-    scalars=KE_stack,
-    scalars_name="KE",
-    particles_plot_params={"clim": [jnp.min(KE_stack), jnp.max(KE_stack)], "point_size": 10},
+    scalars=pressure_stack,
+    scalars_name="P [Pa]",
+    particles_plot_params={
+        "clim": [
+            jnp.min(pressure_stack.at[:1000].get()),
+            jnp.max(pressure_stack.at[:1000].get()),
+        ],
+        "point_size": 10,
+    },
 )
