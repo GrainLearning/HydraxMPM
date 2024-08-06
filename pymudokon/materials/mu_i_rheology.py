@@ -81,7 +81,17 @@ class MuI(Material):
         phi_stack: chex.Array,
         dt: jnp.float32,
     ) -> Tuple[chex.Array, Self]:
+        def get_deviatoric_strain_rate(L, F):
+            dot_F = L @ F
+            u, s, vh = jnp.linalg.svd(dot_F)
+            eps = jnp.log(s)
+            jax.debug.print("eps {} F {}", eps, F)
+            return eps
+
+        eps = jax.vmap(get_deviatoric_strain_rate)(L_stack, F_stack)
+
         deps_dt_stack = get_sym_tensor_stack(L_stack)
+        jax.debug.print("deps_dt_stack {}", deps_dt_stack)
 
         stress_next_stack = self.vmap_viscoplastic(deps_dt_stack, phi_stack)
 

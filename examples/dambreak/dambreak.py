@@ -29,13 +29,7 @@ c = np.sqrt(bulk_modulus / rho)
 dt = 0.1 * cell_size / c
 
 
-is_apic = False
-
-if is_apic:
-    # alpha = 0.0
-    pass
-else:
-    solver = pm.USL.create(alpha=0.99, dt=dt)
+is_apic = True
 
 
 particles_per_cell = 2
@@ -64,7 +58,20 @@ water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=mu)
 gravity = pm.Gravity.create(gravity=jnp.array([0.0, g]))
 # Fix this
 # box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[3, 2], [3, 2]]))
-box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[0, 0], [0, 0]]))
+box = pm.DirichletBox.create(
+    nodes,
+    boundary_types=(
+        ("slip_negative_normal", "slip_positive_normal"),
+        ("stick", "stick"),
+    ),
+)
+
+
+if is_apic:
+    solver = pm.USL_APIC.create(cell_size, dim=2, num_particles=len(pnts_stack), dt=dt)
+else:
+    solver = pm.USL.create(alpha=0.99, dt=dt)
+
 
 carry, accumulate = pm.run_solver(
     solver=solver,

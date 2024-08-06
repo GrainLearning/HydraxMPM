@@ -7,9 +7,7 @@ Built with JAX.
 # from .materials.CSUH_model import CSUHModel
 # from .materials.mu_i_softness import MuISoft
 # from .materials.UH_model import UHModel
-# from .materials_analysis.deformation_wrappers import (
-#     MPBenchmark,
-# )
+
 
 # from .materials_analysis.plot import (
 #     make_plot_set1,
@@ -19,7 +17,6 @@ Built with JAX.
 #     plot_tensor,
 # )
 
-# from .solvers.usl_apic import USL_APIC
 
 # from .utils.stl_helpers import (
 #     get_stl_bounds,
@@ -35,10 +32,13 @@ from .forces.rigidparticles import RigidParticles
 from .materials.druckerprager import DruckerPrager
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.material import Material
+from .materials.mcc_mrm import MCC_MRM
 from .materials.modifiedcamclay import ModifiedCamClay
 from .materials.mu_i_rheology import MuI
 from .materials.newtonfluid import NewtonFluid
 from .materials_analysis.mix_control import mix_control
+from .materials_analysis.mp_benchmarks import MPBenchmark
+from .materials_analysis.plot import make_plots, PlotHelper
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .shapefunctions.cubic import CubicShapeFunction
@@ -46,6 +46,7 @@ from .shapefunctions.linear import LinearShapeFunction
 from .shapefunctions.shapefunctions import ShapeFunction
 from .solvers.run_solver import run_solver
 from .solvers.usl import USL
+from .solvers.usl_apic import USL_APIC
 from .utils.math_helpers import (
     e_to_phi,
     e_to_phi_stack,
@@ -106,9 +107,12 @@ __all__ = [
     "NewtonFluid",
     "DruckerPrager",
     "ModifiedCamClay",
+    "MCC_MRM",
     "MuI",
     "mix_control",
+    "MPBenchmark",
     "USL",
+    "USL_APIC",
     "run_solver",
     "discretize",
     "e_to_phi",
@@ -150,4 +154,6 @@ __all__ = [
     "phi_to_e",
     "phi_to_e_stack",
     "plot_simple",
+    "PlotHelper",
+    "make_plots",
 ]

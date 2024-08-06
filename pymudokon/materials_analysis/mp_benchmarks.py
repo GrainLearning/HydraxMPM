@@ -42,9 +42,10 @@ class MPBenchmark:
         early_stop_iter=None,
     ):
         if stress_ref is not None:
-            material = material.replace(stress_ref=stress_ref.reshape(1, 3, 3))
+            material = material.replace(stress_ref_stack=stress_ref.reshape(1, 3, 3))
         else:
-            stress_ref = material.stress_ref.reshape(3, 3)
+            if "stress_ref_stack" in material.__dict__:  # noqa
+                stress_ref = material.stress_ref_stack.reshape(3, 3)
 
         if F_ref is not None:
             F_ref = jnp.eye(3)
@@ -100,10 +101,11 @@ class MPBenchmark:
         output=None,
         early_stop_iter=None,
     ):
-        if stress_ref is not None:
-            material = material.replace(stress_ref=stress_ref.reshape(1, 3, 3))
-        else:
-            stress_ref = material.stress_ref.reshape(3, 3)
+        if "stress_ref_stack" in material.__dict__:  # noqa
+            if stress_ref is not None:
+                material = material.replace(stress_ref=stress_ref.reshape(1, 3, 3))
+            else:
+                stress_ref = material.stress_ref_stack.reshape(3, 3)
 
         if F_ref is not None:
             F_ref = jnp.eye(3)
@@ -116,7 +118,7 @@ class MPBenchmark:
             return jnp.zeros((3, 3)).at[[0, 1], [1, 0]].set(deps_dt)
 
         L_control_stack = jax.vmap(get_velgrad)(deps_dt_stack)
-
+        print(L_control_stack)
         if pressure_control is None:
             stress_control = jnp.zeros((3, 3))
             stress_mask_indices = None
@@ -168,76 +170,3 @@ class MPBenchmark:
             phi_ref=phi_next,
             accumulated=accumulated_next,
         )
-
-
-# def triaxial_compression_wrapper(
-#     material,
-#     material_params,
-#     total_time=25.0,
-#     dt=0.01,
-#     target=0.2,
-#     confine_pressure=0.0,
-#     volume_fraction=0.5,
-#     stress_ref=None,
-#     keys=None,
-#     store_every=1,
-# ):
-#     if stress_ref is None:
-#         stress_ref = jnp.zeros((3, 3), dtype=jnp.float32)
-
-#     num_steps = int(total_time / dt)
-
-#     deps_dt = (target / num_steps) / dt
-
-#     strain_rate_stack = jnp.zeros((num_steps, 3, 3)).at[:num_steps, 0, 0].set(-deps_dt)
-
-#     mask = jnp.zeros((3, 3)).at[[1, 2], [1, 2]].set(1).astype(bool)
-
-#     stress_stack = (
-#         jnp.zeros((num_steps, 3, 3))
-#         .at[:num_steps, [0, 1, 2], [0, 1, 2]]
-#         .set(-confine_pressure)
-#     )
-
-#     # material = material.create(*material_params, stress_ref=stress_ref.reshape(1, 3, 3))
-
-#     return mix_control(
-#         material=material,
-#         strain_rate_stack=strain_rate_stack,
-#         stress_stack=stress_stack,
-#         mask=mask,
-#         volume_fraction=volume_fraction,
-#         stress_ref=stress_ref,
-#         dt=dt,
-#         store_every=store_every,
-#         keys=keys,
-#     )
-
-
-# def isotropic_compression_wrapper(
-#     material,
-#     material_params,
-#     total_time=25.0,
-#     dt=0.0001,
-#     target=0.05,
-#     volume_fraction=0.5,
-#     stress_ref=None,
-# ):
-#     raise NotImplementedError("Isotropic compression not implemented yet")
-
-
-#     if stress_ref is None:
-#         stress_ref = jnp.zeros((3, 3), dtype=jnp.float32)
-
-#     num_steps = int(total_time / dt)
-
-#     deps_xx_yy_zz = target / num_steps
-#     strain_rate_stack = jnp.zeros((num_steps, 3, 3)).at[:num_steps, (0, 1, 2), (0, 1, 2)].set(-deps_xx_yy_zz)
-
-#     mask = jnp.zeros((3, 3)).astype(bool)
-
-#     stress_stack = jnp.zeros((num_steps, 3, 3))
-
-#     material = material.create(*material_params, stress_ref=stress_ref.reshape(1, 3, 3))
-
-#     return mix_control(material, strain_rate_stack, stress_stack, mask, volume_fraction, stress_ref, dt)

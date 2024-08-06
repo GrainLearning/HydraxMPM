@@ -65,7 +65,7 @@ def mix_control(
 
             phi_next = get_phi_from_L(L_next, phi_prev, dt)
 
-            material_next, stress_next = material_prev.update(
+            stress_next, material_next = material_prev.update(
                 stress_prev.reshape(1, 3, 3),
                 F_next.reshape(1, 3, 3),
                 L_next.reshape(1, 3, 3),

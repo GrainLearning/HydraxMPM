@@ -18,7 +18,7 @@ class USL_APIC(Solver):
 
     Dp: chex.Array
     Dp_inv: chex.Array
-    Bp: chex.Array
+    Bp_stack: chex.Array
 
     @classmethod
     def create(
@@ -33,29 +33,29 @@ class USL_APIC(Solver):
 
         Dp_inv = jnp.linalg.inv(Dp)
 
-        Bp = jnp.zeros((num_particles, 3, 3))
+        Bp_stack = jnp.zeros((num_particles, 3, 3))
 
-        return USL_APIC(dt=dt, Dp=Dp, Dp_inv=Dp_inv, Bp=Bp)
+        return USL_APIC(dt=dt, Dp=Dp, Dp_inv=Dp_inv, Bp_stack=Bp_stack)
 
     def update(self, particles, nodes, shapefunctions, material_stack, forces_stack):
         nodes = nodes.refresh()
         particles = particles.refresh()
 
-        shapefunctions, intr_dist_3d = shapefunctions.calculate_shapefunction(
+        shapefunctions, intr_dist_3d_stack = shapefunctions.calculate_shapefunction(
             origin=nodes.origin,
             inv_node_spacing=nodes.inv_node_spacing,
             grid_size=nodes.grid_size,
-            positions=particles.positions,
+            position_stack=particles.position_stack,
         )
 
         # transform from grid space to particle space
-        intr_dist_3d = -1.0 * intr_dist_3d * nodes.node_spacing
+        intr_dist_3d_stack = -1.0 * intr_dist_3d_stack * nodes.node_spacing
 
         nodes = self.p2g(
             particles=particles,
             nodes=nodes,
             shapefunctions=shapefunctions,
-            intr_dist_3d=intr_dist_3d,
+            intr_dist_3d_stack=intr_dist_3d_stack,
         )
 
         new_forces_stack = []
@@ -72,7 +72,7 @@ class USL_APIC(Solver):
             particles=particles,
             nodes=nodes,
             shapefunctions=shapefunctions,
-            intr_dist_3d=intr_dist_3d,
+            intr_dist_3d_stack=intr_dist_3d_stack,
         )
 
         new_material_stack = []
@@ -96,7 +96,7 @@ class USL_APIC(Solver):
         particles: Particles,
         nodes: Nodes,
         shapefunctions: ShapeFunction,
-        intr_dist_3d: jax.Array,
+        intr_dist_3d_stack: jax.Array,
     ) -> Nodes:
         stencil_size, dim = shapefunctions.stencil.shape
 
@@ -104,13 +104,13 @@ class USL_APIC(Solver):
         def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad, intr_dist_3d):
             particle_id = (intr_id / stencil_size).astype(jnp.int32)
 
-            intr_masses = particles.masses.at[particle_id].get()
-            intr_volumes = particles.volumes.at[particle_id].get()
-            intr_velocities = particles.velocities.at[particle_id].get()
-            intr_ext_forces = particles.forces.at[particle_id].get()
-            intr_stresses = particles.stresses.at[particle_id].get()
+            intr_masses = particles.mass_stack.at[particle_id].get()
+            intr_volumes = particles.volume_stack.at[particle_id].get()
+            intr_velocities = particles.velocity_stack.at[particle_id].get()
+            intr_ext_forces = particles.force_stack.at[particle_id].get()
+            intr_stresses = particles.stress_stack.at[particle_id].get()
 
-            intr_Bp = self.Bp.at[particle_id].get()  # APIC affine matrix
+            intr_Bp = self.Bp_stack.at[particle_id].get()  # APIC affine matrix
 
             affine_velocity = (intr_Bp @ jnp.linalg.inv(self.Dp)) @ intr_dist_3d
 
@@ -125,29 +125,33 @@ class USL_APIC(Solver):
 
             return scaled_mass, scaled_moments, scaled_total_force
 
-        scaled_mass, scaled_moments, scaled_total_force = vmap_p2g(
-            shapefunctions.intr_ids,
-            shapefunctions.intr_shapef,
-            shapefunctions.intr_shapef_grad,
-            intr_dist_3d,
+        scaled_mass_stack, scaled_moment_stack, scaled_total_force_stack = vmap_p2g(
+            shapefunctions.intr_id_stack,
+            shapefunctions.intr_shapef_stack,
+            shapefunctions.intr_shapef_grad_stack,
+            intr_dist_3d_stack,
         )
 
-        nodes_masses = nodes.masses.at[shapefunctions.intr_hashes].add(scaled_mass)
-
-        nodes_moments = nodes.moments.at[shapefunctions.intr_hashes].add(scaled_moments)
-
-        nodes_forces = (
-            jnp.zeros_like(nodes.moments_nt)
-            .at[shapefunctions.intr_hashes]
-            .add(scaled_total_force)
+        nodes_mass_stack = nodes.mass_stack.at[shapefunctions.intr_hash_stack].add(
+            scaled_mass_stack
         )
 
-        nodes_moments_nt = nodes_moments + nodes_forces * self.dt
+        nodes_moment_stack = nodes.moment_stack.at[shapefunctions.intr_hash_stack].add(
+            scaled_moment_stack
+        )
+
+        nodes_force_stack = (
+            jnp.zeros_like(nodes.moment_nt_stack)
+            .at[shapefunctions.intr_hash_stack]
+            .add(scaled_total_force_stack)
+        )
+
+        nodes_moment_nt_stack = nodes_moment_stack + nodes_force_stack * self.dt
 
         return nodes.replace(
-            masses=nodes_masses,
-            moments=nodes_moments,
-            moments_nt=nodes_moments_nt,
+            mass_stack=nodes_mass_stack,
+            moment_stack=nodes_moment_stack,
+            moment_nt_stack=nodes_moment_nt_stack,
         )
 
     @jax.jit
@@ -156,7 +160,7 @@ class USL_APIC(Solver):
         particles: Particles,
         nodes: Nodes,
         shapefunctions: ShapeFunction,
-        intr_dist_3d: jax.Array,
+        intr_dist_3d_stack: jax.Array,
     ) -> Tuple[Particles, Self]:
         stencil_size, dim = shapefunctions.stencil.shape
 
@@ -164,8 +168,8 @@ class USL_APIC(Solver):
 
         @partial(jax.vmap, in_axes=(0, 0, 0, 0))
         def vmap_intr_scatter(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist_3d):
-            intr_masses = nodes.masses.at[intr_hashes].get()
-            intr_moments_nt = nodes.moments_nt.at[intr_hashes].get()
+            intr_masses = nodes.mass_stack.at[intr_hashes].get()
+            intr_moments_nt = nodes.moment_nt_stack.at[intr_hashes].get()
 
             intr_vels_nt = jax.lax.cond(
                 intr_masses > nodes.small_mass_cutoff,
@@ -235,33 +239,35 @@ class USL_APIC(Solver):
                 p_Bp_next,
             )
 
-        intr_scaled_vels_nt, intr_scaled_velgrad, intr_Bp = vmap_intr_scatter(
-            shapefunctions.intr_hashes,
-            shapefunctions.intr_shapef,
-            shapefunctions.intr_shapef_grad,
-            intr_dist_3d,
+        intr_scaled_vels_nt_stack, intr_scaled_velgrad_stack, intr_Bp_stack = (
+            vmap_intr_scatter(
+                shapefunctions.intr_hash_stack,
+                shapefunctions.intr_shapef_stack,
+                shapefunctions.intr_shapef_grad_stack,
+                intr_dist_3d_stack,
+            )
         )
 
         (
-            p_velocities_next,
-            p_positions_next,
-            p_F_next,
-            p_volumes_next,
-            p_velgrads_next,
-            p_Bp_next,
+            p_velocities_next_stack,
+            p_positions_next_stack,
+            p_F_next_stack,
+            p_volumes_next_stack,
+            p_velgrads_next_stack,
+            p_Bp_next_stack,
         ) = vmap_particles_update(
-            intr_scaled_vels_nt.reshape(-1, stencil_size, dim),
-            intr_scaled_velgrad.reshape(-1, stencil_size, 3, 3),
-            intr_Bp.reshape(-1, stencil_size, 3, 3),
-            particles.positions,
-            particles.F,
-            particles.volumes_original,
+            intr_scaled_vels_nt_stack.reshape(-1, stencil_size, dim),
+            intr_scaled_velgrad_stack.reshape(-1, stencil_size, 3, 3),
+            intr_Bp_stack.reshape(-1, stencil_size, 3, 3),
+            particles.position_stack,
+            particles.F_stack,
+            particles.volume0_stack,
         )
 
         return particles.replace(
-            velocities=p_velocities_next,
-            positions=p_positions_next,
-            F=p_F_next,
-            volumes=p_volumes_next,
-            velgrads=p_velgrads_next,
-        ), self.replace(Bp=p_Bp_next)
+            velocity_stack=p_velocities_next_stack,
+            position_stack=p_positions_next_stack,
+            F_stack=p_F_next_stack,
+            volume_stack=p_volumes_next_stack,
+            L_stack=p_velgrads_next_stack,
+        ), self.replace(Bp_stack=p_Bp_next_stack)

@@ -56,24 +56,19 @@ class NodeWall:
             moment_nt = moment_nt.at[self.node_id_stack].set(0.0)
             return moment_nt
 
-        def stick_x(moment_nt):
-            """Stick in the direction of inward/outward normal."""
-            moment_nt = moment_nt.at[self.node_id_stack, self.wall_dim].set(0.0)
-            return moment_nt
-
-        def slip_min(moment_nt):
+        def slip_positive_normal(moment_nt):
             """Slip in min direction of inward normal."""
             moment_nt = moment_nt.at[self.node_id_stack, self.wall_dim].min(0.0)
             return moment_nt
 
-        def slip_max(moment_nt):
+        def slip_negative_normal(moment_nt):
             """Slip in max direction of outward normal."""
             moment_nt = moment_nt.at[self.node_id_stack, self.wall_dim].max(0.0)
             return moment_nt
 
         moment_nt_stack = jax.lax.switch(
             self.wall_type,
-            (stick_all, stick_x, slip_min, slip_max),
+            (stick_all, slip_positive_normal, slip_negative_normal),
             (nodes.moment_nt_stack),
         )
         return nodes.replace(moment_nt_stack=moment_nt_stack), self

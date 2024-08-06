@@ -50,7 +50,12 @@ class DirichletBox:
     wall_z1: NodeWall = None
 
     @classmethod
-    def create(cls: Self, nodes, boundary_types: List = None, width: int = 1) -> Self:
+    def create(
+        cls: Self,
+        nodes,
+        boundary_types: Tuple[str] = None,
+        width: int = 1,
+    ) -> Self:
         """Initialize the Dirichlet box to enfore boundary conditions on domain edge.
 
         Args:
@@ -67,9 +72,27 @@ class DirichletBox:
             Self: Initialized Dirichlet box.
         """
         dim = nodes.origin.shape[0]
-
         if boundary_types is None:
-            boundary_types = jnp.zeros(dim).repeat(2).reshape(dim, 2).astype(jnp.int32)
+            if dim == 2:
+                boundary_types = (("stick", "stick"), ("stick", "stick"))
+            elif dim == 3:
+                boundary_types = (
+                    ("stick", "stick"),
+                    ("stick", "stick"),
+                    ("stick", "stick"),
+                )
+
+        enum_boundary_types = jnp.zeros((dim, 2), dtype=jnp.int32)
+        for ai, axis in enumerate(boundary_types):
+            for bi, boundary_type in enumerate(axis):
+                if boundary_type == "stick":
+                    enum_boundary_types = enum_boundary_types.at[ai, bi].set(0)
+                elif boundary_type == "slip_positive_normal":
+                    enum_boundary_types = enum_boundary_types.at[ai, bi].set(1)
+                elif boundary_type == "slip_negative_normal":
+                    enum_boundary_types = enum_boundary_types.at[ai, bi].set(2)
+                else:
+                    raise ValueError("Invalid boundary type")
 
         node_id_stack = (
             jnp.arange(nodes.num_nodes_total).reshape(nodes.grid_size).astype(jnp.int32)
@@ -107,22 +130,22 @@ class DirichletBox:
                 (nodes.grid_size[0], nodes.grid_size[1], nodes.grid_size[2]),
             )
             wall_x0 = NodeWall.create(
-                wall_type=boundary_types[0, 0], wall_dim=0, node_id_stack=x0_ids
+                wall_type=enum_boundary_types[0, 0], wall_dim=0, node_id_stack=x0_ids
             )
             wall_x1 = NodeWall.create(
-                wall_type=boundary_types[0, 1], wall_dim=0, node_id_stack=x1_ids
+                wall_type=enum_boundary_types[0, 1], wall_dim=0, node_id_stack=x1_ids
             )
             wall_y0 = NodeWall.create(
-                wall_type=boundary_types[1, 0], wall_dim=1, node_id_stack=y0_ids
+                wall_type=enum_boundary_types[1, 0], wall_dim=1, node_id_stack=y0_ids
             )
             wall_y1 = NodeWall.create(
-                wall_type=boundary_types[1, 1], wall_dim=1, node_id_stack=y1_ids
+                wall_type=enum_boundary_types[1, 1], wall_dim=1, node_id_stack=y1_ids
             )
             wall_z0 = NodeWall.create(
-                wall_type=boundary_types[2, 0], wall_dim=2, node_id_stack=z0_ids
+                wall_type=enum_boundary_types[2, 0], wall_dim=2, node_id_stack=z0_ids
             )
             wall_z1 = NodeWall.create(
-                wall_type=boundary_types[2, 1], wall_dim=2, node_id_stack=z1_ids
+                wall_type=enum_boundary_types[2, 1], wall_dim=2, node_id_stack=z1_ids
             )
 
         elif dim == 2:
@@ -132,17 +155,18 @@ class DirichletBox:
             y1_ids = node_id_stack.at[:, nodes.grid_size[1] - width :].get().reshape(-1)
 
             wall_x0 = NodeWall.create(
-                wall_type=boundary_types[0, 0], wall_dim=0, node_id_stack=x0_ids
+                wall_type=enum_boundary_types[0, 0], wall_dim=0, node_id_stack=x0_ids
             )
             wall_x1 = NodeWall.create(
-                wall_type=boundary_types[0, 1], wall_dim=0, node_id_stack=x1_ids
+                wall_type=enum_boundary_types[0, 1], wall_dim=0, node_id_stack=x1_ids
             )
             wall_y0 = NodeWall.create(
-                wall_type=boundary_types[1, 0], wall_dim=1, node_id_stack=y0_ids
+                wall_type=enum_boundary_types[1, 0], wall_dim=1, node_id_stack=y0_ids
             )
             wall_y1 = NodeWall.create(
-                wall_type=boundary_types[1, 1], wall_dim=1, node_id_stack=y1_ids
+                wall_type=enum_boundary_types[1, 1], wall_dim=1, node_id_stack=y1_ids
             )
+
             wall_z0 = None
             wall_z1 = None
 
