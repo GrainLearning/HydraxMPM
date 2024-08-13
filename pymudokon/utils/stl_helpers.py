@@ -2,34 +2,57 @@ import numpy as np
 import pyvista as pv
 import vtk
 
+def sample_points_on_surface(mesh_path,subdivide=1, radius=0.005, sharpness=2.0, plot=False):
+    # Read the mesh from the provided path
+    surface = pv.read(mesh_path)
+    surface = surface.subdivide(subdivide, 'linear')
+    # Create a point cloud to sample points on the surface
+    point_cloud = pv.PolyData(surface.points)
 
-def sample_points_on_surface(mesh_path, distance=0.001, plot=False):
-    reader = pv.get_reader(mesh_path)
+    # Sample points on the surface of the mesh
+    sampled_points = surface.interpolate(point_cloud, radius=radius, sharpness=sharpness)
 
-    mesh = reader.read()
-
-    sampler = vtk.vtkPolyDataPointSampler()
-
-    sampler.SetInputData(mesh)
-
-    sampler.SetDistance(distance)
-
-    sampler.SetPointGenerationModeToRandom()
-
-    sampler.Update()
-
-    point_cloud = pv.wrap(sampler.GetOutput())
-
+    # Plot the mesh and sampled points if plot is True
     if plot:
         pl = pv.Plotter()
-
-        pl.add_mesh(point_cloud, color="tan", show_edges=True)
-
-        pl.add_mesh(mesh, color="red", show_edges=True)
-
+        pl.add_mesh(surface, color="red", show_edges=True)
+        pl.add_points(sampled_points, color="tan", point_size=5)
         pl.show()
 
-    return np.array(point_cloud.points)
+    # Return the sampled points as a NumPy array
+    return np.array(sampled_points.points)
+
+# def sample_points_on_surface(mesh_path, distance=0.001, plot=False):
+#     import pyvista as pv
+#     surface = pv.read(mesh_path)
+
+    
+#     # reader = pv.get_reader(mesh_path)
+
+#     # mesh = reader.read()
+
+#     # sampler = vtk.vtkPolyDataPointSampler()
+
+#     # sampler.SetInputData(mesh)
+
+#     # sampler.SetDistance(distance)
+
+#     # sampler.SetPointGenerationModeToRandom()
+
+#     # sampler.Update()
+
+#     # point_cloud = pv.wrap(sampler.GetOutput())
+
+#     # if plot:
+#     #     pl = pv.Plotter()
+
+#     #     pl.add_mesh(point_cloud, color="tan", show_edges=True)
+
+#     #     pl.add_mesh(mesh, color="red", show_edges=True)
+
+#     #     pl.show()
+
+#     # return np.array(point_cloud.points)
 
 
 def get_stl_bounds(mesh_path):
@@ -42,46 +65,23 @@ def get_stl_bounds(mesh_path):
     return np.array(bounds).reshape(3, 2).T
 
 
-def sample_points_in_volume(mesh_path, num_points=1000):
-    reader = vtk.vtkSTLReader()
-    reader.SetFileName(mesh_path)
-    reader.Update()
+def sample_points_in_volume(mesh_path, num_points=1000, points=None):
+    import pyvista as pv
+    surface = pv.read(mesh_path)
+    if points is None:
+        origin, end = get_stl_bounds(mesh_path)
+        x = np.random.uniform(origin[0], end[0], num_points)
+        y = np.random.uniform(origin[1], end[1], num_points)
+        z = np.random.uniform(origin[2], end[2], num_points)
+        points = np.vstack((x, y, z)).T
 
-    normals = vtk.vtkPolyDataNormals()
-    normals.SetInputConnection(reader.GetOutputPort())
-    normals.FlipNormalsOn()
-    normals.Update()
+    # Create a PolyData object for the points
+    point_cloud = pv.PolyData(points)
 
-    geometry = normals.GetOutput()
+    # Use select_enclosed_points to filter points inside the surface
+    enclosed_points = point_cloud.select_enclosed_points(surface, tolerance=0.0001, inside_out=False, check_surface=True)
 
-    np.random.seed(4355412)
+    # Extract the points that are inside the surface
+    inside_points = enclosed_points.points[enclosed_points.point_data['SelectedPoints'] == 1]
 
-    bounds = geometry.GetBounds()
-
-    # Generate random points within the bounding box of the polydata
-    points = vtk.vtkPoints()
-    pointsPolyData = vtk.vtkPolyData()
-    pointsPolyData.SetPoints(points)
-
-    points.SetNumberOfPoints(num_points)
-    for i in range(num_points):
-        point = [
-            np.random.uniform(bounds[0], bounds[1]),
-            np.random.uniform(bounds[2], bounds[3]),
-            np.random.uniform(bounds[4], bounds[5]),
-        ]
-        points.SetPoint(i, point[0], point[1], point[2])
-
-    extract = vtk.vtkExtractEnclosedPoints()
-    extract.SetSurfaceData(geometry)
-    extract.SetInputData(pointsPolyData)
-    extract.SetTolerance(0.001)
-    extract.CheckSurfaceOn()
-    extract.Update()
-
-    positions_cpu = []
-    for id in range(num_points):
-        point = extract.GetOutput().GetPoint(id)
-        positions_cpu.append([point[0], point[1], point[2]])
-
-    return positions_cpu
+    return inside_points,surface

@@ -9,20 +9,12 @@ Built with JAX.
 # from .materials.UH_model import UHModel
 
 
-# from .materials_analysis.plot import (
-#     make_plot_set1,
-#     plot_csl,
-#     plot_q_gamma,
-#     plot_q_p,
-#     plot_tensor,
-# )
 
-
-# from .utils.stl_helpers import (
-#     get_stl_bounds,
-#     sample_points_in_volume,
-#     sample_points_on_surface,
-# )
+from .utils.stl_helpers import (
+    get_stl_bounds,
+    sample_points_in_volume,
+    sample_points_on_surface
+)
 
 from .forces.dirichletbox import DirichletBox
 from .forces.forces import Forces
@@ -44,7 +36,10 @@ from .particles.particles import Particles
 from .shapefunctions.cubic import CubicShapeFunction
 from .shapefunctions.linear import LinearShapeFunction
 from .shapefunctions.shapefunctions import ShapeFunction
-from .solvers.run_solver import run_solver
+from .solvers.run_solver import (
+    run_solver_io,
+    run_solver
+)
 from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
 from .utils.math_helpers import (
