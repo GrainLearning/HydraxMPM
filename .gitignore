@@ -1,3 +1,4 @@
+NoInclude/
 # Project specific
 poetry.lock
 output_vid.avi
