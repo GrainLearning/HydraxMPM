@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from ..particles.particles import Particles
-from ..utils.math_helpers import get_sym_tensor_stack
+from ..utils.math_helpers import get_sym_tensor_stack,get_scalar_shear_strain,get_dev_strain
 from .material import Material
 
 
@@ -81,17 +81,8 @@ class MuI(Material):
         phi_stack: chex.Array,
         dt: jnp.float32,
     ) -> Tuple[chex.Array, Self]:
-        def get_deviatoric_strain_rate(L, F):
-            dot_F = L @ F
-            u, s, vh = jnp.linalg.svd(dot_F)
-            eps = jnp.log(s)
-            jax.debug.print("eps {} F {}", eps, F)
-            return eps
-
-        eps = jax.vmap(get_deviatoric_strain_rate)(L_stack, F_stack)
 
         deps_dt_stack = get_sym_tensor_stack(L_stack)
-        jax.debug.print("deps_dt_stack {}", deps_dt_stack)
 
         stress_next_stack = self.vmap_viscoplastic(deps_dt_stack, phi_stack)
 
@@ -99,33 +90,37 @@ class MuI(Material):
 
     @partial(jax.vmap, in_axes=(None, 0, 0), out_axes=(0))
     def vmap_viscoplastic(self, strain_rate: chex.Array, volume_fraction: chex.Array):
+        
         I = get_I_phi(volume_fraction, self.phi_c, self.I_phi)
 
         mu_I = get_mu_I(I, self.mu_s, self.mu_d, self.I_0)
 
-        volumetric_strain_rate = -jnp.trace(
-            strain_rate
-        )  # compressive strain rate is positive
+        # eps_v_dt = get_volumetric_strain(strain_rate)
+        # # volumetric_strain_rate = -jnp.trace(
+        # #     strain_rate
+        # # )  # compressive strain rate is positive
 
-        deviatoric_strain_rate = strain_rate + (
-            1 / 3.0
-        ) * volumetric_strain_rate * jnp.eye(3)
+        # deviatoric_strain_rate = strain_rate + (
+        #     1 / 3.0
+        # ) * volumetric_strain_rate * jnp.eye(3)
 
-        dgamma_dt = jnp.sqrt(
-            0.5 * (deviatoric_strain_rate @ deviatoric_strain_rate.T).trace()
-        )
+        # dgamma_dt = jnp.sqrt(
+        #     0.5 * (deviatoric_strain_rate @ deviatoric_strain_rate.T).trace()
+        # )
+        deps_dev_dt = get_dev_strain(strain_rate)
+        dgamma_dt = get_scalar_shear_strain(dev_strain=deps_dev_dt)
 
         # p = self.rho_p * (I / (shear_strain * self.d)) ** 2
         p = get_pressure(dgamma_dt, I, self.d, self.rho_p)
-        # jax.debug.print("dgamma_dt {}", dgamma_dt)
+
         # Two assumptions made
         # (1) Drucker-Prager yield criterion with von-mises plastic potential and
         # (2) Alignment condition
-        J2 = mu_I * p
+        J2 = mu_I *p
 
         viscosity = J2 / dgamma_dt
 
-        stress_next = -p * jnp.eye(3) + viscosity * deviatoric_strain_rate
+        stress_next = -p * jnp.eye(3) + viscosity * deps_dev_dt
 
         return stress_next
 

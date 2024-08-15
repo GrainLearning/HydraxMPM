@@ -272,9 +272,10 @@ def get_skew_tensor_stack(A_stack):
 
 def get_phi_from_L(L, phi_prev, dt):
     """Get volume fraction from velocity gradient."""
-    D = get_skew_tensor(L)
-    return phi_prev / (1.0 + jnp.trace(D) * dt)
+    deps_dt = get_sym_tensor(L)
+    deps_v_dt = get_volumetric_strain(deps_dt)
 
+    return phi_prev / (1.0 - deps_v_dt*dt)
 
 def get_e_from_bulk_density(absolute_density, bulk_density):
     """Get void ratio from absolute and bulk density."""
@@ -293,3 +294,14 @@ def get_phi_from_bulk_density_stack(absolute_density_stack, bulk_density_stack):
         get_phi_from_bulk_density, in_axes=(None, 0)
     )
     return vmap_get_phi_from_bulk_density(absolute_density_stack, bulk_density_stack)
+
+def get_hencky_strain(F):
+    u,s,vh = jnp.linalg.svd(F)
+
+    eps = jnp.zeros((3,3)).at[[0,1,2],[0,1,2]].set(jnp.log(s))
+    return eps, u, vh
+
+def get_hencky_strain_stack(F_stack):
+    vmap_get_hencky = jax.vmap(get_hencky_strain, in_axes=(0))
+    return vmap_get_hencky(F_stack)
+    

@@ -291,3 +291,19 @@ class ModifiedCamClay(Material):
 
         dt = get_timestep(cell_size, K, G, density, factor)
         return dt
+    
+    @classmethod
+    def get_p_ref_phi(cls, phi_ref, phi_c, lam, kap):
+        
+        v_ref = 1.0/phi_ref
+        
+        
+        Gamma = 1.0/phi_c # phi to specific volume
+        
+        log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
+        
+        # p on ICL
+        
+        log_p = (log_N - jnp.log(v_ref))/lam
+        
+        return jnp.exp(log_p)

@@ -116,7 +116,7 @@ def plot_simple(
     """
     pv.set_plot_theme(theme)
 
-    pl = pv.Plotter()
+    pl = pv.Plotter(notebook=False, off_screen=True)
     pl, box = add_box_mesh(origin, end, box_plot_params, pl)
 
     pl, particles_cloud = add_cloud_mesh(
@@ -153,3 +153,20 @@ def plot_simple(
         pl.write_frame()
 
     pl.close()
+
+
+def save_vtk(
+    positions_stack,
+    scalar_stack =None,
+    scalar_name = "Scalar",
+    output_folder= "./output/"
+):
+    num_output,num_points,dim = positions_stack.shape
+    for pi,pos_stack in enumerate(positions_stack):
+        particles_cloud = pv.PolyData( points_to_3D(pos_stack,dim))
+        
+        if scalar_stack is not None:
+            particles_cloud.point_data[scalar_name] = scalar_stack[pi]
+
+        particles_cloud.save(f"{output_folder}/particle_positions_{pi:04}.vtk")
+        

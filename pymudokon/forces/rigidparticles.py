@@ -12,7 +12,7 @@ from jax import Array
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..shapefunctions.shapefunctions import ShapeFunction
-
+from ..shapefunctions.linear import LinearShapeFunction
 
 @chex.dataclass
 class RigidParticles:
@@ -49,10 +49,17 @@ class RigidParticles:
     def create(
         cls: Self,
         position_stack: Array,
-        velocity_stack: Array,
-        shapefunction: ShapeFunction,
+        velocity_stack: Array= None,
+        shapefunction: ShapeFunction = None,
     ) -> Self:
         """Initialize the rigid particles."""
+        num_rigid, dim = position_stack.shape        
+        if velocity_stack is None:
+            velocity_stack = jnp.zeros((num_rigid,dim))
+        
+        if shapefunction is None:
+            shapefunction = LinearShapeFunction.create(num_rigid, dim)
+            
         return cls(
             position_stack=position_stack,
             velocity_stack=velocity_stack,

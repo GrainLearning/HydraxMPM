@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import optimistix as optx
 
 from ..materials.material import Material
-from ..utils.math_helpers import get_phi_from_L
+from ..utils.math_helpers import get_phi_from_L,get_sym_tensor,get_skew_tensor, get_volumetric_strain
 
 
 @partial(jax.jit, static_argnames=("output"))
@@ -17,7 +17,7 @@ def mix_control(
     material: Material,
     dt: jnp.float32,
     L_control_stack: chex.Array,
-    stress_control: chex.Array = None,
+    stress_control_stack: chex.Array = None,
     stress_mask_indices: chex.Array = None,
     stress_ref: chex.Array = None,
     F_ref: chex.Array = None,
@@ -43,8 +43,8 @@ def mix_control(
     servo_params = None
 
     if stress_mask_indices is not None:
-        stress_control_target = stress_control.at[stress_mask_indices].get()
-        servo_params = jnp.zeros_like(stress_control_target)
+        servo_params = jnp.zeros((3,3)).at[stress_mask_indices].get()
+
 
     def scan_fn(carry, control):
         (
@@ -56,10 +56,13 @@ def mix_control(
             servo_params,
         ) = carry
 
-        L_control = control
-
+        L_control, stress_control = control
+        
+        if stress_mask_indices is not None:
+            stress_control_target = stress_control.at[stress_mask_indices].get()
+        
         def update_from_params(L_next):
-            phi_next = phi_prev
+
 
             F_next = (jnp.eye(3) + L_next * dt) @ F_prev
 
@@ -79,6 +82,7 @@ def mix_control(
             return stress_next, aux
 
         def servo_controller(sol, args):
+            
             L_next = L_control.at[stress_mask_indices].set(sol)
 
             stress_next, aux = update_from_params(L_next)
@@ -86,7 +90,6 @@ def mix_control(
             stress_guess = stress_next.at[stress_mask_indices].get()
 
             R = stress_guess - stress_control_target
-
             return R, (stress_next, *aux)
 
         if stress_mask_indices is None:
@@ -102,8 +105,9 @@ def mix_control(
                 params,
                 throw=False,
                 has_aux=True,
-                max_steps=10,
+                max_steps=20,
             )
+            
             stress_next, *aux_next = sol.aux
 
         F_next, L_next, phi_next, material_next = aux_next
@@ -135,7 +139,7 @@ def mix_control(
     carry, accumulate = jax.lax.scan(
         scan_fn,
         (material, stress_ref, F_ref, phi_ref, 0, servo_params),  # carry
-        (L_control_stack),  # control
+        (L_control_stack, stress_control_stack),  # control
     )
 
     return carry, accumulate

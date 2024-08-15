@@ -24,7 +24,7 @@ class PlotHelper:
 
 
 def make_plots(
-    plot_list: List[PlotHelper],
+    plot_list: List[PlotHelper]= None,
     fig_ax: Tuple = None,
     file: str = None,
     subplots_options: Dict = None,
@@ -48,14 +48,15 @@ def make_plots(
     else:
         fig, axes = fig_ax
     axes = axes.reshape(-1)
+    
+    if plot_list is None:
+        return (fig, axes)
+    
     for i, plot in enumerate(plot_list):
         (line,) = axes[i].plot(
             plot.x, plot.y, ls=plot.ls, marker=plot.marker, color=plot.color
         )
-        axes[i].set_xlabel(plot.xlabel)
-        axes[i].set_ylabel(plot.ylabel)
-        axes[i].set_xlim(plot.xlim)
-        axes[i].set_ylim(plot.ylim)
+
 
         if plot.start_end_markers:
             axes[i].plot(plot.x[0], plot.y[0], ".", color=line.get_color())
@@ -65,8 +66,12 @@ def make_plots(
             axes[i].set_xscale("log")
         if plot.ylogscale:
             axes[i].set_yscale("log")
-
-    plt.tight_layout()
+            
+        axes[i].set_xlabel(plot.xlabel)
+        axes[i].set_ylabel(plot.ylabel)
+        axes[i].set_xlim(plot.xlim)
+        axes[i].set_ylim(plot.ylim)
+    fig.tight_layout()
     if file is not None:
         fig.savefig(file)
         fig.clear()

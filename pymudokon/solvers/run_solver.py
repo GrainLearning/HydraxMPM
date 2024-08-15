@@ -249,3 +249,112 @@ def run_solver_io(
         unroll=1,
         # unroll=0,
     )
+
+
+@partial(jax.jit, static_argnums=(6, 7, 8, 9, 10, 11))
+def run_solver_io(
+    solver: Solver,
+    particles: Particles,
+    nodes: Nodes,
+    shapefunctions: ShapeFunction,
+    material_stack: List[Material],
+    forces_stack: List[Forces] = None,
+    num_steps: jnp.int32 = 1,
+    store_every: jnp.int32 = 1,
+    particles_output: Tuple[str] = None,
+    nodes_output: Tuple[str] = None,
+    materials_output: Tuple[str] = None,
+    forces_output: Tuple[str] = None,
+) -> Tuple[
+    Tuple[Particles, Nodes, ShapeFunction, List[Material], List[Forces]],
+    Tuple[Solver, chex.Array],
+]:
+    if forces_stack is None:
+        forces_stack = []
+
+    if particles_output is None:
+        particles_output = ()
+
+    if nodes_output is None:
+        nodes_output = ()
+
+    if materials_output is None:
+        materials_output = ()
+
+    if forces_output is None:
+        forces_output = ()
+        
+    def main_loop(step,carry):
+        solver, particles, nodes, shapefunctions, material_stack, forces_stack = (
+            carry
+        )
+
+        solver, particles, nodes, shapefunctions, material_stack, forces_stack = (
+            solver.update(
+                particles, nodes, shapefunctions, material_stack, forces_stack
+            )
+        )
+
+        carry = (
+            solver,
+            particles,
+            nodes,
+            shapefunctions,
+            material_stack,
+            forces_stack
+        )
+        
+        return carry
+    
+    def scan_fn(carry, step):
+        solver, particles,nodes,shapefunctions, material_stack, forces_stack = carry
+        
+
+        solver, particles, nodes, shapefunctions, material_stack, forces_stack = jax.lax.fori_loop(
+            step,
+            step + store_every,
+            main_loop,
+            carry
+        )
+        
+        carry = (
+            solver,
+            particles,
+            nodes,
+            shapefunctions,
+            material_stack,
+            forces_stack,
+        )
+
+        accumulate = []
+        
+        for key in particles_output:
+            accumulate.append(particles.get(key))
+
+        for key in nodes_output:
+            accumulate.append(nodes.get(key))
+
+        for key in materials_output:
+            for material in material_stack:
+                if key in material:
+                    accumulate.append(material.get(key))
+
+        for key in forces_output:
+            for force in forces_stack:
+                if key in force:
+                    accumulate.append(force.get(key))
+
+        jax.debug.print("{}",step)
+        
+        return carry, accumulate
+    
+    xs = jnp.arange(0,num_steps,store_every).astype(jnp.int32)
+    
+    return jax.lax.scan(
+        scan_fn,
+        (solver, particles, nodes, shapefunctions, material_stack, forces_stack),
+        xs= xs,
+        unroll=1
+    )
+        
+    #     jax.debug.callback(callback,carry,accumulate)

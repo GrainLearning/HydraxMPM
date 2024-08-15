@@ -31,6 +31,7 @@ from .materials.newtonfluid import NewtonFluid
 from .materials_analysis.mix_control import mix_control
 from .materials_analysis.mp_benchmarks import MPBenchmark
 from .materials_analysis.plot import make_plots, PlotHelper
+from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .shapefunctions.cubic import CubicShapeFunction
@@ -81,9 +82,10 @@ from .utils.math_helpers import (
     get_volumetric_strain_stack,
     phi_to_e,
     phi_to_e_stack,
+    get_hencky_strain_stack
 )
 from .utils.mpm_domain_helpers import discretize
-from .utils.mpm_plot_helpers import plot_simple
+from .utils.mpm_plot_helpers import plot_simple,save_vtk
 
 
 __all__ = [
