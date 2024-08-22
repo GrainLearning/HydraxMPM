@@ -202,7 +202,6 @@ class MCC_MRM(Material):
         deps_p_dev_dt_stack = deps_p_dev_stack / dt
 
         stress_visc_next_stack = self.vmap_viscoplastic(deps_p_dev_dt_stack, phi_stack)
-        # jax.debug.print("stress_visc_next_stack {}", stress_visc_next_stack)
 
         return (
             stress_qs_next_stack + stress_visc_next_stack,

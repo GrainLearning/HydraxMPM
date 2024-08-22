@@ -71,13 +71,13 @@ def plot_set1(
         xlogscale=True
     )
 
-    # Plot 3: M - e
+    # Plot 3: m - e
     M_stack = q_stack/p_stack
     
     plot3_eM = _PlotHelper(
         x=M_stack,
         y=e_stack,
-        xlabel="$M$ [-]",
+        xlabel="$q/p$ [-]",
         ylabel="$e$ [-]",
         xlim=[M_stack.min()*0.99, M_stack.max()*1.01],
         ylim=[0, e_stack.max()*1.2]
@@ -110,12 +110,12 @@ def plot_set1(
         ylim=[p_stack.min()*0.1,p_stack.max()*10], # adjust for logscale
     )
     
-    # Plot 6: M - phi
+    # Plot 6: q/p - phi
     plot6_Mphi = _PlotHelper(
         y=M_stack,
         x=phi_stack,
         xlabel="$\phi$ [-]",
-        ylabel="$M$ [-]",
+        ylabel="$q/p$ [-]",
         xlim=[phi_stack.min()*0.99, phi_stack.max()*1.01],
         ylim=[M_stack.min()*0.99, M_stack.max()*1.01],
     )
@@ -202,7 +202,7 @@ def plot_set2(
         x=gamma_stack,
         y=M_stack,
         xlabel="$\gamma$ [-]",
-        ylabel="$M$ [-]",
+        ylabel="$q/p$ [-]",
         xlim=[0, gamma_stack.max()*1.2],
         ylim=[M_stack.min()*0.99, M_stack.max()*1.01],
     )
@@ -242,7 +242,7 @@ def plot_set2(
         x=dgamma_dt_stack,
         y=M_stack,
         xlabel="$\dot\gamma$ [-]",
-        ylabel="$M$ [-]",
+        ylabel="$q/p$ [-]",
         xlim=[0, dgamma_dt_stack.max()*1.2],
         ylim=[M_stack.min()*0.99, M_stack.max()*1.01],
     )
@@ -297,7 +297,7 @@ def plot_set3(
 
     q_stack = get_q_vm_stack(stress_stack)
 
-    plot1_q_t= PlotHelper(
+    plot1_q_t= _PlotHelper(
         x=t_stack,
         y=q_stack,
         xlabel="$t$ [s]",
@@ -323,7 +323,7 @@ def plot_set3(
         x=t_stack,
         y=M_stack,
         xlabel="$t$ [s]",
-        ylabel="$M$ [-]",
+        ylabel="$q/p$ [-]",
         ylim=[M_stack.min()*0.99, M_stack.max()*1.01],
     )
 

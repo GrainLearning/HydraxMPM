@@ -34,14 +34,15 @@ mu_d = 0.645
 
 # modified cam clay
 M_s = jnp.sqrt(3)*mu_s
-print(M_s)
+M_d = jnp.sqrt(3)*mu_d
+
 nu=0.2
 R=1
 lam=0.01
 kap=0.005
 
 # Reference conditions and create material
-phi_ref = 0.64
+phi_ref = 0.63
 
 
 start_time = time.time()
@@ -50,8 +51,20 @@ p_ref_mcc = pm.ModifiedCamClay.get_p_ref_phi(
     phi_ref,phi_c,lam,kap
 )
 
-mcc = pm.ModifiedCamClay.create(
-    nu=nu, M=M_s, R=1, lam=lam, kap=kap, Vs=1.0, stress_ref_stack=-p_ref_mcc*jnp.eye(3).reshape((1,3,3))
+mcc = pm.MCC_MRM.create(
+    nu=nu,
+    M=M_s,
+    R=1,
+    lam=lam,
+    kap=kap,
+    Vs=1.0,
+    phi_c=phi_c,
+    I_phi=I_phi,
+    d0=d,
+    rho_p=rho_p,
+    M_d=M_d,
+    I_0=I_0,
+    stress_ref_stack=-p_ref_mcc*jnp.eye(3).reshape((1,3,3))
 )
 
 mu_i = pm.MuI.create(

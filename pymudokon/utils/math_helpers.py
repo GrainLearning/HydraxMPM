@@ -263,7 +263,6 @@ def get_skew_tensor(A):
     """Get skew-symmetric part of a tensor."""
     return 0.5 * (A - A.T)
 
-
 def get_skew_tensor_stack(A_stack):
     """Get skew-symmetric part of a stack of tensors."""
     vmap_get_skew_tensor = jax.vmap(get_skew_tensor)
@@ -272,10 +271,10 @@ def get_skew_tensor_stack(A_stack):
 
 def get_phi_from_L(L, phi_prev, dt):
     """Get volume fraction from velocity gradient."""
-    deps_dt = get_sym_tensor(L)
-    deps_v_dt = get_volumetric_strain(deps_dt)
-
-    return phi_prev / (1.0 - deps_v_dt*dt)
+    deps = get_sym_tensor(L)*dt
+    deps_v = get_volumetric_strain(deps)
+    phi_next = phi_prev / (1.0 - deps_v)
+    return phi_next
 
 def get_e_from_bulk_density(absolute_density, bulk_density):
     """Get void ratio from absolute and bulk density."""
