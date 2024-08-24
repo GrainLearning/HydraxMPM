@@ -134,7 +134,7 @@ class MCC_MRM(Material):
             dim (jnp.int16, optional): Dimension of the domain. Defaults to 3.
         """
         num_particles = stress_ref_stack.shape[0]
-        eps_e_stack = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)
+        eps_e_stack = jnp.zeros((num_particles, 3, 3))
 
         if stress_ref_stack is None:
             stress_ref_stack = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)
@@ -193,6 +193,7 @@ class MCC_MRM(Material):
             deps_p_dev_stack,
         ) = self.vmap_update_stress(
             deps_stack,
+            phi_stack,
             self.stress_ref_stack,
             self.eps_e_stack,
             self.p_c_stack,
@@ -212,126 +213,134 @@ class MCC_MRM(Material):
             ),
         )
 
-    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0), out_axes=(0, 0, 0, 0, 0))
+    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0, 0, 0))
     def vmap_update_stress(
         self,
         deps_next,
+        phi,
         stress_ref,
         eps_e_prev,
         p_c_prev,
         p_prev,
     ):
         dim = deps_next.shape[0]
+        
+        def unjammed(): #phi < phi_c
+            deps_p_dev_next = get_dev_strain(deps_next)
+            # stress_next, eps_e_next, p_c_next, p_next, deps_p_dev
+            return jnp.zeros((3,3)), jnp.zeros((3,3)), 0.0, 0.0, deps_p_dev_next
+        def jammed(): # phi >= phi_c
+            # Reference pressure and deviatoric stress
+            p_ref = get_pressure(stress_ref, dim)
 
-        # Reference pressure and deviatoric stress
-        p_ref = get_pressure(stress_ref, dim)
+            s_ref = get_dev_stress(stress_ref, p_ref, dim)
 
-        s_ref = get_dev_stress(stress_ref, p_ref, dim)
+            # Trail Elastic strain
+            eps_e_tr = eps_e_prev + deps_next
 
-        # Trail Elastic strain
-        eps_e_tr = eps_e_prev + deps_next
+            eps_e_v_tr = get_volumetric_strain(eps_e_tr)
 
-        eps_e_v_tr = get_volumetric_strain(eps_e_tr)
+            eps_e_d_tr = get_dev_strain(eps_e_tr, eps_e_v_tr)
 
-        eps_e_d_tr = get_dev_strain(eps_e_tr, eps_e_v_tr)
+            deps_e_v = get_volumetric_strain(deps_next)
 
-        deps_e_v = get_volumetric_strain(deps_next)
+            p_tr = get_elas_non_linear_pressure(deps_e_v, self.kap, p_prev)
 
-        p_tr = get_elas_non_linear_pressure(deps_e_v, self.kap, p_prev)
+            K_tr = get_K(self.kap, p_tr)
 
-        K_tr = get_K(self.kap, p_tr)
+            G_tr = get_G(self.nu, K_tr)
 
-        G_tr = get_G(self.nu, K_tr)
+            s_tr = get_elas_dev_stress(eps_e_d_tr, s_ref, G_tr)
 
-        s_tr = get_elas_dev_stress(eps_e_d_tr, s_ref, G_tr)
+            q_tr = get_q_vm(dev_stress=s_tr)
 
-        q_tr = get_q_vm(dev_stress=s_tr)
+            p_c_tr = p_c_prev
 
-        p_c_tr = p_c_prev
+            yf = yield_function(p_tr, p_c_tr, q_tr, self.M)
 
-        yf = yield_function(p_tr, p_c_tr, q_tr, self.M)
+            is_ep = yf > 0
 
-        is_ep = yf > 0
+            def elastic_update():
+                stress_next = s_tr - p_tr * jnp.eye(3)
+                return stress_next, eps_e_tr, p_c_prev, p_tr, jnp.zeros((3, 3))
 
-        def elastic_update():
-            stress_next = s_tr - p_tr * jnp.eye(3)
-            return stress_next, eps_e_tr, p_c_prev, p_tr, jnp.zeros((3, 3))
+            def pull_to_ys():
+                stress_next = s_tr - p_tr * jnp.eye(3)
 
-        def pull_to_ys():
-            stress_next = s_tr - p_tr * jnp.eye(3)
+                def residuals(sol, args):
+                    pmulti, deps_p_v = sol
 
-            def residuals(sol, args):
-                pmulti, deps_p_v = sol
+                    p_next = get_elas_non_linear_pressure(
+                        deps_e_v - deps_p_v, self.kap, p_prev
+                    )
 
-                p_next = get_elas_non_linear_pressure(
-                    deps_e_v - deps_p_v, self.kap, p_prev
-                )
+                    K_next = get_K(self.kap, p_next)
 
-                K_next = get_K(self.kap, p_next)
+                    G_next = get_G(self.nu, K_next)
 
-                G_next = get_G(self.nu, K_next)
+                    s_next = (self.M**2 / (self.M**2 + 6.0 * G_next * pmulti)) * s_tr
 
-                s_next = (self.M**2 / (self.M**2 + 6.0 * G_next * pmulti)) * s_tr
+                    q_next = (self.M**2 / (self.M**2 + 6.0 * G_next * pmulti)) * q_tr
 
-                q_next = (self.M**2 / (self.M**2 + 6.0 * G_next * pmulti)) * q_tr
+                    p_c_next = get_non_linear_hardening_pressure(
+                        deps_p_v,
+                        self.lam,
+                        self.kap,
+                        p_c_prev,
+                    )
 
-                p_c_next = get_non_linear_hardening_pressure(
-                    deps_p_v,
-                    self.lam,
-                    self.kap,
-                    p_c_prev,
-                )
+                    deps_v_p_fr = pmulti * jax.grad(yield_function, argnums=0)(
+                        p_next, p_c_next, q_next, self.M
+                    )
+                    yf = yield_function(p_next, p_c_next, q_next, self.M)
 
-                deps_v_p_fr = pmulti * jax.grad(yield_function, argnums=0)(
-                    p_next, p_c_next, q_next, self.M
-                )
-                yf = yield_function(p_next, p_c_next, q_next, self.M)
+                    R = jnp.array([yf, deps_p_v - deps_v_p_fr])
 
-                R = jnp.array([yf, deps_p_v - deps_v_p_fr])
+                    R = R.at[0].set(R[0] / (K_tr * self.kap))
 
-                R = R.at[0].set(R[0] / (K_tr * self.kap))
+                    aux = (p_next, s_next, p_c_next, G_next)
 
-                aux = (p_next, s_next, p_c_next, G_next)
+                    return R, aux
 
-                return R, aux
+                def find_roots():
+                    init_val = jnp.array([0.0, 0.0])
 
-            def find_roots():
-                init_val = jnp.array([0.0, 0.0])
+                    solver = optx.Newton(rtol=1e-3, atol=1e-3)
+                    sol = optx.root_find(
+                        residuals, solver, init_val, throw=False, has_aux=True, max_steps=20
+                    )
 
-                solver = optx.Newton(rtol=1e-3, atol=1e-3)
-                sol = optx.root_find(
-                    residuals, solver, init_val, throw=False, has_aux=True, max_steps=20
-                )
+                    return sol.value
 
-                return sol.value
+                pmulti, deps_p_v_next = jax.lax.stop_gradient(find_roots())
 
-            pmulti, deps_p_v_next = jax.lax.stop_gradient(find_roots())
+                R, aux = residuals((pmulti, deps_p_v_next), None)
+                p_next, s_next, p_c_next, G_next = aux
+                stress_next = s_next - p_next * jnp.eye(3)
 
-            R, aux = residuals((pmulti, deps_p_v_next), None)
-            p_next, s_next, p_c_next, G_next = aux
-            stress_next = s_next - p_next * jnp.eye(3)
+                eps_e_v_next = eps_e_v_tr - deps_p_v_next
 
-            eps_e_v_next = eps_e_v_tr - deps_p_v_next
+                eps_e_dev_next = (s_next - s_ref) / (2.0 * G_next)
 
-            eps_e_dev_next = (s_next - s_ref) / (2.0 * G_next)
+                eps_e_next = eps_e_dev_next - (1 / 3) * eps_e_v_next * jnp.eye(3)
 
-            eps_e_next = eps_e_dev_next - (1 / 3) * eps_e_v_next * jnp.eye(3)
+                # get deviatoric plastic strain
+                # there must be a better way to do this?
+                eps_dev_prev = get_dev_strain(eps_e_prev)
 
-            # get deviatoric plastic strain
-            # there must be a better way to do this?
-            eps_dev_prev = get_dev_strain(eps_e_prev)
+                deps_e_dev = eps_e_dev_next - eps_dev_prev
 
-            deps_e_dev = eps_e_dev_next - eps_dev_prev
+                deps_dev = get_dev_strain(deps_next)
 
-            deps_dev = get_dev_strain(deps_next)
+                deps_p_dev = deps_dev - deps_e_dev
 
-            deps_p_dev = deps_dev - deps_e_dev
+                # dgamma_p = get_scalar_shear_strain(dev_strain=deps_p_d)
 
-            # dgamma_p = get_scalar_shear_strain(dev_strain=deps_p_d)
+                return stress_next, eps_e_next, p_c_next, p_next, deps_p_dev
 
-            return stress_next, eps_e_next, p_c_next, p_next, deps_p_dev
-
-        return jax.lax.cond(is_ep, pull_to_ys, elastic_update)
+            return jax.lax.cond(is_ep, pull_to_ys, elastic_update)
+        
+        return jax.lax.cond(phi >self.phi_c, jammed,unjammed)
 
     @partial(jax.vmap, in_axes=(None, 0, 0), out_axes=(0))
     def vmap_viscoplastic(self, deps_p_dev_dt: chex.Array, phi: chex.Array):
@@ -349,12 +358,14 @@ class MCC_MRM(Material):
             right = self.lam * jnp.log(1 + p_ss) - (1.0 / self.I_phi) * (
                 dgamma_p_dt * self.d0 * self.rho_p ** (1 / 2)
             ) / p_ss ** (1 / 2)
+            
+            # jax.debug.print("{}",right-left)
             return right - left
 
         def find_root():
-            solver = optx.Newton(rtol=1e-9, atol=1e-9)
+            solver = optx.Newton(rtol=1e-5, atol=1e-5)
             sol = optx.root_find(
-                solve_p, solver, 0.01, throw=False, options={"lower": 0.0}
+                solve_p, solver, 0.1, throw=False, options={"lower": 0.0}
             )
 
             return jnp.nan_to_num(sol.value, nan=0.0)
@@ -386,12 +397,15 @@ class MCC_MRM(Material):
 
             stress_next_I_I = -p_ss_I * jnp.eye(3) + visc_I_I * deps_p_dev_dt
 
-            # stress_visc_next = jnp.eye(3)
+            # jax.debug.print("visc_qs_I {} stress_next_qs_I {}", visc_qs_I, stress_next_qs_I)
+            # stress_visc_next = jnp.zeros((3, 3))
             stress_visc_next = stress_next_qs_I + stress_next_I_I
             # stress_visc_next = stress_next_qs_I
+            # stress_visc_next = stress_next_I_I
             return stress_visc_next
 
-        tol = 1e-12
+        tol = 1e-9
+        
         return jax.lax.cond(
             dgamma_p_dt < tol, zero_flow_condition, viscous_flow_condition
         )

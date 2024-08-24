@@ -112,7 +112,7 @@ class ModifiedCamClay(Material):
             dim (jnp.int16, optional): Dimension of the domain. Defaults to 3.
         """
         num_particles = stress_ref_stack.shape[0]
-        eps_e_stack = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)
+        eps_e_stack = jnp.zeros((num_particles, 3, 3))
 
         if stress_ref_stack is None:
             stress_ref_stack = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)

@@ -5,18 +5,20 @@ import pymudokon as pm
 import time
 
 jax.config.update("jax_platform_name", "cpu")
-
+jax.config.update("jax_enable_x64", True)
 # loading conditions
 
 load_steps = 500000
+# total_time_list = [100.0,400.0]
+# total_time_list = [1.0,4.0]
+total_time_list = [0.01,100]
 
-total_time_list = [1.0,2.0,4.0]
-
+# total_shear_strain =1.0
 total_shear_strain =1.0
 
 store_every = 500
 
-total_volume_strain = 0.03
+total_volume_strain = 0.05
 
 
 # common params
@@ -27,8 +29,9 @@ mu_s = 0.3819
 mu_d = 0.645
 rho_p = 2000
 d = 0.0053
-I_phi=0.3
+# I_phi=0.3
 # I_phi = 0.01
+I_phi = 0.8
 I_0 = 0.279
 mu_d = 0.645
 
@@ -42,7 +45,7 @@ lam=0.01
 kap=0.005
 
 # Reference conditions and create material
-phi_ref = 0.63
+phi_ref = 0.61
 
 
 start_time = time.time()
@@ -51,7 +54,7 @@ p_ref_mcc = pm.ModifiedCamClay.get_p_ref_phi(
     phi_ref,phi_c,lam,kap
 )
 
-mcc = pm.MCC_MRM.create(
+mrm = pm.MCC_MRM.create(
     nu=nu,
     M=M_s,
     R=1,
@@ -77,6 +80,10 @@ mu_i = pm.MuI.create(
     d=d,
 )
 
+mcc = pm.ModifiedCamClay.create(
+    nu=nu, M=M_s, R=1, lam=lam, kap=kap, Vs=1.0, stress_ref_stack=-p_ref_mcc*jnp.eye(3).reshape((1,3,3))
+)
+
 I_ref = pm.materials.mu_i_rheology.get_I_phi(
     phi_ref,
     phi_c,
@@ -87,10 +94,10 @@ fig_ax_set1 = pm.make_plots()
 fig_ax_set2 = pm.make_plots()
 fig_ax_set3 = pm.make_plots()
 
-colors = ["blue","green","red"]
-linestyles = ["--","-"]
+colors = ["blue","red"]
+linestyles = ["--",":","-"]
 
-for mi,material in enumerate([mcc,mu_i]):
+for mi,material in enumerate([mcc, mu_i, mrm]):
     for ti, total_time in enumerate(total_time_list):
         
         plot_helper_args={"ls":linestyles[mi],"color":colors[ti]}
