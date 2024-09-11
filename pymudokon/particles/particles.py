@@ -150,3 +150,9 @@ class Particles:
             Particles: Updated state for the MPM particles.
         """
         return self.replace(L_stack=self.L_stack.at[:].set(0.0))
+
+    def get_phi_stack(self, rho_p):
+        
+        density_stack = self.mass_stack/self.volume_stack
+
+        return density_stack/rho_p

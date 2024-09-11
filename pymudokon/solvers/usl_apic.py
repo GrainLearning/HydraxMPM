@@ -154,7 +154,6 @@ class USL_APIC(Solver):
             moment_nt_stack=nodes_moment_nt_stack,
         )
 
-    @jax.jit
     def g2p(
         self: Self,
         particles: Particles,

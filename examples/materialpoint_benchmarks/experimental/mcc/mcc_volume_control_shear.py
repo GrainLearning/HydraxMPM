@@ -19,7 +19,7 @@ material = pm.ModifiedCamClay.create(
 
 # Reference conditions
 phi_ref = 0.8
-dgamma_dt_ref = 0.00001
+dgamma_dt_ref = 0.001
 
 
 dt = 0.00001
@@ -30,7 +30,7 @@ benchmark = pm.MPBenchmark.create_volume_control_shear(
     total_time=5,
     dt=dt,
     x_range=(dgamma_dt_ref, dgamma_dt_ref),
-    y_range=(0, 0.005),
+    y_range=(0, 0.05),
     stress_ref=stress_ref.reshape(3, 3),
     phi_ref=phi_ref,
     store_every=store_every,

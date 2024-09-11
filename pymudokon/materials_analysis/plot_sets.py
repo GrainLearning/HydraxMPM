@@ -54,6 +54,8 @@ def plot_set1(
         y=q_stack,
         xlabel="$p$ [Pa]",
         ylabel="$q$ [Pa]",
+        # xlogscale=True,
+        # ylogscale=True
         xlim=[0, p_stack.max()*1.2],
         ylim=[0, q_stack.max()*1.2],
     )
@@ -302,7 +304,10 @@ def plot_set3(
         y=q_stack,
         xlabel="$t$ [s]",
         ylabel="$q$ [Pa]",
-        ylim=[0, q_stack.max()*1.2],
+        xlogscale=True,
+        ylogscale=True
+        # ylim=[0, q_stack.max()*1.2],
+        
     )
     
     # Plot 2: p - t
@@ -315,6 +320,8 @@ def plot_set3(
         xlabel="$t$ [s]",
         ylabel="$p$ [Pa]",
         ylim=[0, p_stack.max()*1.2],
+        xlogscale=True,
+        ylogscale=True
     )
  
     # Plot 3: M - t
@@ -324,7 +331,9 @@ def plot_set3(
         y=M_stack,
         xlabel="$t$ [s]",
         ylabel="$q/p$ [-]",
-        ylim=[M_stack.min()*0.99, M_stack.max()*1.01],
+        # ylim=[M_stack.min()*0.99, M_stack.max()*1.01],
+        xlogscale=True,
+        ylogscale=True
     )
 
     
@@ -336,6 +345,8 @@ def plot_set3(
         xlabel="$t$ [s]",
         ylabel="$\phi$ [-]",
         ylim=[phi_stack.min()*0.99, phi_stack.max()*1.01],
+        xlogscale=True,
+        # ylogscale=True
     )
 
     # Plot 5: gamma - t
@@ -348,6 +359,7 @@ def plot_set3(
         xlabel="$t$ [s]",
         ylabel="$\gamma$ [-]",
         ylim=[gamma_stack.min()*0.9, gamma_stack.max()*1.1],
+        xlogscale=True,
     )
     
     # Plot 6: dot gamma - t
@@ -362,6 +374,7 @@ def plot_set3(
         xlabel="$t$ [s]",
         ylabel="$\dot\gamma$ [-]",
         ylim=[dgamma_dt_stack.min()*0.9, dgamma_dt_stack.max()*1.1],
+        xlogscale=True
     )
     
     fig_ax = make_plots(

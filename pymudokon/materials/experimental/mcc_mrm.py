@@ -9,8 +9,8 @@ import jax
 import jax.numpy as jnp
 import optimistix as optx
 
-from ..particles.particles import Particles
-from ..utils.math_helpers import (
+from ...particles.particles import Particles
+from ...utils.math_helpers import (
     get_dev_strain,
     get_dev_stress,
     get_inertial_number,
@@ -21,7 +21,7 @@ from ..utils.math_helpers import (
     get_sym_tensor_stack,
     get_volumetric_strain,
 )
-from .material import Material
+from ..material import Material
 
 
 def plot_yield_surface(
@@ -48,8 +48,8 @@ def plot_yield_surface(
 def get_elas_non_linear_pressure(deps_e_v, kap, p_prev):
     """Compute non-linear pressure."""
     const = deps_e_v / kap
-    return (p_prev + const) / (1.0 - const)
-    # return (p_prev) / (1.0 - const)
+    # return (p_prev + const) / (1.0 - const)
+    return (p_prev) / (1.0 - const)
 
 
 def get_elas_dev_stress(eps_e_d, s_ref, G):
@@ -58,8 +58,8 @@ def get_elas_dev_stress(eps_e_d, s_ref, G):
 
 def get_non_linear_hardening_pressure(deps_p_v, lam, kap, p_c_prev):
     const = deps_p_v / (lam - kap)
-    return (p_c_prev + const) / (1.0 - const)
-    # return (p_c_prev) / (1.0 - const)
+    # return (p_c_prev + const) / (1.0 - const)
+    return (p_c_prev) / (1.0 - const)
 
 
 def yield_function(p, p_c, q, M):
@@ -165,13 +165,56 @@ class MCC_MRM(Material):
             I_0=I_0,
             absolute_density=absolute_density,
         )
-
+    @classmethod
+    def create_from_phi_ref(
+        cls: Self,
+        nu: jnp.float32,
+        M: jnp.float32,
+        R: jnp.float32,
+        lam: jnp.float32,
+        kap: jnp.float32,
+        Vs: jnp.float32,
+        phi_c: jnp.float32,
+        I_phi: jnp.float32,
+        d0: jnp.float32,
+        rho_p: jnp.float32,
+        M_d: jnp.float32,
+        I_0: jnp.float32,
+        phi_ref_stack: chex.Array = None,
+        absolute_density: jnp.float32 = 1.0,
+        dim: jnp.int16 = 3,
+    ) -> Self:
+        p_ref_stack = jax.vmap(cls.get_p_ref_phi,in_axes=(0,None,None,None))(phi_ref_stack,phi_c,lam,kap)
+        
+        def create_stress_ref(p_ref):
+            return -jnp.eye(3)*p_ref
+        
+        stress_ref_stack = jax.vmap(create_stress_ref)(p_ref_stack)
+        return cls.create(
+            nu = nu,
+            M = M,
+            R = R,
+            lam =lam,
+            kap = kap,
+            Vs = 1,
+            phi_c = phi_c,
+            I_phi = I_phi,
+            d0 = d0,
+            rho_p = rho_p,
+            M_d =M_d,
+            I_0 = I_0,
+            stress_ref_stack=stress_ref_stack,
+            dim = dim,
+        )
     def update_from_particles(
         self: Self, particles: Particles, dt: jnp.float32
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
+
+        phi_stack = density_stack/self.rho_p
+        
         stress_stack, self = self.update(
-            particles.stress_stack, particles.F_stack, particles.L_stack, None, dt
+            particles.stress_stack, particles.F_stack, particles.L_stack, phi_stack, dt
         )
 
         return particles.replace(stress_stack=stress_stack), self
@@ -206,6 +249,7 @@ class MCC_MRM(Material):
 
         return (
             stress_qs_next_stack + stress_visc_next_stack,
+            # stress_qs_next_stack,
             self.replace(
                 eps_e_stack=eps_e_next_stack,
                 p_c_stack=p_c_next_stack,
@@ -340,32 +384,36 @@ class MCC_MRM(Material):
 
             return jax.lax.cond(is_ep, pull_to_ys, elastic_update)
         
-        return jax.lax.cond(phi >self.phi_c, jammed,unjammed)
+        return jax.lax.cond(phi >=self.phi_c, jammed,unjammed)
+        # return jax.lax.cond(phi >self.phi_c, jammed,jammed)
 
     @partial(jax.vmap, in_axes=(None, 0, 0), out_axes=(0))
     def vmap_viscoplastic(self, deps_p_dev_dt: chex.Array, phi: chex.Array):
         dgamma_p_dt = get_scalar_shear_strain(dev_strain=deps_p_dev_dt)
 
         def get_PQS():
+            # return (phi / self.phi_c) ** (1.0 / self.lam) - 1.0
             return jax.lax.cond(
-                phi < self.phi_c,
+                phi <= self.phi_c,
                 lambda: 0.0,
-                lambda: (phi / self.phi_c) ** (1.0 / self.lam) - 1.0,
+                # lambda: (phi / self.phi_c) ** (1.0 / self.lam) - 1.0,
+                lambda: (phi / self.phi_c) ** (1.0 / self.lam),
             )
 
-        def solve_p(p_ss, args):
-            left = jnp.log(phi / self.phi_c)
-            right = self.lam * jnp.log(1 + p_ss) - (1.0 / self.I_phi) * (
-                dgamma_p_dt * self.d0 * self.rho_p ** (1 / 2)
-            ) / p_ss ** (1 / 2)
-            
-            # jax.debug.print("{}",right-left)
+        def implicit_p(p_ss,args):
+
+            I = get_inertial_number(p_ss,dgamma_p_dt,self.d0,self.rho_p)
+            left = phi / self.phi_c
+            right = (1.0 + p_ss)**self.lam *jnp.exp(-I/self.I_phi)
             return right - left
+    
 
         def find_root():
             solver = optx.Newton(rtol=1e-5, atol=1e-5)
+
+            # solver = optx.Bisection(rtol=1e-5, atol=1e-5)
             sol = optx.root_find(
-                solve_p, solver, 0.1, throw=False, options={"lower": 0.0}
+                implicit_p, solver, 0.1, throw=False,max_steps=20
             )
 
             return jnp.nan_to_num(sol.value, nan=0.0)
@@ -374,8 +422,11 @@ class MCC_MRM(Material):
             return jnp.zeros((3, 3))
 
         def viscous_flow_condition():
+            # p_ss_total_qs = find_root(tol_qs=1.0,tol_I=1.0)
+            # p_ss_total_I = find_root(tol_qs=1.0,tol_I=1.0)
+            
+            # p_ss_total = (p_ss_total_qs + p_ss_total_I)/2.0
             p_ss_total = find_root()
-
             I = get_inertial_number(p_ss_total, dgamma_p_dt, self.d0, self.rho_p)
 
             mu0_muI = get_M_I(I, self.M / jnp.sqrt(3), self.M_d / jnp.sqrt(3), self.I_0)
@@ -395,17 +446,36 @@ class MCC_MRM(Material):
 
             stress_next_qs_I = visc_qs_I * deps_p_dev_dt
 
-            stress_next_I_I = -p_ss_I * jnp.eye(3) + visc_I_I * deps_p_dev_dt
+            # stress_next_I_I = -p_ss_I * jnp.eye(3) + visc_I_I * deps_p_dev_dt
+            # stress_next_I_I =  visc_I_I * deps_p_dev_dt
 
             # jax.debug.print("visc_qs_I {} stress_next_qs_I {}", visc_qs_I, stress_next_qs_I)
-            # stress_visc_next = jnp.zeros((3, 3))
-            stress_visc_next = stress_next_qs_I + stress_next_I_I
+            stress_visc_next = jnp.zeros((3, 3))
+            # stress_visc_next = stress_next_qs_I + stress_next_I_I
             # stress_visc_next = stress_next_qs_I
             # stress_visc_next = stress_next_I_I
             return stress_visc_next
 
-        tol = 1e-9
+        # tol = 1e-5
+        tol = 1e-12
         
         return jax.lax.cond(
             dgamma_p_dt < tol, zero_flow_condition, viscous_flow_condition
+                    # dgamma_p_dt < tol, viscous_flow_condition, viscous_flow_condition
         )
+        
+    @classmethod
+    def get_p_ref_phi(cls, phi_ref, phi_c, lam, kap):
+        
+        v_ref = 1.0/phi_ref
+        
+        
+        Gamma = 1.0/phi_c # phi to specific volume
+        
+        log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
+        
+        # p on ICL
+        
+        log_p = (log_N - jnp.log(v_ref))/lam
+        
+        return jnp.exp(log_p)

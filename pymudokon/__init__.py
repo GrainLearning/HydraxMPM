@@ -24,13 +24,12 @@ from .forces.rigidparticles import RigidParticles
 from .materials.druckerprager import DruckerPrager
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.material import Material
-from .materials.mcc_mrm import MCC_MRM
 from .materials.modifiedcamclay import ModifiedCamClay
-from .materials.mu_i_rheology import MuI
+from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .materials.newtonfluid import NewtonFluid
 from .materials_analysis.mix_control import mix_control
 from .materials_analysis.mp_benchmarks import MPBenchmark
-from .materials_analysis.plot import make_plots, PlotHelper
+from .materials_analysis.plot import make_plots, add_plot, PlotHelper
 from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
@@ -85,8 +84,8 @@ from .utils.math_helpers import (
     get_hencky_strain_stack
 )
 from .utils.mpm_domain_helpers import discretize
-from .utils.mpm_plot_helpers import plot_simple,save_vtk
-
+from .utils.mpm_plot_helpers import PvPointHelper,make_pvplots, points_to_3D
+from .utils.mpm_postprocessing_helpers import post_processes_stress_stack
 
 __all__ = [
     "Nodes",

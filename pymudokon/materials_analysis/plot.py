@@ -15,20 +15,47 @@ class PlotHelper:
     ylim: List[float] = dataclasses.field(default_factory=lambda: [None, None])
 
     ls: str = "-"
+    markersize: int = None
+    markeredgecolor: str = None
     marker: str = None
     color: str = None
+    alpha: float = None
     start_end_markers: bool = True
-
+    zorder: float = None
     xlogscale: bool = False
     ylogscale: bool = False
+    label: str = None
 
+def create_plot(plot,axis):
+    (line,) = axis.plot(
+        plot.x, plot.y, ls=plot.ls, marker=plot.marker, color=plot.color, label= plot.label,
+        
+        markersize = plot.markersize,
+        markeredgecolor = plot.markeredgecolor,
+        alpha = plot.alpha
+    )
+    if plot.start_end_markers:
+        axis.plot(plot.x[0], plot.y[0], ".", color=line.get_color())
+        axis.plot(plot.x[-1], plot.y[-1], "x", color=line.get_color())
 
+    if plot.xlogscale:
+        axis.set_xscale("log")
+    if plot.ylogscale:
+        axis.set_yscale("log")
+        
+    axis.set_xlabel(plot.xlabel)
+    axis.set_ylabel(plot.ylabel)
+    axis.set_xlim(plot.xlim)
+    axis.set_ylim(plot.ylim)
+    return axis
+    
 def make_plots(
     plot_list: List[PlotHelper]= None,
     fig_ax: Tuple = None,
     file: str = None,
     subplots_options: Dict = None,
     savefig_options: Dict = None,
+    transpose_axes= False
 ):
     import scienceplots
 
@@ -47,33 +74,41 @@ def make_plots(
         fig, axes = plt.subplots(**subplots_options)
     else:
         fig, axes = fig_ax
-    axes = axes.reshape(-1)
+    
+    if transpose_axes:
+        axes = axes.T
+    
+    if isinstance(axes,  (np.ndarray, np.generic) ):
+        axes = axes.reshape(-1)
+    
     
     if plot_list is None:
         return (fig, axes)
     
-    for i, plot in enumerate(plot_list):
-        (line,) = axes[i].plot(
-            plot.x, plot.y, ls=plot.ls, marker=plot.marker, color=plot.color
-        )
 
-
-        if plot.start_end_markers:
-            axes[i].plot(plot.x[0], plot.y[0], ".", color=line.get_color())
-            axes[i].plot(plot.x[-1], plot.y[-1], "x", color=line.get_color())
-
-        if plot.xlogscale:
-            axes[i].set_xscale("log")
-        if plot.ylogscale:
-            axes[i].set_yscale("log")
-            
-        axes[i].set_xlabel(plot.xlabel)
-        axes[i].set_ylabel(plot.ylabel)
-        axes[i].set_xlim(plot.xlim)
-        axes[i].set_ylim(plot.ylim)
+    if isinstance(axes,  (np.ndarray, np.generic) ):
+        for i, plot in enumerate(plot_list):
+            axes[i] = create_plot(plot,axes[i])
+    else:
+        axes = create_plot(plot_list[0],axes)
+        
     fig.tight_layout()
     if file is not None:
         fig.savefig(file)
         fig.clear()
 
     return fig, axes
+
+
+def add_plot(
+    plot_helper: PlotHelper,
+    fig_ax,
+    index =0
+):
+    fig, axes = fig_ax
+    
+    if isinstance(axes,  (np.ndarray, np.generic) ):
+        axes[index] = create_plot(plot_helper,axes[index])
+    else:
+        axes = create_plot(plot_helper,axes)
+    return fig,axes

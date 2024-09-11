@@ -1,8 +1,13 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-
+import os
 import pymudokon as pm
+
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
+fname = "/dambreak_output.gif"
+
 
 # dam
 dam_height = 2.0
@@ -32,7 +37,7 @@ dt = 0.1 * cell_size / c
 is_apic = True
 
 
-particles_per_cell = 2
+particles_per_cell = 4
 
 nodes = pm.Nodes.create(origin=origin, end=end, node_spacing=cell_size)
 
@@ -82,22 +87,49 @@ carry, accumulate = pm.run_solver(
     forces_stack=[gravity, box],
     num_steps=20000,
     store_every=500,
-    particles_output=("position_stack", "velocity_stack", "mass_stack"),
+    particles_output=("stress_stack","position_stack", "velocity_stack", "mass_stack"),
 )
 
 print("Simulation done.. plotting might take a while")
 
-positions_stack, velocity_stack, mass_stack = accumulate
+stress_stack, position_stack, velocity_stack, mass_stack = accumulate
 
-
-pm.plot_simple(
-    origin=nodes.origin,
-    end=nodes.end,
-    positions_stack=positions_stack,
-    scalars=velocity_stack,
-    scalars_name="Velocity magnitude",
-    particles_plot_params={
-        "clim": [jnp.min(velocity_stack), jnp.max(velocity_stack)],
-        "point_size": 10,
-    },
+stress_reg_stack = jax.vmap(pm.post_processes_stress_stack,in_axes=(0,0,0, None,None)) (
+    stress_stack,
+    mass_stack,
+    position_stack,
+    nodes,
+    shapefunctions
 )
+
+q_reg_stack = jax.vmap(pm.get_q_vm_stack,in_axes=(0,None, None,None))(
+    stress_reg_stack,None,None,2)
+
+pvplot_cmap_q = pm.PvPointHelper.create(
+   position_stack,
+   scalar_stack = q_reg_stack,
+  scalar_name="q [Pa]",
+   origin=nodes.origin,
+   end=nodes.end,
+   subplot = (0,0),
+   timeseries_options={
+    "clim":[0,50000],
+    "point_size":25,
+    "render_points_as_spheres":True,
+    "scalar_bar_args":{
+           "vertical":True,
+           "height":0.8,
+            "title_font_size":35,
+            "label_font_size":30,
+            "font_family":"arial",
+
+           }
+   }
+)
+plotter = pm.make_pvplots(
+    [pvplot_cmap_q],
+    plotter_options={"shape":(1,1),"window_size":([2048, 2048]) },
+    dim=2,
+    file=dir_path + fname,
+)
+

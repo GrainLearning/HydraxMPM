@@ -8,17 +8,17 @@ jax.config.update("jax_platform_name", "cpu")
 jax.config.update("jax_enable_x64", True)
 # loading conditions
 
-load_steps = 500000
+load_steps = 5000
 # total_time_list = [100.0,400.0]
 # total_time_list = [1.0,4.0]
-total_time_list = [0.01,100]
+total_time_list = [1,10]
 
 # total_shear_strain =1.0
 total_shear_strain =1.0
 
-store_every = 500
+store_every = 10
 
-total_volume_strain = 0.05
+total_volume_strain = 0.03
 
 
 # common params
@@ -29,9 +29,9 @@ mu_s = 0.3819
 mu_d = 0.645
 rho_p = 2000
 d = 0.0053
-# I_phi=0.3
+I_phi=0.85
 # I_phi = 0.01
-I_phi = 0.8
+# I_phi = 0.8
 I_0 = 0.279
 mu_d = 0.645
 
@@ -43,6 +43,8 @@ nu=0.2
 R=1
 lam=0.01
 kap=0.005
+
+
 
 # Reference conditions and create material
 phi_ref = 0.61
@@ -94,13 +96,13 @@ fig_ax_set1 = pm.make_plots()
 fig_ax_set2 = pm.make_plots()
 fig_ax_set3 = pm.make_plots()
 
-colors = ["blue","red"]
-linestyles = ["--",":","-"]
+colors = ["blue","red","black"]
+linestyles = ["--","-"]
 
 for mi,material in enumerate([mcc, mu_i, mrm]):
     for ti, total_time in enumerate(total_time_list):
         
-        plot_helper_args={"ls":linestyles[mi],"color":colors[ti]}
+        plot_helper_args={"ls":linestyles[ti],"color":colors[mi]}
         
         dt = total_time/load_steps
         dgamma_dt_ref = (total_shear_strain/load_steps)/dt

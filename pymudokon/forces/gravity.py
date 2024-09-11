@@ -30,11 +30,10 @@ class Gravity:
 
     gravity: chex.Array
 
+
     @classmethod
     def create(cls: Self, gravity: chex.Array) -> Self:
         """Initialize Gravity force on Nodes."""
-        dim = gravity.shape[0]
-        gravity.reshape(-1, dim)
         return cls(gravity=gravity)
 
     def apply_on_nodes_moments(
@@ -45,6 +44,10 @@ class Gravity:
         dt: jnp.float32 = 0.0,
     ) -> Tuple[Nodes, Self]:
         """Apply gravity on the nodes."""
+        self = self.replace(
+            gravity = self.gravity
+        )
+        
         moment_stack, moment_nt_stack = self.apply_gravity(
             nodes.moment_stack, nodes.moment_nt_stack, nodes.mass_stack, dt
         )

@@ -7,6 +7,12 @@ import jax.numpy as jnp
 import numpy as np
 
 import pymudokon as pm
+import os
+
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
+fname = "/cubes_fall.gif"
+
 
 domain_size = 10
 
@@ -66,7 +72,10 @@ gravity = pm.Gravity.create(gravity=jnp.array([0.00, -0.0098]))
 
 box = pm.DirichletBox.create(
     nodes,
-    boundary_types=jnp.array([[0, 0], [3, 0]]),
+    boundary_types=(
+        ("slip_negative_normal", "slip_positive_normal"),
+        ("stick", "stick"),
+    ),
 )
 
 solver = pm.USL.create(alpha=0.99, dt=0.003)
@@ -81,23 +90,49 @@ carry, accumulate = pm.run_solver(
     forces_stack=[gravity, box],
     num_steps=120000,
     store_every=1000,
-    particles_output=("position_stack", "velocity_stack", "mass_stack"),
+    particles_output=("stress_stack","position_stack", "velocity_stack", "mass_stack"),
 )
 
 print("Simulation done.. plotting might take a while")
 
-positions_stack, velocities_stack, masses_stack = accumulate
+stress_stack, position_stack, velocity_stack, mass_stack = accumulate
 
-KE_stack = pm.get_KE(masses_stack, velocities_stack)
+stress_reg_stack = jax.vmap(pm.post_processes_stress_stack,in_axes=(0,0,0, None,None)) (
+    stress_stack,
+    mass_stack,
+    position_stack,
+    nodes,
+    shapefunctions
+)
 
-pm.plot_simple(
-    origin=nodes.origin,
-    end=nodes.end,
-    positions_stack=positions_stack,
-    scalars=velocities_stack,
-    scalars_name="Velocity magnitude",
-    particles_plot_params={
-        "clim": [jnp.min(velocities_stack), jnp.max(velocities_stack)],
-        "point_size": 10,
-    },
+p_reg_stack = jax.vmap(pm.get_pressure_stack,in_axes=(0,None))(
+    stress_reg_stack,2)
+
+
+pvplot_cmap_q = pm.PvPointHelper.create(
+   position_stack,
+   scalar_stack = p_reg_stack,
+  scalar_name="p [Pa]",
+   origin=nodes.origin,
+   end=nodes.end,
+   subplot = (0,0),
+   timeseries_options={
+    "clim":[0,50000],
+    "point_size":25,
+    "render_points_as_spheres":True,
+    "scalar_bar_args":{
+           "vertical":True,
+           "height":0.8,
+            "title_font_size":35,
+            "label_font_size":30,
+            "font_family":"arial",
+
+           }
+   }
+)
+plotter = pm.make_pvplots(
+    [pvplot_cmap_q],
+    plotter_options={"shape":(1,1),"window_size":([2048, 2048]) },
+    dim=2,
+    file=dir_path + fname,
 )
