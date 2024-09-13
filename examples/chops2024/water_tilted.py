@@ -105,7 +105,7 @@ start_time = time.time()
 
 
 bbox = pv.Box(bounds=np.array(list(zip(jnp.pad(origin,[0,1]), jnp.pad(end,[0,1])))).flatten())
-bbox.save(dir_path + f"/output/water_inclined_collapse/bbox.vtk")
+bbox.save(dir_path + f"/output/water_tilted/bbox.vtk")
 
 # save restart file
 def io_vtk(carry,step):
@@ -130,16 +130,15 @@ def io_vtk(carry,step):
     )
     pressure_reg_stack =  pm.get_pressure_stack(stress_reg_stack,dim=2)
     pressure_stack =  pm.get_pressure_stack(particles.stress_stack,dim=2)
-    phi_stack = particles.get_phi_stack(rho_p)
     
     cloud["pressure_reg_stack"] = pressure_reg_stack
     cloud["pressure_stack"] = pressure_stack
     cloud["density_stack"] = particles.mass_stack/particles.volume_stack
     
-    cloud["phi_stack"] = phi_stack
+    
     
     jax.debug.print("step {}",step)
-    cloud.save(dir_path + f"/output/water_inclined_collapse/particles_{step}.vtk")
+    cloud.save(dir_path + f"/output/water_tilted/particles_{step}.vtk")
 
     
 

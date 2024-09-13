@@ -123,12 +123,7 @@ def io_vtk(carry,step):
     
     q_reg_stack = pm.get_q_vm_stack(stress_reg_stack,dim=2)
     cloud["q_reg_stack"] = q_reg_stack
-    
-    phi_stack = particles.get_phi_stack(rho_p)
-    
 
-    
-    cloud["phi_stack"] = phi_stack
     
     jax.debug.print("step {}",step)
     cloud.save(dir_path + f"/output/water_flat/particles_{step}.vtk")
