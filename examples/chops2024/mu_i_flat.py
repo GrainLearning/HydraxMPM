@@ -83,8 +83,8 @@ print(f"num_nodes = {nodes.num_nodes_total}, num_particles = {particles.position
 phi_ref_stack = particles.get_phi_stack(rho_p)
 
 material = pm.MuI_incompressible.create(
-    mu_s=0.8/np.sqrt(3),
-    mu_d=(0.8/np.sqrt(3))*1.2,
+    mu_s=0.38186285175,
+    mu_d=0.57176986,
     I_0=0.279,
     rho_p=rho_p,
     d=0.0053,

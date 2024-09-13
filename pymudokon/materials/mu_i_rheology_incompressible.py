@@ -146,7 +146,7 @@ class MuI_incompressible(Material):
         def stop():
             return stress_prev
 
-        return jax.lax.cond(dgamma_dt<1e-6,stop,flow )
+        return jax.lax.cond(dgamma_dt<1e-9,stop,flow )
 
     def get_p_ref(self, phi):
         return jnp.maximum(self.K*(phi-1.0),1e-12)

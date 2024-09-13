@@ -36,11 +36,7 @@ domain_length = 6 * column_width  # [m]
 
 
 # material parameters
-phi_c = 0.648 # [-] rigid limit
-phi_0 = 0.65 # [-] initial solid volume fraction
-rho_p = 2000 # [kg/m^3] particle (skeletan density)
-rho = rho_p*phi_0 #[kg/m^3] bulk density
-d=0.0053 # [m] particle diameter
+rho = 2000*0.65 # [kg/m^3]
 
 
 # gravity
@@ -78,10 +74,11 @@ particles, nodes, shapefunctions = pm.discretize(
 print(f"num_nodes = {nodes.num_nodes_total}, num_particles = {particles.position_stack.shape[0]}",)
 
 # initialize material and particles, perhaps there is a less verbose way?
-# get reference solid volume fraction particle mass  /volume
-phi_ref_stack = particles.get_phi_stack(rho_p)
 
-material = pm.NewtonFluid.create(K=50*rho*9.8*column_height, viscosity=0.001)
+material = pm.NewtonFluid.create(
+    K=50*rho*9.8*column_height,
+    viscosity=0.002
+)
 
 
 # initialize fources and boundary conditions

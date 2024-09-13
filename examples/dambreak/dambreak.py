@@ -16,7 +16,7 @@ dam_length = 4.0
 # material parameters
 rho = 997.5
 bulk_modulus = 2.0 * 10**6
-mu = 0.001
+visc = 0.002
 
 
 # gravity
@@ -58,7 +58,7 @@ particles, nodes, shapefunctions = pm.discretize(
     particles, nodes, shapefunctions, ppc=particles_per_cell, density_ref=rho
 )
 
-water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=mu)
+water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=visc)
 
 gravity = pm.Gravity.create(gravity=jnp.array([0.0, g]))
 # Fix this

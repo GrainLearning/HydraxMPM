@@ -95,4 +95,4 @@ class NewtonFluid(Material):
 
         deps_dev_dt = deps_dt - (deps_v_dt / 3) * jnp.eye(3)
 
-        return -pressure * jnp.eye(3) + 2.0 * self.viscosity * deps_dev_dt
+        return -pressure * jnp.eye(3) + self.viscosity * deps_dev_dt
