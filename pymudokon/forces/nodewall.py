@@ -48,6 +48,7 @@ class NodeWall:
         particles: Particles = None,
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
+        step: jnp.int32 = 0
     ) -> Tuple[Nodes, Self]:
         """Apply the boundary conditions on the nodes moments."""
 

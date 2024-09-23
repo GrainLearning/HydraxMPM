@@ -130,6 +130,12 @@ def io_vtk(carry,step):
     shapefunctions
     )
 
+    
+    KE_stack = pm.get_KE_stack(particles.mass_stack, particles.velocity_stack )
+    
+    KE_stack = jnp.nan_to_num(KE_stack,nan=0.0,posinf=0.0,neginf=0.0)
+    
+    print(KE_stack.sum())
     q_reg_stack = pm.get_q_vm_stack(stress_reg_stack,dim=2)
     cloud["q_reg_stack"] = q_reg_stack
 

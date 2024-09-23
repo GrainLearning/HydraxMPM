@@ -9,13 +9,17 @@ import jax.numpy as jnp
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..shapefunctions.shapefunctions import ShapeFunction
-from ..solvers.solver import Solver
+from .solver import Solver
 
 
 @chex.dataclass
-class USL_APIC(Solver):
+class USL_ASFLIP(Solver):
     """Explicit Update Stress Last (USL) Affine Particle in Cell (APIC) MPM solver."""
 
+    alpha: jnp.float32
+    phi_c: jnp.float32
+    beta_min: jnp.float32
+    beta_max: jnp.float32 
     Dp: chex.Array
     Dp_inv: chex.Array
     Bp_stack: chex.Array
@@ -26,6 +30,10 @@ class USL_APIC(Solver):
         cell_size,
         dim,
         num_particles,
+        alpha=1.0,
+        phi_c = 0.5,
+        beta_min= 0,
+        beta_max= 0, 
         dt: jnp.float32 = 0.00001,
     ):
         jax.debug.print("USL_APIC solver supported for cubic shape functions only")
@@ -35,9 +43,14 @@ class USL_APIC(Solver):
 
         Bp_stack = jnp.zeros((num_particles, 3, 3))
 
-        return USL_APIC(dt=dt, Dp=Dp, Dp_inv=Dp_inv, Bp_stack=Bp_stack)
+        return USL_ASFLIP(dt=dt, alpha=alpha, Dp=Dp, Dp_inv=Dp_inv, Bp_stack=Bp_stack,
+                phi_c = phi_c,
+                beta_min= beta_min,
+                beta_max= beta_max,                   
+                          
+                          )
 
-    def update(self, particles, nodes, shapefunctions, material_stack, forces_stack,step):
+    def update(self, particles, nodes, shapefunctions, material_stack, forces_stack, step):
         nodes = nodes.refresh()
         particles = particles.refresh()
 
@@ -169,7 +182,15 @@ class USL_APIC(Solver):
         @partial(jax.vmap, in_axes=(0, 0, 0, 0))
         def vmap_intr_scatter(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist_3d):
             intr_masses = nodes.mass_stack.at[intr_hashes].get()
+            intr_moments = nodes.moment_stack.at[intr_hashes].get()
             intr_moments_nt = nodes.moment_nt_stack.at[intr_hashes].get()
+
+            intr_vels = jax.lax.cond(
+                intr_masses > nodes.small_mass_cutoff,
+                lambda x: x / intr_masses,
+                lambda x: jnp.zeros_like(x),
+                intr_moments,
+            )
 
             intr_vels_nt = jax.lax.cond(
                 intr_masses > nodes.small_mass_cutoff,
@@ -177,6 +198,11 @@ class USL_APIC(Solver):
                 lambda x: jnp.zeros_like(x),
                 intr_moments_nt,
             )
+            
+            intr_delta_vels = intr_vels_nt - intr_vels
+
+            intr_scaled_delta_vels = intr_shapef * intr_delta_vels
+
 
             intr_scaled_vels_nt = intr_shapef * intr_vels_nt
 
@@ -197,29 +223,43 @@ class USL_APIC(Solver):
 
             intr_scaled_velgrad = intr_Bp @ self.Dp_inv
 
-            return intr_scaled_vels_nt, intr_scaled_velgrad, intr_Bp
+            return intr_scaled_delta_vels, intr_scaled_vels_nt, intr_scaled_velgrad, intr_Bp
 
-        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0))
+        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0, 0,0))
         def vmap_particles_update(
+            intr_delta_vels_reshaped: chex.ArrayBatched,
             intr_vels_nt_reshaped,
             intr_velgrad_reshaped,
             intr_Bp,
+            p_velocities: chex.ArrayBatched,
             p_positions,
             p_F,
             p_volumes_orig,
         ):
             # Update particle quantities
             p_velgrads_next = jnp.sum(intr_velgrad_reshaped, axis=0)
-
+            
+            delta_vels = jnp.sum(intr_delta_vels_reshaped, axis=0)
             vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
 
             p_Bp_next = jnp.sum(intr_Bp, axis=0)
             if dim == 2:
                 p_Bp_next = p_Bp_next.at[2, 2].set(0)
 
-            p_velocities_next = vels_nt
-
-            p_positions_next = p_positions + vels_nt * self.dt
+            # p_velocities_next = (1.0 - self.alpha) * vels_nt + self.alpha * (
+            #     p_velocities + delta_vels
+            # )
+            
+            T = self.alpha * (
+                p_velocities + delta_vels - vels_nt
+            )
+            p_velocities_next =  vels_nt + T
+            
+            
+            # Beta_p = 0
+            
+            
+            
 
             if dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
@@ -230,6 +270,15 @@ class USL_APIC(Solver):
                 p_F_next = p_F_next.at[2, 2].set(1)
 
             p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
+            
+            
+             
+            phi = p_volumes_orig/p_volumes_next # mass is constant
+            Beta_p = jax.lax.cond(phi< self.phi_c, lambda: self.beta_max, lambda: self.beta_min)
+            p_positions_next = p_positions + (vels_nt + Beta_p*T) * self.dt
+            
+            
+            
             return (
                 p_velocities_next,
                 p_positions_next,
@@ -239,7 +288,7 @@ class USL_APIC(Solver):
                 p_Bp_next,
             )
 
-        intr_scaled_vels_nt_stack, intr_scaled_velgrad_stack, intr_Bp_stack = (
+        intr_scaled_delta_vel_stack, intr_scaled_vels_nt_stack, intr_scaled_velgrad_stack, intr_Bp_stack = (
             vmap_intr_scatter(
                 shapefunctions.intr_hash_stack,
                 shapefunctions.intr_shapef_stack,
@@ -256,9 +305,11 @@ class USL_APIC(Solver):
             p_velgrads_next_stack,
             p_Bp_next_stack,
         ) = vmap_particles_update(
+            intr_scaled_delta_vel_stack.reshape(-1, stencil_size, dim),
             intr_scaled_vels_nt_stack.reshape(-1, stencil_size, dim),
             intr_scaled_velgrad_stack.reshape(-1, stencil_size, 3, 3),
             intr_Bp_stack.reshape(-1, stencil_size, 3, 3),
+            particles.velocity_stack,
             particles.position_stack,
             particles.F_stack,
             particles.volume0_stack,

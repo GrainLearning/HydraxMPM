@@ -5,6 +5,7 @@ from typing_extensions import Self
 
 import chex
 import jax.numpy as jnp
+import jax
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -29,12 +30,14 @@ class Gravity:
     """
 
     gravity: chex.Array
+    increment: chex.Array
+    stop_increment: jnp.int32
 
 
     @classmethod
-    def create(cls: Self, gravity: chex.Array) -> Self:
+    def create(cls: Self, gravity: chex.Array=None, increment : chex.Array = None,stop_increment : jnp.int32 = 0) -> Self:
         """Initialize Gravity force on Nodes."""
-        return cls(gravity=gravity)
+        return cls(gravity=gravity, increment= increment, stop_increment=stop_increment)
 
     def apply_on_nodes_moments(
         self: Self,
@@ -42,11 +45,18 @@ class Gravity:
         particles: Particles = None,
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
+        step: jnp.int32 = 0
     ) -> Tuple[Nodes, Self]:
         """Apply gravity on the nodes."""
-        self = self.replace(
-            gravity = self.gravity
-        )
+        
+        if self.increment is not None:
+            # jax.debug.print("grav step {} {} {}",step, self.stop_increment, is_done)
+            self = jax.lax.cond(
+                self.stop_increment >= step,
+                lambda:  self.replace(gravity = self.gravity + self.increment),
+                lambda: self
+                )
+
         
         moment_stack, moment_nt_stack = self.apply_gravity(
             nodes.moment_stack, nodes.moment_nt_stack, nodes.mass_stack, dt

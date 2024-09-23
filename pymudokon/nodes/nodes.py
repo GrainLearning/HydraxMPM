@@ -5,7 +5,7 @@ from typing_extensions import Self
 
 import chex
 import jax.numpy as jnp
-
+import jax
 
 @chex.dataclass
 class Nodes:
@@ -118,3 +118,44 @@ class Nodes:
             moment_stack=self.moment_stack.at[:].set(0.0),
             moment_nt_stack=self.moment_nt_stack.at[:].set(0.0),
         )
+    
+    def get_coordinate_stack(self,dim=3):
+        
+        nx, ny = self.grid_size
+
+        x = jnp.linspace(self.origin[0], self.end[0], nx)
+
+        y = jnp.linspace(self.origin[1], self.end[1], ny)
+
+        xv, yv = jnp.meshgrid(x, y)
+
+
+        node_coordinate_stack = jnp.array(list(zip(xv.flatten(), yv.flatten()))).astype(jnp.float32)
+
+        # is there a way to avoid this? i.e., generate sorted nodes
+        node_hash_stack = self.get_hash_stack(node_coordinate_stack,dim)
+        sorted_id_stack = jnp.argsort(node_hash_stack)
+        node_coordinate_stack = node_coordinate_stack.at[sorted_id_stack].get()
+        return node_coordinate_stack
+        
+        
+    def get_hash_stack(self,position_stack: chex.Array, dim: int=3):
+        
+        def calculate_hash(position):
+            rel_pos = (position - self.origin)*self.inv_node_spacing
+
+            if dim == 2:
+                return (rel_pos[1] + rel_pos[0] * self.grid_size[1]).astype(
+                    jnp.int32
+                )
+            else:
+                return (
+                    rel_pos[0]
+                    + rel_pos[1] * self.grid_size[0]
+                    + rel_pos[2] * self.grid_size[0] * self.grid_size[1]
+                ).astype(jnp.int32)
+            
+                
+        hash_stack = jax.vmap(calculate_hash)(position_stack)
+
+        return hash_stack

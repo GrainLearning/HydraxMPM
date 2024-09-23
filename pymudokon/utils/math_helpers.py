@@ -303,4 +303,33 @@ def get_hencky_strain(F):
 def get_hencky_strain_stack(F_stack):
     vmap_get_hencky = jax.vmap(get_hencky_strain, in_axes=(0))
     return vmap_get_hencky(F_stack)
+
+
+def get_k0_stress(height,gravity,rho_0,mu, axis_vertical=3):
     
+    fric_angle = jnp.arctan(mu)
+    
+    K0 = 1 -jnp.sin(fric_angle)
+    
+    print(K0)
+    factor = height*gravity*rho_0
+
+    stress = jnp.zeros((3,3))
+    stress = jnp.zeros((3,3)).at[[0,1,2],[0,1,2]].set(
+        factor*K0
+    )
+    
+    stress = stress.at[axis_vertical,axis_vertical].set(
+        factor
+    )
+    
+    p = get_pressure(stress,dim=2)
+    
+    q = get_q_vm(stress,dim=2)
+    
+    print(f"{p=},{q=}")
+    
+    mu = (q/p)/jnp.sqrt(3)
+    
+    print(f"{mu}=")
+    return stress

@@ -115,7 +115,6 @@ class MuI_incompressible(Material):
 
         return stress_next_stack, self
 
-
     @partial(jax.vmap, in_axes=(None, 0, 0,0), out_axes=(0))
     def vmap_viscoplastic(self, strain_rate: chex.Array, phi: chex.Array,stress_prev:chex.Array):
         
@@ -127,26 +126,65 @@ class MuI_incompressible(Material):
         
         
         
+        
+        
         I = get_inertial_number(p,dgamma_dt,self.d, self.rho_p)
 
-        def flow():
-            alpha = 0.0001
-            eta_E_s = p*self.mu_s/jnp.sqrt(dgamma_dt*dgamma_dt + alpha*alpha)
-            
-            mu_I_delta = (self.mu_d - self.mu_s)/(1.0 + self.I_0 / I)
-            
-            eta_delta = p*mu_I_delta/dgamma_dt
-            
-            eta = eta_E_s+eta_delta
-            
-            stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
+        I = jnp.maximum(I,1e-12)
 
-            return stress_next
+        alpha = 0.0001
+        eta_E_s = p*self.mu_s/jnp.sqrt(dgamma_dt*dgamma_dt + alpha*alpha)
         
-        def stop():
-            return stress_prev
+        mu_I_delta = (self.mu_d - self.mu_s)/(1.0 + self.I_0 / I)
+        
+        eta_delta = p*mu_I_delta/dgamma_dt
+        
+        eta = eta_E_s+eta_delta
+        
+        # eta = jnp.nan_to_num(eta,nan=0,posinf=self.eta_max,neginf=0)
+        
+        # eta = jnp.maximum(eta,self.eta_max)
+                
+        stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
 
-        return jax.lax.cond(dgamma_dt<1e-9,stop,flow )
+        return stress_next
+        
+
+
+        # return jax.lax.cond(dgamma_dt<1e-6,stop,flow )
+    
+    
+    # @partial(jax.vmap, in_axes=(None, 0, 0,0), out_axes=(0))
+    # def vmap_viscoplastic(self, strain_rate: chex.Array, phi: chex.Array,stress_prev:chex.Array):
+        
+    #     p = jnp.maximum(self.K*(phi-1.0),1e-12)
+
+    #     deps_dev_dt = get_dev_strain(strain_rate,dim =self.dim)
+        
+    #     dgamma_dt = get_scalar_shear_strain(strain_rate,dim = self.dim)
+        
+        
+        
+    #     I = get_inertial_number(p,dgamma_dt,self.d, self.rho_p)
+
+    #     def flow():
+    #         alpha = 0.0001
+    #         eta_E_s = p*self.mu_s/jnp.sqrt(dgamma_dt*dgamma_dt + alpha*alpha)
+            
+    #         mu_I_delta = (self.mu_d - self.mu_s)/(1.0 + self.I_0 / I)
+            
+    #         eta_delta = p*mu_I_delta/dgamma_dt
+            
+    #         eta = eta_E_s+eta_delta
+            
+    #         stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
+
+    #         return stress_next
+        
+    #     def stop():
+    #         return stress_prev
+
+    #     return jax.lax.cond(dgamma_dt<1e-6,stop,flow )
 
     def get_p_ref(self, phi):
         return jnp.maximum(self.K*(phi-1.0),1e-12)

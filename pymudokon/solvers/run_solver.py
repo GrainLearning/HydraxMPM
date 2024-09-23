@@ -157,7 +157,7 @@ def run_solver_io(
 
         solver, particles, nodes, shapefunctions, material_stack, forces_stack = (
             solver.update(
-                particles, nodes, shapefunctions, material_stack, forces_stack
+                particles, nodes, shapefunctions, material_stack, forces_stack, step
             )
         )
 
