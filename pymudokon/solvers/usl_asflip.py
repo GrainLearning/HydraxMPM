@@ -59,6 +59,7 @@ class USL_ASFLIP(Solver):
             inv_node_spacing=nodes.inv_node_spacing,
             grid_size=nodes.grid_size,
             position_stack=particles.position_stack,
+            species_stack = nodes.species_stack
         )
 
         # transform from grid space to particle space
@@ -246,20 +247,12 @@ class USL_ASFLIP(Solver):
             if dim == 2:
                 p_Bp_next = p_Bp_next.at[2, 2].set(0)
 
-            # p_velocities_next = (1.0 - self.alpha) * vels_nt + self.alpha * (
-            #     p_velocities + delta_vels
-            # )
             
             T = self.alpha * (
                 p_velocities + delta_vels - vels_nt
             )
             p_velocities_next =  vels_nt + T
-            
-            
-            # Beta_p = 0
-            
-            
-            
+
 
             if dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0)

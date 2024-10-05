@@ -90,6 +90,24 @@ class Nodes:
 
         dim = origin.shape[0]
 
+        species_stack = jnp.zeros(num_nodes_total).reshape(grid_size).astype(jnp.int16)
+        
+        if dim ==2:
+            # boundary layers
+            species_stack = species_stack.at[0, :].set(1) #x0
+            species_stack = species_stack.at[:, 0].set(1) #y0
+            species_stack = species_stack.at[grid_size[0]-1, :].set(1) #x1
+            species_stack = species_stack.at[:,grid_size[1] -1].set(1) #y0
+            
+            # boundary layers 0 + h
+            species_stack = species_stack.at[1, :].set(2) #x0
+            species_stack = species_stack.at[:, 1].set(2) #y0
+            
+            # boundary layer N-h
+            species_stack = species_stack.at[grid_size[0]-2, :].set(3) #x1
+            species_stack = species_stack.at[:,grid_size[1] -2].set(3) #y0
+
+        species_stack = species_stack.reshape(-1)
         return cls(
             origin=origin,
             end=end,
@@ -101,7 +119,7 @@ class Nodes:
             mass_stack=jnp.zeros((num_nodes_total)).astype(jnp.float32),
             moment_stack=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
             moment_nt_stack=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
-            species_stack=jnp.zeros(num_nodes_total).astype(jnp.int32),
+            species_stack=species_stack,
         )
 
     def refresh(self: Self) -> Self:

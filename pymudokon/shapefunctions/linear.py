@@ -85,6 +85,7 @@ class LinearShapeFunction(ShapeFunction):
         inv_node_spacing: jnp.float32,
         grid_size: chex.Array,
         position_stack: chex.Array,
+        species_stack: chex.Array
     ) -> Tuple[Self, chex.Array]:
         """Calculate shape functions and its gradients.
 

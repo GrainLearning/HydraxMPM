@@ -1,6 +1,58 @@
 import operator
-
+import os
 import jax
+
+
+def set_default_gpu(gpu_id=0):
+    jax.config.update("jax_default_device", jax.devices("gpu")[gpu_id])
+
+
+def filter_object(obj, l):
+    obj_dict = vars(obj)
+    return dict(((key, obj_dict[key]) for key in l))
+
+
+def save_object(obj, l, file_path):
+    obj_out = filter_object(particles, l)
+    jnp.savez(file_path, **obj_out)
+
+
+def dump_restart_files(
+    solver=None,
+    particles=None,
+    nodes=None,
+    shapefunctions=None,
+    material_stack=None,
+    forces_stack=None,
+    suffix="",
+    directory=None,
+):
+    import pickle
+
+    if directory is None:
+        directory = "./"
+
+    def dump(object, name):
+        with open(f"{directory}/{name}{suffix}.pickle", "wb") as handle:
+            pickle.dump(object, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    if solver is not None:
+        dump(solver, "solver")
+
+    if particles is not None:
+        dump(particles, "particles")
+
+    if nodes is not None:
+        dump(nodes, "nodes")
+
+    if shapefunctions is not None:
+        dump(shapefunctions, "shapefunctions")
+
+    if material_stack is not None:
+        dump(material_stack, "material_stack")
+
+    if forces_stack is not None:
+        dump(forces_stack, "forces_stack")
 
 
 def scan_kth(f, init, xs=None, reverse=False, unroll=1, store_every=1):

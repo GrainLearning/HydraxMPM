@@ -46,6 +46,7 @@ class USL_APIC(Solver):
             inv_node_spacing=nodes.inv_node_spacing,
             grid_size=nodes.grid_size,
             position_stack=particles.position_stack,
+            species_stack = nodes.species_stack
         )
 
         # transform from grid space to particle space

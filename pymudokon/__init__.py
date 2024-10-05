@@ -21,6 +21,7 @@ from .forces.forces import Forces
 from .forces.gravity import Gravity
 from .forces.nodewall import NodeWall
 from .forces.rigidparticles import RigidParticles
+from .forces.nodelevelset import NodeLevelSet
 from .materials.druckerprager import DruckerPrager
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.material import Material
@@ -29,11 +30,14 @@ from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .materials.newtonfluid import NewtonFluid
 from .materials_analysis.mix_control import mix_control
 from .materials_analysis.mp_benchmarks import MPBenchmark
-from .materials_analysis.plot import make_plots, add_plot, PlotHelper
+from .materials_analysis.plot import make_plots, add_plot, PlotHelper, make_plots_3d, add_plot_3d
 from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
+
+from .materials.experimental.mrm_steadystate import MRMSteady
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .shapefunctions.cubic import CubicShapeFunction
+from .shapefunctions.cubic_old import CubicShapeFunction2
 from .shapefunctions.linear import LinearShapeFunction
 from .shapefunctions.shapefunctions import ShapeFunction
 from .solvers.run_solver import (
@@ -85,9 +89,11 @@ from .utils.math_helpers import (
     get_hencky_strain_stack,
     get_k0_stress
 )
-from .utils.mpm_domain_helpers import discretize
+from .utils.mpm_domain_helpers import discretize, fill_domain_with_particles
 from .utils.mpm_plot_helpers import PvPointHelper,make_pvplots, points_to_3D
 from .utils.mpm_postprocessing_helpers import post_processes_stress_stack, post_processes_grid_gradient_stack
+
+from .utils.jax_helpers import set_default_gpu, dump_restart_files,save_object
 
 __all__ = [
     "Nodes",

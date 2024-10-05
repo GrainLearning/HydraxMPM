@@ -124,15 +124,11 @@ class MuI_incompressible(Material):
         
         dgamma_dt = get_scalar_shear_strain(strain_rate,dim = self.dim)
         
-        
-        
-        
-        
         I = get_inertial_number(p,dgamma_dt,self.d, self.rho_p)
 
-        I = jnp.maximum(I,1e-12)
+        I = jnp.maximum(I,1e-9)
 
-        alpha = 0.0001
+        alpha = 0.000001
         eta_E_s = p*self.mu_s/jnp.sqrt(dgamma_dt*dgamma_dt + alpha*alpha)
         
         mu_I_delta = (self.mu_d - self.mu_s)/(1.0 + self.I_0 / I)

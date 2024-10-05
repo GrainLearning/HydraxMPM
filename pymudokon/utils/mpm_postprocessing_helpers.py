@@ -46,6 +46,7 @@ def post_processes_stress_stack(
         inv_node_spacing=nodes.inv_node_spacing,
         grid_size=nodes.grid_size,
         position_stack=position_stack,
+        species_stack = nodes.species_stack
     )
     
     # p2g
@@ -139,11 +140,12 @@ def post_processes_grid_gradient_stack(
         inv_node_spacing=nodes.inv_node_spacing,
         grid_size=nodes.grid_size,
         position_stack=position_stack,
+        species_stack = None
     )
     
     # p2g
     stencil_size, dim = shapefunctions.stencil.shape
-
+    
     @partial(jax.vmap, in_axes=(0, 0))
     def vmap_p2g(intr_id, intr_shapef):
         particle_id = (intr_id / stencil_size).astype(jnp.int32)
@@ -161,6 +163,7 @@ def post_processes_grid_gradient_stack(
             shapefunctions.intr_id_stack,
             shapefunctions.intr_shapef_stack
         )
+    # print(scaled_x_stack.min(), scaled_x_stack.max())
     
     # in case arrays are not empty from prior simulation run
     zero_node_mass_stack = jnp.zeros_like(nodes.mass_stack)
@@ -176,5 +179,16 @@ def post_processes_grid_gradient_stack(
             scaled_x_stack
         )
 
+    def divide(X_generic,mass):
+        
+        result = jax.lax.cond(
+                mass > nodes.small_mass_cutoff,
+                lambda x: x/ mass,
+                lambda x: jnp.nan,
+                X_generic,
+        )
+        return result
+    
+    return jax.vmap(divide)(nodes_x_stack,nodes_mass_stack)
 
-    return nodes_x_stack
+    # return nodes_x_stack/nodes_mass_stack.reshape(-1,1,1)
