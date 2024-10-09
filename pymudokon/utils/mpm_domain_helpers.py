@@ -56,10 +56,10 @@ def fill_domain_with_particles(nodes):
 
     node_coords = node_coordinate_stack.reshape(*nodes.grid_size,2)
 
-    node_coords = node_coords.at[4:,:].get()
-    node_coords = node_coords.at[:,4:].get()
-    node_coords = node_coords.at[:-5,:].get()
-    node_coords = node_coords.at[:,:-5].get()
+    node_coords = node_coords.at[3:,:].get()
+    node_coords = node_coords.at[:,3:].get()
+    node_coords = node_coords.at[:-4,:].get()
+    node_coords = node_coords.at[:,:-4].get()
     node_coords = node_coords.reshape(-1,2)
     pnt_stack = jax.vmap(get_opt)(node_coords).reshape(-1,2)
     return pnt_stack, node_coordinate_stack

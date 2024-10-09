@@ -24,60 +24,63 @@ from ...utils.math_helpers import (
 from ..material import Material
 
 
-def plot_yield_surface(
-    ax, p_range: Tuple, M: jnp.float32, p_c: jnp.float32, color="black", linestyle="--"
-):
-    p_stack = jnp.arange(p_range[0], p_range[1], p_range[2])
+# def plot_yield_surface(
+#     ax, p_range: Tuple, M: jnp.float32, p_c: jnp.float32, color="black", linestyle="--"
+# ):
+#     p_stack = jnp.arange(p_range[0], p_range[1], p_range[2])
 
-    def return_mapping(p):
-        def solve_yf(sol, args):
-            q = sol
+#     def return_mapping(p):
+#         def solve_yf(sol, args):
+#             q = sol
 
-            return yield_function(p, p_c, q, M)
+#             return yield_function(p, p_c, q, M)
 
-        solver = optx.Newton(rtol=1e-6, atol=1e-6)
-        sol = optx.root_find(solve_yf, solver, p, throw=False)
-        return sol.value
+#         solver = optx.Newton(rtol=1e-6, atol=1e-6)
+#         sol = optx.root_find(solve_yf, solver, p, throw=False)
+#         return sol.value
 
-    q_stack = jax.vmap(return_mapping)(p_stack)
+#     q_stack = jax.vmap(return_mapping)(p_stack)
 
-    ax.plot(p_stack, q_stack, color=color, linestyle=linestyle)
-    return ax
-
-
-def get_elas_non_linear_pressure(deps_e_v, kap, p_prev):
-    """Compute non-linear pressure."""
-    const = deps_e_v / kap
-    # return (p_prev + const) / (1.0 - const)
-    return (p_prev) / (1.0 - const)
+#     ax.plot(p_stack, q_stack, color=color, linestyle=linestyle)
+#     return ax
 
 
-def get_elas_dev_stress(eps_e_d, s_ref, G):
-    return 2.0 * G * eps_e_d + s_ref
+# def get_elas_non_linear_pressure(deps_e_v, kap, p_prev):
+#     """Compute non-linear pressure."""
+#     const = deps_e_v / kap
+#     # return (p_prev + const) / (1.0 - const)
+#     return (p_prev) / (1.0 - const)
 
 
-def get_non_linear_hardening_pressure(deps_p_v, lam, kap, p_c_prev):
-    const = deps_p_v / (lam - kap)
-    # return (p_c_prev + const) / (1.0 - const)
-    return (p_c_prev) / (1.0 - const)
+# def get_elas_dev_stress(eps_e_d, s_ref, G):
+#     return 2.0 * G * eps_e_d + s_ref
 
 
-def yield_function(p, p_c, q, M):
-    """Compute the modified Cam Clay yield function."""
-    return q**2 / M**2 - p * (p_c - p)
+# def get_non_linear_hardening_pressure(deps_p_v, lam, kap, p_c_prev):
+#     const = deps_p_v / (lam - kap)
+#     # return (p_c_prev + const) / (1.0 - const)
+#     return (p_c_prev) / (1.0 - const)
 
 
-def get_K(kap, p):
-    return (1.0 / kap) * p
+# def yield_function(p, p_c, q, M):
+#     """Compute the modified Cam Clay yield function."""
+#     return q**2 / M**2 - p * (p_c - p)
 
 
-def get_G(nu, K):
-    return (3.0 * (1.0 - 2.0 * nu)) / (2.0 * (1.0 + nu)) * K
+# def get_K(kap, p):
+#     return (1.0 / kap) * p
 
 
-def get_M_I(I, M_s, M_d, I0):
-    return M_s + (M_d - M_s) * (1 / (1 + I0 / I))
+# def get_G(nu, K):
+#     return (3.0 * (1.0 - 2.0 * nu)) / (2.0 * (1.0 + nu)) * K
 
+
+# def get_M_I(I, M_s, M_d, I0):
+#     return M_s + (M_d - M_s) * (1 / (1 + I0 / I))
+
+
+def get_mrm_phi(I,p_star, phi_c, I_phi, lam):
+    return phi_c* jnp.exp(-I/I_phi)*(1+p_star)**lam
 
 @chex.dataclass
 class MCC_MRM(Material):
@@ -466,16 +469,29 @@ class MCC_MRM(Material):
         
     @classmethod
     def get_p_ref_phi(cls, phi_ref, phi_c, lam, kap):
+        """
         
-        v_ref = 1.0/phi_ref
+        Here we start from a reference specific volume
+
+        Args:
+            phi_ref (_type_): _description_
+            phi_c (_type_): _description_
+            lam (_type_): _description_
+            kap (_type_): _description_
+            
+            
+        """
         
         
-        Gamma = 1.0/phi_c # phi to specific volume
+        # v_ref = 1.0/phi_ref
         
-        log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
         
-        # p on ICL
+        # Gamma = 1.0/phi_c # phi to specific volume
         
-        log_p = (log_N - jnp.log(v_ref))/lam
+        # log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
         
-        return jnp.exp(log_p)
+        # # p on ICL
+        
+        # log_p = (log_N - jnp.log(v_ref))/lam
+        
+        # return jnp.exp(log_p)

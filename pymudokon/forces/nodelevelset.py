@@ -125,7 +125,8 @@ class NodeLevelSet:
             # and 1 when they are parallel
             # if othogonal no contact is happening
             # if parallel the contact is happening
-            delta_vel = nodes_vel_nt - velocity
+            delta_vel = nodes_vel_nt 
+            # - velocity
             
             delta_vel_dot_normal = jnp.dot(delta_vel, node_normals)
             
@@ -151,19 +152,19 @@ class NodeLevelSet:
                 
                 tangent = (norm_padded + mu_prime*normal_cross_omega).at[:2].get()
             
-            # sometomes tanges become nan if velocity is zero at initialization
+            # sometimes tangent become nan if velocity is zero at initialization
             # which causes problems
-            # tangent = jnp.nan_to_num(tangent) 
+            tangent = jnp.nan_to_num(tangent) 
             
             new_nodes_vel_nt = jax.lax.cond(
                 delta_vel_dot_normal > 0.0,
-                # lambda x: x - delta_vel_dot_normal * tangent,
-                lambda x: x - delta_vel_dot_normal*node_normals, # no friction debug
+                lambda x: x - delta_vel_dot_normal * tangent,
+                # lambda x: x - delta_vel_dot_normal*node_normals, # no friction debug
                 lambda x: x,
                 nodes_vel_nt,
             )
 
-            node_moments_nt = new_nodes_vel_nt * tangent
+            node_moments_nt = new_nodes_vel_nt * node_mass
             return node_moments_nt
     
         levelset_moment_nt_stack= vmap_nodes(

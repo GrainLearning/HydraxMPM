@@ -34,6 +34,8 @@ from .materials_analysis.plot import make_plots, add_plot, PlotHelper, make_plot
 from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
 
 from .materials.experimental.mrm_steadystate import MRMSteady
+from .materials.experimental.mcc_mrm import MCC_MRM
+
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .shapefunctions.cubic import CubicShapeFunction
