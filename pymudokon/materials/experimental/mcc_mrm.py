@@ -79,8 +79,9 @@ from ..material import Material
 #     return M_s + (M_d - M_s) * (1 / (1 + I0 / I))
 
 
-def get_mrm_phi(I,p_star, phi_c, I_phi, lam):
-    return phi_c* jnp.exp(-I/I_phi)*(1.0+p_star)**lam
+def get_mrm_phi(I, p_star, phi_c, I_phi, lam):
+    return phi_c * jnp.exp(-I / I_phi) * (1.0 + p_star) ** lam
+
 
 @chex.dataclass
 class MCC_MRM(Material):
@@ -168,6 +169,7 @@ class MCC_MRM(Material):
             I_0=I_0,
             absolute_density=absolute_density,
         )
+
     @classmethod
     def create_from_phi_ref(
         cls: Self,
@@ -187,35 +189,38 @@ class MCC_MRM(Material):
         absolute_density: jnp.float32 = 1.0,
         dim: jnp.int16 = 3,
     ) -> Self:
-        p_ref_stack = jax.vmap(cls.get_p_ref_phi,in_axes=(0,None,None,None))(phi_ref_stack,phi_c,lam,kap)
-        
+        p_ref_stack = jax.vmap(cls.get_p_ref_phi, in_axes=(0, None, None, None))(
+            phi_ref_stack, phi_c, lam, kap
+        )
+
         def create_stress_ref(p_ref):
-            return -jnp.eye(3)*p_ref
-        
+            return -jnp.eye(3) * p_ref
+
         stress_ref_stack = jax.vmap(create_stress_ref)(p_ref_stack)
         return cls.create(
-            nu = nu,
-            M = M,
-            R = R,
-            lam =lam,
-            kap = kap,
-            Vs = 1,
-            phi_c = phi_c,
-            I_phi = I_phi,
-            d0 = d0,
-            rho_p = rho_p,
-            M_d =M_d,
-            I_0 = I_0,
+            nu=nu,
+            M=M,
+            R=R,
+            lam=lam,
+            kap=kap,
+            Vs=1,
+            phi_c=phi_c,
+            I_phi=I_phi,
+            d0=d0,
+            rho_p=rho_p,
+            M_d=M_d,
+            I_0=I_0,
             stress_ref_stack=stress_ref_stack,
-            dim = dim,
+            dim=dim,
         )
+
     def update_from_particles(
         self: Self, particles: Particles, dt: jnp.float32
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
 
-        phi_stack = density_stack/self.rho_p
-        
+        phi_stack = density_stack / self.rho_p
+
         stress_stack, self = self.update(
             particles.stress_stack, particles.F_stack, particles.L_stack, phi_stack, dt
         )
@@ -271,12 +276,13 @@ class MCC_MRM(Material):
         p_prev,
     ):
         dim = deps_next.shape[0]
-        
-        def unjammed(): #phi < phi_c
+
+        def unjammed():  # phi < phi_c
             deps_p_dev_next = get_dev_strain(deps_next)
             # stress_next, eps_e_next, p_c_next, p_next, deps_p_dev
-            return jnp.zeros((3,3)), jnp.zeros((3,3)), 0.0, 0.0, deps_p_dev_next
-        def jammed(): # phi >= phi_c
+            return jnp.zeros((3, 3)), jnp.zeros((3, 3)), 0.0, 0.0, deps_p_dev_next
+
+        def jammed():  # phi >= phi_c
             # Reference pressure and deviatoric stress
             p_ref = get_pressure(stress_ref, dim)
 
@@ -354,7 +360,12 @@ class MCC_MRM(Material):
 
                     solver = optx.Newton(rtol=1e-3, atol=1e-3)
                     sol = optx.root_find(
-                        residuals, solver, init_val, throw=False, has_aux=True, max_steps=20
+                        residuals,
+                        solver,
+                        init_val,
+                        throw=False,
+                        has_aux=True,
+                        max_steps=20,
                     )
 
                     return sol.value
@@ -386,8 +397,8 @@ class MCC_MRM(Material):
                 return stress_next, eps_e_next, p_c_next, p_next, deps_p_dev
 
             return jax.lax.cond(is_ep, pull_to_ys, elastic_update)
-        
-        return jax.lax.cond(phi >=self.phi_c, jammed,unjammed)
+
+        return jax.lax.cond(phi >= self.phi_c, jammed, unjammed)
         # return jax.lax.cond(phi >self.phi_c, jammed,jammed)
 
     @partial(jax.vmap, in_axes=(None, 0, 0), out_axes=(0))
@@ -403,21 +414,18 @@ class MCC_MRM(Material):
                 lambda: (phi / self.phi_c) ** (1.0 / self.lam),
             )
 
-        def implicit_p(p_ss,args):
+        def implicit_p(p_ss, args):
 
-            I = get_inertial_number(p_ss,dgamma_p_dt,self.d0,self.rho_p)
+            I = get_inertial_number(p_ss, dgamma_p_dt, self.d0, self.rho_p)
             left = phi / self.phi_c
-            right = (1.0 + p_ss)**self.lam *jnp.exp(-I/self.I_phi)
+            right = (1.0 + p_ss) ** self.lam * jnp.exp(-I / self.I_phi)
             return right - left
-    
 
         def find_root():
             solver = optx.Newton(rtol=1e-5, atol=1e-5)
 
             # solver = optx.Bisection(rtol=1e-5, atol=1e-5)
-            sol = optx.root_find(
-                implicit_p, solver, 0.1, throw=False,max_steps=20
-            )
+            sol = optx.root_find(implicit_p, solver, 0.1, throw=False, max_steps=20)
 
             return jnp.nan_to_num(sol.value, nan=0.0)
 
@@ -427,7 +435,7 @@ class MCC_MRM(Material):
         def viscous_flow_condition():
             # p_ss_total_qs = find_root(tol_qs=1.0,tol_I=1.0)
             # p_ss_total_I = find_root(tol_qs=1.0,tol_I=1.0)
-            
+
             # p_ss_total = (p_ss_total_qs + p_ss_total_I)/2.0
             p_ss_total = find_root()
             I = get_inertial_number(p_ss_total, dgamma_p_dt, self.d0, self.rho_p)
@@ -461,54 +469,76 @@ class MCC_MRM(Material):
 
         # tol = 1e-5
         tol = 1e-12
-        
+
         return jax.lax.cond(
-            dgamma_p_dt < tol, zero_flow_condition, viscous_flow_condition
-                    # dgamma_p_dt < tol, viscous_flow_condition, viscous_flow_condition
+            dgamma_p_dt < tol,
+            zero_flow_condition,
+            viscous_flow_condition,
+            # dgamma_p_dt < tol, viscous_flow_condition, viscous_flow_condition
         )
-        
+
     @classmethod
-    def get_p_ref_ncl(cls, 
-                      phi_ref,
-                      dgamma_dt_ref,
-                      phi_c,
-                      lam,
-                      kap,
-                      d0,
-                      k_p,
-                      rho_p):
+    def get_p_ref_ncl(cls, phi, lam, kap, p_star, phi_c, rho_p):
         """
-        (1) Assuming I=0 at the start
-        (2) Assuming we are on the NCL
-        
-        The state boundary layer is defined on a unique line 
-        
-        $\ln ($)
-        
+
+        This function finds the pressure given the following conditions:
+
+        1. The material is on the NCL
+        2. The inertial number is zero
+
+
+        The state boundary layer for modified Cam-Clay is [1]:
         $$
-        \ln ( \phi ) = \phi_{\mathrm{NCL}} - \lam \ln (p+p_r)/p_r - \ln (1+m^2/)
+        \ln v = \ln \Gamma - \lambda \ln \left(\\frac{p}{p_r} \\right)
+        - (\lambda-\kappa) \ln \\left[ (1+m^2/M^2)/2 \\right]
         $$
 
-        
-        TBC
- 
+        - $v$ is the specific volume
+        - $p$ is pressure (Pa)
+        - $p_r$ is reference pressure
+        - $\Gamma$ is the specific volume at the reference $p_r$ on the CSL
+        - $M$ is the slope of the critical state line.
+        - $m=q/p$ is the shear stress over pressure
+        - $\lambda$ is the compression slope
+        - $\kappa$ is the decompression slope
+
+        The reference boundary layer for this model at $I=0$ is
+
+        $$
+        \ln v = \ln v_r - \lambda \ln \left(\\frac{p+p_r}{p_r} \\right)
+        - (\lambda-\kappa) \ln \\left[ (1+m^2/M^2)/2 \\right]
+        $$
+
+        The pressure on the NCL is then found by setting $m=0$
+
+        $$
+        p = p_r \exp \left(
+        \\frac{1}{\lambda}\\ln \\frac{v}{v_r}   + \\frac{1}{\lambda}(\lambda-\kappa) \ln \\frac{1}{2}
+        \\right)  - p_r
+        $$
+
         """
-        
-        raise NotImplementedError
+        inner = (1 / lam) * jnp.log(phi_c / phi) + (1 / lam) * (lam - kap) * jnp.log(
+            0.5
+        )
+
+        result = p_star * jnp.exp(inner) - p_star
+        return result
+
+        # ln_phi_0_csl = jnp.log(phi_0_csl)
         # # Get phi_trail
         # p_trail = 0.1*(d0/k_p)
         # I_trail = get_inertial_number(p_trail,dgamma_dt,d0,rho_p)
         # get_mrm_phi()
-        
+
         # # v_ref = 1.0/phi_ref
-        
-        
+
         # # Gamma = 1.0/phi_c # phi to specific volume
-        
+
         # # log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
-        
+
         # # # p on ICL
-        
+
         # # log_p = (log_N - jnp.log(v_ref))/lam
-        
+
         # # return jnp.exp(log_p)
