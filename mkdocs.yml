@@ -1,0 +1,48 @@
+site_name: Pymudokon
+nav:
+  - Home: index.md
+  - Installation: installing.md
+  - Usage: usage/index.md
+  - API:
+    - Solvers: api/solvers.md
+  - About: about.md
+
+theme:
+    name: material
+    palette:
+      scheme: slate
+      primary: amber
+      accent: red
+      features:
+        - navigation.sections
+
+markdown_extensions:
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences # Code highlighting for material theme
+  - admonition
+  - def_list
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [pymudokon]
+
+            # docstring_section_style: list
+          #   show_if_no_docstring: true
+          #   show_source: false  # don't include source code
+          #   heading_level: 4
+            # show_source: true
+
+            # selection:
+            #     inherited_members: true  # Allow looking up inherited methods
+            # rendering:
+            #     show_root_heading: true  # actually display anything at all...
+            #     show_root_full_path: true  # display "diffrax.asdf" not just "asdf"
+            #     show_signature_annotations: true
+            #     members_order: source  # order methods according to their order of definition in the source code, not alphabetical order

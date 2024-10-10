@@ -14,7 +14,19 @@ from ..solvers.solver import Solver
 
 @chex.dataclass
 class USL_APIC(Solver):
-    """Explicit Update Stress Last (USL) Affine Particle in Cell (APIC) MPM solver."""
+    """
+    Explicit Update Stress Last (USL) Affine Particle in Cell (APIC) MPM solver.
+
+    !!! warning "Warning"
+
+        Only cubic shape functions are supported for this solver at the moment.
+
+    **References:**
+
+    * Jiang, Chenfanfu, et al. "The affine particle-in-cell method."
+        ACM Transactions on Graphics (TOG) 34.4 (2015): 1-10.
+
+    """
 
     Dp: chex.Array
     Dp_inv: chex.Array
@@ -28,7 +40,7 @@ class USL_APIC(Solver):
         num_particles,
         dt: jnp.float32 = 0.00001,
     ):
-        jax.debug.print("USL_APIC solver supported for cubic shape functions only")
+        # jax.debug.print("USL_APIC solver supported for cubic shape functions only")
         Dp = (1.0 / 3.0) * cell_size * cell_size * jnp.eye(3)
 
         Dp_inv = jnp.linalg.inv(Dp)
@@ -37,7 +49,9 @@ class USL_APIC(Solver):
 
         return USL_APIC(dt=dt, Dp=Dp, Dp_inv=Dp_inv, Bp_stack=Bp_stack)
 
-    def update(self, particles, nodes, shapefunctions, material_stack, forces_stack,step):
+    def update(
+        self, particles, nodes, shapefunctions, material_stack, forces_stack, step
+    ):
         nodes = nodes.refresh()
         particles = particles.refresh()
 
@@ -46,7 +60,7 @@ class USL_APIC(Solver):
             inv_node_spacing=nodes.inv_node_spacing,
             grid_size=nodes.grid_size,
             position_stack=particles.position_stack,
-            species_stack = nodes.species_stack
+            species_stack=nodes.species_stack,
         )
 
         # transform from grid space to particle space
@@ -66,7 +80,7 @@ class USL_APIC(Solver):
                 nodes=nodes,
                 shapefunctions=shapefunctions,
                 dt=self.dt,
-                step = step
+                step=step,
             )
             new_forces_stack.append(forces)
 
