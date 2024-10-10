@@ -80,7 +80,7 @@ from ..material import Material
 
 
 def get_mrm_phi(I,p_star, phi_c, I_phi, lam):
-    return phi_c* jnp.exp(-I/I_phi)*(1+p_star)**lam
+    return phi_c* jnp.exp(-I/I_phi)*(1.0+p_star)**lam
 
 @chex.dataclass
 class MCC_MRM(Material):
@@ -468,30 +468,47 @@ class MCC_MRM(Material):
         )
         
     @classmethod
-    def get_p_ref_phi(cls, phi_ref, phi_c, lam, kap):
+    def get_p_ref_ncl(cls, 
+                      phi_ref,
+                      dgamma_dt_ref,
+                      phi_c,
+                      lam,
+                      kap,
+                      d0,
+                      k_p,
+                      rho_p):
         """
+        (1) Assuming I=0 at the start
+        (2) Assuming we are on the NCL
         
-        Here we start from a reference specific volume
+        The state boundary layer is defined on a unique line 
+        
+        $\ln ($)
+        
+        $$
+        \ln ( \phi ) = \phi_{\mathrm{NCL}} - \lam \ln (p+p_r)/p_r - \ln (1+m^2/)
+        $$
 
-        Args:
-            phi_ref (_type_): _description_
-            phi_c (_type_): _description_
-            lam (_type_): _description_
-            kap (_type_): _description_
-            
-            
+        
+        TBC
+ 
         """
         
+        raise NotImplementedError
+        # # Get phi_trail
+        # p_trail = 0.1*(d0/k_p)
+        # I_trail = get_inertial_number(p_trail,dgamma_dt,d0,rho_p)
+        # get_mrm_phi()
         
-        # v_ref = 1.0/phi_ref
+        # # v_ref = 1.0/phi_ref
         
         
-        # Gamma = 1.0/phi_c # phi to specific volume
+        # # Gamma = 1.0/phi_c # phi to specific volume
         
-        # log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
+        # # log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
         
-        # # p on ICL
+        # # # p on ICL
         
-        # log_p = (log_N - jnp.log(v_ref))/lam
+        # # log_p = (log_N - jnp.log(v_ref))/lam
         
-        # return jnp.exp(log_p)
+        # # return jnp.exp(log_p)
