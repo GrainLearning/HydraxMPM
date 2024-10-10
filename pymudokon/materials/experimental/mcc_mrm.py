@@ -525,6 +525,15 @@ class MCC_MRM(Material):
         result = p_star * jnp.exp(inner) - p_star
         return result
 
+
+    @classmethod
+    def get_phi_ncl(cls, p, p_star, lam, kap, phi_c,M_s,m):
+
+        v_r = 1.0/phi_c
+        ln_v = jnp.log(v_r) - lam*jnp.log((p+p_star)/p_star) - (lam - kap)*jnp.log((1+m**2/M_s**2)/2)
+        v = jnp.exp(ln_v)
+        phi = 1.0/v
+        return  phi
         # ln_phi_0_csl = jnp.log(phi_0_csl)
         # # Get phi_trail
         # p_trail = 0.1*(d0/k_p)
