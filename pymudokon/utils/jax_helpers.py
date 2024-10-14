@@ -1,6 +1,14 @@
 import operator
-import os
+import jax.numpy as jnp
 import jax
+
+
+def simple_warning(condition: jnp.bool_, place: str, message: str):
+    jax.lax.cond(
+        condition,
+        lambda: jax.debug.print("{}: {}", place, message),
+        lambda: None,
+    )
 
 
 def set_default_gpu(gpu_id=0):

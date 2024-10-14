@@ -1,26 +1,64 @@
-"""Module containing helper functions for mathematical operations.
+"""Math helper functions for the pymudokon package."""
 
-To be used for post-processing and analysis of the simulation results.
-"""
+from typing import Tuple
 
 import chex
 import jax
 import jax.numpy as jnp
 
 
-def get_pressure(stress: jax.Array, dim=3) -> jnp.float32:
-    """Compression positive pressure from stress tensor."""
+"""Compression positive pressure from stress tensor."""
+
+
+def get_pressure(stress: chex.Array, dim: jnp.int32 = 3) -> jnp.float32:
+    """Get compression positive pressure from the cauchy stress tensor.
+
+    $$
+    p = -\\mathrm{trace} ( \\boldsymbol \\sigma ) / \\mathrm{dim}
+    $$
+
+    Args:
+        stress (chex.Array): Cauchy stress tensor
+        dim (jnp.int32, optional): Dimension. Defaults to 3.
+
+    Returns:
+        jnp.float32: pressure
+    """
     return -(1 / dim) * jnp.trace(stress)
 
 
-def get_pressure_stack(stress_stack: jax.Array, dim=3) -> chex.Array:
-    """Get compression positive pressure from a stack of stress tensors."""
+def get_pressure_stack(stress_stack: jax.Array, dim: jnp.int32 = 3) -> chex.Array:
+    """Vectorized version of [get_pressure][utils.math_helpers.get_pressure]
+    for a stack of stress tensors.
+
+    Args:
+        stress_stack (jax.Array): stack of cauchy stress tensors
+        dim (jnp.int32, optional): dimension. Defaults to 3.
+
+    Returns:
+        chex.Array: stack of pressures
+    """
     vmap_get_pressure = jax.vmap(get_pressure, in_axes=(0, None))
     return vmap_get_pressure(stress_stack, dim)
 
 
-def get_dev_stress(stress: jax.Array, pressure=None, dim=3) -> chex.ArrayBatched:
-    """Get deviatoric stress tensor."""
+def get_dev_stress(
+    stress: chex.Array, pressure: jnp.float32 = None, dim: jnp.int32 = 3
+) -> chex.Array:
+    """Get deviatoric part of the cauchy stress tensor.
+
+    $$
+    \\boldsymbol s = \\boldsymbol \\sigma - p \\mathbf{I}
+    $$
+
+    Args:
+        stress (chex.Array): cauchy stress tensor
+        pressure (jnp.float32, optional): pressure. Defaults to None.
+        dim (jnp.int32, optional): dimension. Defaults to 3.
+
+    Returns:
+        (chex.Array): deviatoric stress tensor
+    """
     if pressure is None:
         pressure = get_pressure(stress, dim)
     return stress + jnp.eye(3) * pressure
@@ -29,7 +67,16 @@ def get_dev_stress(stress: jax.Array, pressure=None, dim=3) -> chex.ArrayBatched
 def get_dev_stress_stack(
     stress_stack: jax.Array, pressure_stack=None, dim=3
 ) -> chex.Array:
-    """Get deviatoric stress tensor from a stack of stress tensors."""
+    """Vectorized version of [get_dev_stress][utils.math_helpers.get_dev_stress]
+    for a  stress tensors.
+
+    Args:
+        stress_stack (jax.Array): stack of cauchy stress tensors
+        dim (jnp.int32, optional): dimension. Defaults to 3.
+
+    Returns:
+        (chex.Array): stack of deviatoric stress tensors
+    """
     if pressure_stack is None:
         pressure_stack = get_pressure_stack(stress_stack, dim)
     vmap_get_dev_stress = jax.vmap(get_dev_stress, in_axes=(0, 0, None))
@@ -37,18 +84,52 @@ def get_dev_stress_stack(
 
 
 def get_q_vm(
-    stress: jax.Array = None, dev_stress=None, pressure=None, dim=3
+    stress: chex.Array = None,
+    dev_stress: chex.Array = None,
+    pressure: jnp.float32 = None,
+    dim: jnp.int32 = 3,
 ) -> jnp.float32:
-    """Get the von Mises stress from the stress tensor sqrt(3/2*J2)."""
+    """Get the scalar von-Mises shear stress from the cauchy stress tensor.
+
+    $$
+    q = \\sqrt{3/2 J_2}
+    $$
+    where  $J_2 = \\frac{1}{2} \\mathrm{trace} ( \\boldsymbol s     \\boldsymbol s^T)$
+    is the second invariant of the deviatoric stress tensor.
+
+    Args:
+        stress (chex.Array, optional): cauchy stress tensor. Defaults to None.
+        dev_stress (chex.Array, optional): deviatoric stress tensor. Defaults to None.
+        pressure (jnp.float32, optional): input pressure. Defaults to None.
+        dim (int, optional): dimension. Defaults to 3.
+
+    Returns:
+        (jnp.float32): scalar von-Mises shear stress
+    """
+
     if dev_stress is None:
         dev_stress = get_dev_stress(stress, pressure, dim)
     return jnp.sqrt(3 * 0.5 * jnp.trace(dev_stress @ dev_stress.T))
 
 
 def get_q_vm_stack(
-    stress_stack: jax.Array, dev_stress_stack=None, pressure_stack=None, dim=3
+    stress_stack: chex.Array,
+    dev_stress_stack: chex.Array = None,
+    pressure_stack: chex.Array = None,
+    dim: jnp.int32 = 3,
 ) -> chex.Array:
-    """Get the von Mises stress from a stack of stress tensors."""
+    """Vectorized version of [get_q_vm][utils.math_helpers.get_q_vm]
+    for a stack of stress tensors.
+
+    Args:
+        stress_stack (jax.Array): stack of cauchy stress tensors.
+        dev_stress_stack (jax.Array): stack of deviatoric stress tensors tensors.
+        dev_stress_stack (jax.Array): stack of pressures.
+        dim (jnp.int32, optional): dimension. Defaults to 3.
+
+    Returns:
+        (chex.Array): stack of scalar von-Mises stresses
+    """
     if dev_stress_stack is None:
         dev_stress_stack = get_dev_stress_stack(stress_stack, pressure_stack, dim)
     vmap_get_q_vm = jax.vmap(get_q_vm, in_axes=(0, 0, None, None))
@@ -227,109 +308,229 @@ def get_strain_rate_from_L_stack(L_stack):
 
 
 def phi_to_e(phi):
-    """Volume fraction to void ratio."""
+    """Solid volume fraction to void ratio."""
     return (1.0 - phi) / phi
 
 
 def phi_to_e_stack(phi_stack):
-    """Volume fraction to void ratio from a stack of volume fractions."""
+    """Vectorized version of [phi_to_e][utils.math_helpers.phi_to_e]
+    for a stack of solid volume fractions."""
     vmap_phi_to_e = jax.vmap(phi_to_e)
     return vmap_phi_to_e(phi_stack)
 
 
-def e_to_phi(e):
-    """Void ratio to volume fraction."""
+def e_to_phi(e) -> jnp.float32:
+    """Convert void ratio to solid volume fraction, assuming gradients are zero.
+
+    $$
+    \phi = \\frac{1}{1+e}
+    $$
+    where $e$ is the void ratio and $\phi$ is the volume fraction.
+
+    Args:
+        e (jnp.float32): void ratio
+
+    Returns:
+        (jnp.float32): solid volume fraction
+    """
+
     return 1.0 / (1.0 + e)
 
 
-def e_to_phi_stack(e_stack):
-    """Void ratio to volume fraction from a stack of void ratios."""
+def e_to_phi_stack(e_stack: chex.Array) -> chex.Array:
+    """Vectorized version of [e_to_phi][utils.math_helpers.e_to_phi]
+    for a solid volume fraction.
+
+    Args:
+        e_stack (chex.Array): void ratio stack
+
+    Returns:
+        (chex.Array): solid volume fraction stack
+    """
     vmap_e_to_phi = jax.vmap(e_to_phi)
     return vmap_e_to_phi(e_stack)
 
 
-def get_sym_tensor(A):
-    """Get symmetric part of a tensor."""
+def get_sym_tensor(A: chex.Array) -> chex.Array:
+    """Get symmetric part of a tensor.
+
+    $$
+    B = \\frac{1}{2}(A + A^T)
+    $$
+
+    Args:
+        A (chex.Array): input tensor
+
+    Returns:
+        chex.Array: Symmetric part of the tensor
+    """
     return 0.5 * (A + A.T)
 
 
-def get_sym_tensor_stack(A_stack):
-    """Get symmetric part of a stack of tensors."""
+def get_sym_tensor_stack(A_stack: chex.Array) -> chex.Array:
+    """Vectorized version of [get_sym_tensor][utils.math_helpers.get_sym_tensor]
+    for a stack of tensors.
+
+    Args:
+        A_stack (chex.Array): stack of input tensors
+
+    Returns:
+        (chex.Array): stack of symmetric tensors.
+    """
     vmap_get_sym_tensor = jax.vmap(get_sym_tensor)
     return vmap_get_sym_tensor(A_stack)
 
 
-def get_skew_tensor(A):
-    """Get skew-symmetric part of a tensor."""
+def get_skew_tensor(A: chex.Array) -> chex.Array:
+    """Get skew-symmetric part of a tensor.
+
+    $$
+    B = \\frac{1}{2}(A - A^T)
+    $$
+
+    Args:
+        A (chex.Array): input tensor
+
+    Returns:
+        (chex.Array): Skew-symmetric part of the tensor
+    """
     return 0.5 * (A - A.T)
 
+
 def get_skew_tensor_stack(A_stack):
-    """Get skew-symmetric part of a stack of tensors."""
+    """Vectorized version of  [get_skew_tensor][utils.math_helpers.get_skew_tensor]
+    for a stack of tensors.
+
+    Args:
+        A_stack (chex.Array): stack of input tensors
+
+    Returns:
+        (chex.Array): stack of symmetric tensors.
+    """
     vmap_get_skew_tensor = jax.vmap(get_skew_tensor)
     return vmap_get_skew_tensor(A_stack)
 
 
-def get_phi_from_L(L, phi_prev, dt):
-    """Get volume fraction from velocity gradient."""
-    deps = get_sym_tensor(L)*dt
+def get_phi_from_L(
+    L: chex.Array, phi_prev: jnp.float32, dt: jnp.float32
+) -> jnp.float32:
+    """Get solid volume fraction from velocity gradient using the mass balance.
+
+    Args:
+        L (chex.Array): velocity gradient
+        phi_prev (jnp.float32): previous solid volume fraction
+        dt (jnp.float32): time step
+
+    Returns:
+        jnp.float32: Solid volume fraction
+    """
+    deps = get_sym_tensor(L) * dt
     deps_v = get_volumetric_strain(deps)
     phi_next = phi_prev / (1.0 - deps_v)
     return phi_next
 
-def get_e_from_bulk_density(absolute_density, bulk_density):
+
+def get_e_from_bulk_density(
+    absolute_density: jnp.float32, bulk_density: jnp.float32
+) -> jnp.float32:
     """Get void ratio from absolute and bulk density."""
     return absolute_density / bulk_density
 
 
-def get_phi_from_bulk_density(absolute_density, bulk_density):
-    """Get volume fraction from absolute and bulk density."""
+def get_phi_from_bulk_density(
+    absolute_density: jnp.float32, bulk_density: jnp.float32
+) -> jnp.float32:
+    """Get solid volume fraction from absolute and bulk density."""
     e = get_e_from_bulk_density(absolute_density, bulk_density)
     return e_to_phi(e)
 
 
-def get_phi_from_bulk_density_stack(absolute_density_stack, bulk_density_stack):
-    """Get volume fraction from a stack of absolute and bulk densities."""
+def get_phi_from_bulk_density_stack(
+    absolute_density_stack: chex.Array, bulk_density_stack: chex.Array
+) -> chex.Array:
+    """Get volume fraction from a stack of absolute and bulk densities.
+
+    See [get_phi_from_bulk_density][utils.math_helpers.get_phi_from_bulk_density] for
+    more details.
+    """
     vmap_get_phi_from_bulk_density = jax.vmap(
         get_phi_from_bulk_density, in_axes=(None, 0)
     )
     return vmap_get_phi_from_bulk_density(absolute_density_stack, bulk_density_stack)
 
-def get_hencky_strain(F):
-    u,s,vh = jnp.linalg.svd(F)
 
-    eps = jnp.zeros((3,3)).at[[0,1,2],[0,1,2]].set(jnp.log(s))
+def get_hencky_strain(F: chex.Array) -> Tuple[chex.Array, chex.Array, chex.Array]:
+    """Get Hencky strain from the deformation gradient.
+
+    Do Singular Value Decomposition (SVD) of the deformation gradient $F$ to get the
+    singular values, left stretch tensor $U$ and right stretch tensor $V^T$. After, take
+    the matrix logarithm of the singular values to get the Hencky strain.
+
+    Args:
+        F (chex.Array): deformation gradient
+
+    Returns:
+        Tuple[chex.Array, chex.Array, chex.Array]: strain tensor, left stretch tensor,
+        right stretch tensor
+    """
+    u, s, vh = jnp.linalg.svd(F)
+
+    eps = jnp.zeros((3, 3)).at[[0, 1, 2], [0, 1, 2]].set(jnp.log(s))
     return eps, u, vh
 
-def get_hencky_strain_stack(F_stack):
+
+def get_hencky_strain_stack(
+    F_stack: chex.Array,
+) -> Tuple[chex.Array, chex.Array, chex.Array]:
+    """Vectorized version of get Hencky strain from a stack of deformation gradients.
+
+    See [get_hencky_strain][utils.math_helpers.get_hencky_strain] for more details.
+
+    Args:
+        F_stack (chex.Array): deformation gradient stack
+
+    Returns:
+        (chex.Array, chex.Array, chex.Array):
+        strain tensor, left stretch tensor (stacked)
+    """
     vmap_get_hencky = jax.vmap(get_hencky_strain, in_axes=(0))
     return vmap_get_hencky(F_stack)
 
 
-def get_k0_stress(height,gravity,rho_0,mu, axis_vertical=3):
-    
-    fric_angle = jnp.arctan(mu)
-    
-    K0 = 1 -jnp.sin(fric_angle)
-    
-    print(K0)
-    factor = height*gravity*rho_0
+def get_k0_stress(
+    height: jnp.float32,
+    gravity: jnp.float32,
+    rho_0: jnp.float32,
+    mu: jnp.float32,
+    axis_vertical: jnp.int32 = 3,
+) -> jnp.float32:
+    """Get k0 stress tensor.
 
-    stress = jnp.zeros((3,3))
-    stress = jnp.zeros((3,3)).at[[0,1,2],[0,1,2]].set(
-        factor*K0
+    ??? warning
+        This function is still being developed and may not work as expected.
+
+    """
+    import warnings
+
+    warnings.warn(
+        "This function is still being developed and may not work as expected."
     )
-    
-    stress = stress.at[axis_vertical,axis_vertical].set(
-        factor
-    )
-    
-    p = get_pressure(stress,dim=2)
-    
-    q = get_q_vm(stress,dim=2)
-    
-    print(f"{p=},{q=}")
-    
-    mu = (q/p)/jnp.sqrt(3)
-    
-    print(f"{mu}=")
+
+    fric_angle = jnp.arctan(mu)
+
+    K0 = 1 - jnp.sin(fric_angle)
+
+    factor = height * gravity * rho_0
+
+    stress = jnp.zeros((3, 3))
+    stress = jnp.zeros((3, 3)).at[[0, 1, 2], [0, 1, 2]].set(factor * K0)
+
+    stress = stress.at[axis_vertical, axis_vertical].set(factor)
+
+    p = get_pressure(stress, dim=2)
+
+    q = get_q_vm(stress, dim=2)
+
+    mu = (q / p) / jnp.sqrt(3)
+
     return stress

@@ -85,3 +85,9 @@ There are several MPM solvers available. All solvers are explicit time integrati
 
 
 ## post-processing output
+
+
+# Termonology
+
+## stacks
+ The vectorized versions of the functions are suffixed with `_stack`.

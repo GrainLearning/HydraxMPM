@@ -1,6 +1,7 @@
 """Two cubes falling featuring rough domain walls, gravity and cubic shape functions"""
 
-import timeit
+
+import os
 
 import jax
 import jax.numpy as jnp
@@ -8,7 +9,6 @@ import numpy as np
 
 import pymudokon as pm
 
-import os
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 

@@ -7,16 +7,17 @@ from typing_extensions import Self
 import chex
 import jax
 import jax.numpy as jnp
+import optimistix as optx
 
 from ...particles.particles import Particles
 from ...utils.math_helpers import (
-    get_sym_tensor_stack,
-    get_scalar_shear_strain,
     get_dev_strain,
-    get_dev_strain_stack,
-    get_inertial_number )
-import optimistix as optx
+    get_inertial_number,
+    get_scalar_shear_strain,
+    get_sym_tensor_stack,
+)
 from ..material import Material
+
 
 def get_mu_I(I, mu_s, mu_d, I0):
     return mu_s + (mu_d - mu_s) * (1 / (1 + I0 / I))

@@ -1,7 +1,7 @@
 """Module to run solver and store its state."""
 
 from functools import partial
-from typing import List, Tuple, Callable
+from typing import Callable, List, Tuple
 
 import chex
 import jax

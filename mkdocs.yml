@@ -5,6 +5,9 @@ nav:
   - Usage: usage/index.md
   - API:
     - Solvers: api/solvers.md
+    - Shape functions: api/shapefunctions.md
+    - Materials: api/materials.md
+    - Math utils: api/math.md
   - About: about.md
 
 theme:
@@ -25,19 +28,32 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 plugins:
+  - search
+  - autorefs
   - mkdocstrings:
       default_handler: python
       handlers:
         python:
           paths: [pymudokon]
+          options:
+            show_source: false
+            docstring_section_style: list
+            signature_crossrefs: true
+            show_bases: false
 
             # docstring_section_style: list
           #   show_if_no_docstring: true
           #   show_source: false  # don't include source code
           #   heading_level: 4
-            # show_source: true
 
             # selection:
             #     inherited_members: true  # Allow looking up inherited methods
@@ -46,3 +62,8 @@ plugins:
             #     show_root_full_path: true  # display "diffrax.asdf" not just "asdf"
             #     show_signature_annotations: true
             #     members_order: source  # order methods according to their order of definition in the source code, not alphabetical order
+
+
+# Ideas about documentations
+# Create a section on termonolody?
+## stacks...

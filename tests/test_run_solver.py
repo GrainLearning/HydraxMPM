@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 
-
 import pymudokon as pm
 
 

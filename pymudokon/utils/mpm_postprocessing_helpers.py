@@ -1,15 +1,7 @@
 from functools import partial
-from typing import Tuple
-from typing_extensions import Self
 
-import chex
 import jax
 import jax.numpy as jnp
-
-from ..nodes.nodes import Nodes
-from ..particles.particles import Particles
-from ..shapefunctions.shapefunctions import ShapeFunction
-from ..solvers.solver import Solver
 
 
 def post_processes_stress_stack(

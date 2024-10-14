@@ -4,25 +4,21 @@ Built with JAX.
 """
 
 # Future
-# from .materials.CSUH_model import CSUHModel
+
 # from .materials.mu_i_softness import MuISoft
 # from .materials.UH_model import UHModel
 
 
-
-from .utils.stl_helpers import (
-    get_stl_bounds,
-    sample_points_in_volume,
-    sample_points_on_surface
-)
-
 from .forces.dirichletbox import DirichletBox
 from .forces.forces import Forces
 from .forces.gravity import Gravity
+from .forces.nodelevelset import NodeLevelSet
 from .forces.nodewall import NodeWall
 from .forces.rigidparticles import RigidParticles
-from .forces.nodelevelset import NodeLevelSet
 from .materials.druckerprager import DruckerPrager
+from .materials.experimental.mcc_mrm import MCC_MRM
+from .materials.experimental.mrm_steadystate import MRMSteady
+from .materials.experimental.uh_model import UHModel
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.material import Material
 from .materials.modifiedcamclay import ModifiedCamClay
@@ -30,25 +26,25 @@ from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .materials.newtonfluid import NewtonFluid
 from .materials_analysis.mix_control import mix_control
 from .materials_analysis.mp_benchmarks import MPBenchmark
-from .materials_analysis.plot import make_plots, add_plot, PlotHelper, make_plots_3d, add_plot_3d
+from .materials_analysis.plot import (
+    add_plot,
+    add_plot_3d,
+    make_plots,
+    make_plots_3d,
+    PlotHelper,
+)
 from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
-
-from .materials.experimental.mrm_steadystate import MRMSteady
-from .materials.experimental.mcc_mrm import MCC_MRM
-
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .shapefunctions.cubic import CubicShapeFunction
 from .shapefunctions.cubic_old import CubicShapeFunction2
 from .shapefunctions.linear import LinearShapeFunction
 from .shapefunctions.shapefunctions import ShapeFunction
-from .solvers.run_solver import (
-    run_solver_io,
-    run_solver
-)
+from .solvers.run_solver import run_solver, run_solver_io
 from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
 from .solvers.usl_asflip import USL_ASFLIP
+from .utils.jax_helpers import dump_restart_files, save_object, set_default_gpu
 from .utils.math_helpers import (
     e_to_phi,
     e_to_phi_stack,
@@ -57,10 +53,12 @@ from .utils.math_helpers import (
     get_dev_stress,
     get_dev_stress_stack,
     get_e_from_bulk_density,
+    get_hencky_strain_stack,
     get_inertial_number,
     get_inertial_number_stack,
     get_J2,
     get_J2_stack,
+    get_k0_stress,
     get_KE,
     get_KE_stack,
     get_phi_from_bulk_density,
@@ -88,14 +86,19 @@ from .utils.math_helpers import (
     get_volumetric_strain_stack,
     phi_to_e,
     phi_to_e_stack,
-    get_hencky_strain_stack,
-    get_k0_stress
 )
 from .utils.mpm_domain_helpers import discretize, fill_domain_with_particles
-from .utils.mpm_plot_helpers import PvPointHelper,make_pvplots, points_to_3D
-from .utils.mpm_postprocessing_helpers import post_processes_stress_stack, post_processes_grid_gradient_stack
+from .utils.mpm_plot_helpers import make_pvplots, points_to_3D, PvPointHelper
+from .utils.mpm_postprocessing_helpers import (
+    post_processes_grid_gradient_stack,
+    post_processes_stress_stack,
+)
+from .utils.stl_helpers import (
+    get_stl_bounds,
+    sample_points_in_volume,
+    sample_points_on_surface,
+)
 
-from .utils.jax_helpers import set_default_gpu, dump_restart_files,save_object
 
 __all__ = [
     "Nodes",

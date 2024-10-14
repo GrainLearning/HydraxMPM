@@ -1,11 +1,11 @@
 """Run two-sphere impact simulation."""
 
-import jax
+import os
+
 import jax.numpy as jnp
 import numpy as np
 
 import pymudokon as pm
-import os
 
 
 dir_path = os.path.dirname(os.path.realpath(__file__))

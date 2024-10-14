@@ -2,6 +2,7 @@ import numpy as np
 import pyvista as pv
 import vtk
 
+
 def sample_points_on_surface(mesh_path,subdivide=1, radius=0.005, sharpness=2.0, plot=False):
     # Read the mesh from the provided path
     surface = pv.read(mesh_path)

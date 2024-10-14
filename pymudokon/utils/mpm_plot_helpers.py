@@ -1,9 +1,8 @@
-from typing import Any, Dict, List,Tuple
+import dataclasses
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pyvista as pv
-import matplotlib.cm as cm
-import dataclasses
 
 
 def points_to_3D(points, dim=2):

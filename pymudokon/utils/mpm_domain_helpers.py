@@ -1,7 +1,9 @@
 """Helper functions to discretize the domain."""
+from typing import Tuple
+
 import jax
 import jax.numpy as jnp
-from typing import Tuple
+
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..shapefunctions.shapefunctions import ShapeFunction

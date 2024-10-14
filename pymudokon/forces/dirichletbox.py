@@ -1,6 +1,6 @@
 """Module for the imposing zero/non-zero boundaries at the edges of the domain."""
 
-from typing import List, Tuple
+from typing import Tuple
 from typing_extensions import Self
 
 import chex

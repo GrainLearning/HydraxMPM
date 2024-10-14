@@ -15,7 +15,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from .shapefunctions import ShapeFunction
-from ..nodes.nodes import Nodes
+
 
 @chex.dataclass(mappable_dataclass=False, frozen=True)
 class CubicShapeFunction(ShapeFunction):

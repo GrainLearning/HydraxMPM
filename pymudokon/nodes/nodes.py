@@ -4,8 +4,9 @@
 from typing_extensions import Self
 
 import chex
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
+
 
 @chex.dataclass
 class Nodes:

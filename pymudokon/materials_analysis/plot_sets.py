@@ -1,17 +1,19 @@
 
-import jax.numpy as jnp
-import chex
-from typing import Tuple,Dict
 from functools import partial
-from .plot import make_plots, PlotHelper
+from typing import Dict, Tuple
+
+import chex
+
 from ..utils.math_helpers import (
+    get_hencky_strain_stack,
     get_pressure_stack,
-    get_q_vm_stack,phi_to_e_stack,
+    get_q_vm_stack,
+    get_scalar_shear_strain_stack,
     get_sym_tensor_stack,
     get_volumetric_strain_stack,
-    get_scalar_shear_strain_stack,
-    get_hencky_strain_stack
+    phi_to_e_stack,
 )
+from .plot import make_plots, PlotHelper
 
 
 def plot_set1(

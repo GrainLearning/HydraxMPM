@@ -9,7 +9,9 @@ import jax.numpy as jnp
 import optimistix as optx
 
 from ..materials.material import Material
-from ..utils.math_helpers import get_phi_from_L,get_sym_tensor,get_skew_tensor, get_volumetric_strain
+from ..utils.math_helpers import (
+    get_phi_from_L,
+)
 
 
 @partial(jax.jit, static_argnames=("output"))

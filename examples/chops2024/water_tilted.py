@@ -1,14 +1,15 @@
 """Column collapse with small uniform pressure and solid volume fraction"""
 
+import os
+import time
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-import matplotlib.pyplot as plt
-import pymudokon as pm
-import pickle
-import os
-import time
 import pyvista as pv
+
+import pymudokon as pm
+
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 

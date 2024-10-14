@@ -1,8 +1,11 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-import os
+
 import pymudokon as pm
+
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 

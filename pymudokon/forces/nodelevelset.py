@@ -12,7 +12,7 @@ from jax import Array
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..shapefunctions.shapefunctions import ShapeFunction
-from ..shapefunctions.linear import LinearShapeFunction
+
 
 @chex.dataclass
 class NodeLevelSet:

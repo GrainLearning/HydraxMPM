@@ -4,8 +4,8 @@ from typing import Tuple
 from typing_extensions import Self
 
 import chex
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles

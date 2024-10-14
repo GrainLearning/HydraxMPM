@@ -47,8 +47,9 @@ def plot_yield_surface(
 def get_elas_non_linear_pressure(deps_e_v, kap, p_prev):
     """Compute non-linear pressure."""
     out = p_prev / (1.0 - (1.0 / kap) * deps_e_v)
+    return out
     # return jnp.maximum(,0.0)
-    return jnp.nan_to_num(out, neginf=0, nan=0)
+    # return jnp.nan_to_num(out, neginf=0, nan=0)
 
 
 def get_elas_dev_stress(eps_e_d, s_ref, G):
@@ -57,7 +58,8 @@ def get_elas_dev_stress(eps_e_d, s_ref, G):
 
 def get_non_linear_hardening_pressure(deps_p_v, lam, kap, p_c_prev):
     out = p_c_prev / (1.0 - (1.0 / (lam - kap)) * deps_p_v)
-    return jnp.nan_to_num(out, neginf=0, nan=0)
+    return out
+    # return jnp.nan_to_num(out, neginf=0, nan=0)
 
 
 def yield_function(p, p_c, q, M):
@@ -76,10 +78,11 @@ def get_G(nu, K):
 @chex.dataclass
 class ModifiedCamClay(Material):
     """
-    Return mapping follows implementation of 
+    Return mapping follows implementation of
 
 
     """
+
     p_c_stack: chex.Array
     eps_e_stack: chex.Array
     stress_ref_stack: chex.Array
@@ -107,6 +110,7 @@ class ModifiedCamClay(Material):
         absolute_density: jnp.float32 = 1.0,
         dim: jnp.int16 = 3,
     ) -> Self:
+        # Check if kappa less than lambda
 
         num_particles = stress_ref_stack.shape[0]
         eps_e_stack = jnp.zeros((num_particles, 3, 3))
@@ -128,8 +132,8 @@ class ModifiedCamClay(Material):
             lam=lam,
             kap=kap,
             Vs=Vs,
-            phi_c = phi_c,
-            rho_p= rho_p,
+            phi_c=phi_c,
+            rho_p=rho_p,
             absolute_density=absolute_density,
         )
 
@@ -147,32 +151,34 @@ class ModifiedCamClay(Material):
         absolute_density: jnp.float32 = 1.0,
         dim: jnp.int16 = 3,
     ):
-        p_ref_stack = jax.vmap(cls.get_p_ref_phi,in_axes=(0,None,None,None))(phi_ref_stack,phi_c,lam,kap)
-        
+        p_ref_stack = jax.vmap(cls.get_p_ref_phi, in_axes=(0, None, None, None))(
+            phi_ref_stack, phi_c, lam, kap
+        )
+
         def create_stress_ref(p_ref):
-            return -jnp.eye(3)*p_ref
-        
+            return -jnp.eye(3) * p_ref
+
         stress_ref_stack = jax.vmap(create_stress_ref)(p_ref_stack)
 
         return cls.create(
-            nu= nu,
-            M= M,
-            R= R,
-            lam= lam,
-            kap= kap,
-            Vs= 1.0,
-            phi_c = phi_c,
+            nu=nu,
+            M=M,
+            R=R,
+            lam=lam,
+            kap=kap,
+            Vs=1.0,
+            phi_c=phi_c,
             rho_p=rho_p,
-            stress_ref_stack= stress_ref_stack,
-            absolute_density= 1.0,
-            dim= dim
+            stress_ref_stack=stress_ref_stack,
+            absolute_density=1.0,
+            dim=dim,
         )
-        
+
     def update_from_particles(
         self: Self, particles: Particles, dt: jnp.float32
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
-                
+
         stress_stack, self = self.update(
             particles.stress_stack, particles.F_stack, particles.L_stack, None, dt
         )
@@ -193,7 +199,7 @@ class ModifiedCamClay(Material):
             self.stress_ref_stack,
             stress_prev_stack,
             self.eps_e_stack,
-            self.p_c_stack
+            self.p_c_stack,
         )
 
         return (
@@ -203,14 +209,10 @@ class ModifiedCamClay(Material):
 
     @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0), out_axes=(0, 0, 0))
     def vmap_update_stress(
-        self,
-        deps_next,
-        stress_ref,
-        stress_prev,
-        eps_e_prev,
-        p_c_prev
+        self, deps_next, stress_ref, stress_prev, eps_e_prev, p_c_prev
     ):
         dim = deps_next.shape[0]
+
         p_prev = get_pressure(stress_prev, dim)
 
         # Reference pressure and deviatoric stress
@@ -226,7 +228,7 @@ class ModifiedCamClay(Material):
         eps_e_d_tr = get_dev_strain(eps_e_tr, eps_e_v_tr)
 
         deps_e_v = get_volumetric_strain(deps_next)
-        
+
         p_tr = get_elas_non_linear_pressure(deps_e_v, self.kap, p_prev)
 
         K_tr = get_K(self.kap, p_tr)
@@ -246,9 +248,8 @@ class ModifiedCamClay(Material):
         def elastic_update():
 
             stress_next = s_tr - p_tr * jnp.eye(3)
-                        
-            return stress_next, eps_e_tr, p_c_prev
 
+            return stress_next, eps_e_tr, p_c_prev
 
         def pull_to_ys():
             stress_next = s_tr - p_tr * jnp.eye(3)
@@ -257,9 +258,7 @@ class ModifiedCamClay(Material):
                 pmulti, deps_p_v = sol
 
                 p_next = get_elas_non_linear_pressure(
-                    deps_e_v - deps_p_v,
-
-                    self.kap, p_prev
+                    deps_e_v - deps_p_v, self.kap, p_prev
                 )
 
                 K_next = get_K(self.kap, p_next)
@@ -293,9 +292,14 @@ class ModifiedCamClay(Material):
             def find_roots():
                 init_val = jnp.array([0.0, 0.0])
 
-                solver = optx.Newton(rtol=1e-3, atol=1e-3)
+                solver = optx.Newton(rtol=1e-8, atol=1e-8)
                 sol = optx.root_find(
-                    residuals, solver, init_val, throw=False, has_aux=True, max_steps=20
+                    residuals,
+                    solver,
+                    init_val,
+                    throw=False,
+                    has_aux=True,
+                    max_steps=20,
                 )
 
                 return sol.value
@@ -305,7 +309,7 @@ class ModifiedCamClay(Material):
             R, aux = residuals((pmulti, deps_p_v_next), None)
             p_next, s_next, p_c_next, G_next = aux
 
-            stress_next = s_next -p_next  * jnp.eye(3)
+            stress_next = s_next - p_next * jnp.eye(3)
 
             eps_e_v_next = eps_e_v_tr - deps_p_v_next
 
@@ -317,8 +321,6 @@ class ModifiedCamClay(Material):
 
         return jax.lax.cond(is_ep, pull_to_ys, elastic_update)
 
-
-    
     def get_timestep(self, cell_size, density, pressure=None, factor=0.1):
         if pressure is None:
             K = get_K(self.kap, self.p_c.max())
@@ -329,25 +331,24 @@ class ModifiedCamClay(Material):
 
         dt = get_timestep(cell_size, K, G, density, factor)
         return dt
-    
+
     @classmethod
     def get_p_ref_phi(cls, phi_ref, phi_c, lam, kap):
-        
-        v_ref = 1.0/phi_ref
-        
-        
-        Gamma = 1.0/phi_c # phi to specific volume
-        
-        log_N = jnp.log(Gamma) +( lam-kap)*jnp.log(2)
-        
+
+        v_ref = 1.0 / phi_ref
+
+        Gamma = 1.0 / phi_c  # phi to specific volume
+
+        log_N = jnp.log(Gamma) + (lam - kap) * jnp.log(2)
+
         # p on ICL
-        log_p = (log_N - jnp.log(v_ref))/lam
-        
+        log_p = (log_N - jnp.log(v_ref)) / lam
+
         return jnp.exp(log_p)
-    
-    def estimate_timestep(self,p, density, cell_size, factor):
-        
+
+    def estimate_timestep(self, p, density, cell_size, factor):
+
         K = get_K(self.kap, p)
-        G = get_G(self.nu,K)
-        
-        return get_timestep(cell_size,K,G,density,factor)
+        G = get_G(self.nu, K)
+
+        return get_timestep(cell_size, K, G, density, factor)
