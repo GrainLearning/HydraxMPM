@@ -140,18 +140,31 @@ class Nodes:
     
     def get_coordinate_stack(self,dim=3):
         
-        nx, ny = self.grid_size
+        if dim ==2:
+            nx, ny = self.grid_size
 
-        x = jnp.linspace(self.origin[0], self.end[0], nx)
+            x = jnp.linspace(self.origin[0], self.end[0], nx)
 
-        y = jnp.linspace(self.origin[1], self.end[1], ny)
+            y = jnp.linspace(self.origin[1], self.end[1], ny)
 
-        xv, yv = jnp.meshgrid(x, y)
+            xv, yv = jnp.meshgrid(x, y)
 
+            node_coordinate_stack = jnp.array(list(zip(xv.flatten(), yv.flatten()))).astype(jnp.float32)
+        else:
+            nx, ny, nz = self.grid_size
 
-        node_coordinate_stack = jnp.array(list(zip(xv.flatten(), yv.flatten()))).astype(jnp.float32)
+            x = jnp.linspace(self.origin[0], self.end[0], nx)
 
-        # is there a way to avoid this? i.e., generate sorted nodes
+            y = jnp.linspace(self.origin[1], self.end[1], ny)
+            
+            z = jnp.linspace(self.origin[1], self.end[1], nz)
+
+            xv, yv, zv = jnp.meshgrid(x, y, z)
+
+            node_coordinate_stack = jnp.array(list(zip(xv.flatten(), yv.flatten(), zv.flatten()))).astype(jnp.float32)
+            
+        
+ 
         node_hash_stack = self.get_hash_stack(node_coordinate_stack,dim)
         sorted_id_stack = jnp.argsort(node_hash_stack)
         node_coordinate_stack = node_coordinate_stack.at[sorted_id_stack].get()

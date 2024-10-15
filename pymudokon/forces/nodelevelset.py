@@ -53,8 +53,15 @@ class NodeLevelSet:
             mask_id_stack = mask_id_stack.at[0:thickness, :].set(True) #x0
             mask_id_stack = mask_id_stack.at[:, 0:thickness].set(True) #y0
             mask_id_stack = mask_id_stack.at[nodes.grid_size[0]-thickness:, :].set(True) #x1
-            mask_id_stack = mask_id_stack.at[:,nodes.grid_size[1] - thickness:].set(True) #y0
-
+            mask_id_stack = mask_id_stack.at[:,nodes.grid_size[1] - thickness:].set(True) #y1
+        else:
+            mask_id_stack = mask_id_stack.at[0:thickness, :,:].set(True) #x0
+            mask_id_stack = mask_id_stack.at[:, 0:thickness,:].set(True) #y0
+            mask_id_stack = mask_id_stack.at[:, :, 0:thickness].set(True) #z0
+            mask_id_stack = mask_id_stack.at[nodes.grid_size[0]-thickness:, :,:].set(True) #x1
+            mask_id_stack = mask_id_stack.at[:,nodes.grid_size[1] - thickness:,:].set(True) #y1
+            mask_id_stack = mask_id_stack.at[:,:,nodes.grid_size[2] - thickness:].set(True) #z1
+            
         non_zero_ids = jnp.where(mask_id_stack.reshape(-1))[0]
         id_stack = all_id_stack.reshape(-1).at[non_zero_ids].get()
         
@@ -151,6 +158,23 @@ class NodeLevelSet:
                         ) # works only for vectors of len 3
                 
                 tangent = (norm_padded + mu_prime*normal_cross_omega).at[:2].get()
+            else:
+
+                delta_vel_cross_normal = jnp.cross(
+                        delta_vel,
+                        node_normals
+                        ) # works only for vectors of len 3
+                norm_delta_vel_cross_normal = jnp.linalg.vector_norm(delta_vel_cross_normal)
+                
+                omega = delta_vel_cross_normal/norm_delta_vel_cross_normal
+                mu_prime = jnp.minimum(self.mu, norm_delta_vel_cross_normal/ delta_vel_dot_normal)
+                
+                normal_cross_omega = jnp.cross(
+                        node_normals,
+                        omega
+                        ) # works only for vectors of len 3
+                
+                tangent = node_normals + mu_prime*normal_cross_omega
             
             # sometimes tangent become nan if velocity is zero at initialization
             # which causes problems
