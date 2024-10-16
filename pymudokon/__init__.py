@@ -17,6 +17,7 @@ from .forces.nodewall import NodeWall
 from .forces.rigidparticles import RigidParticles
 from .materials.druckerprager import DruckerPrager
 from .materials.experimental.mcc_mrm import MCC_MRM
+from .materials.experimental.mcc_reg import ModifiedCamClayReg
 from .materials.experimental.mrm_steadystate import MRMSteady
 from .materials.experimental.uh_model import UHModel
 from .materials.linearelastic import LinearIsotropicElastic
