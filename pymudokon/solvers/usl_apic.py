@@ -5,6 +5,7 @@ from typing_extensions import Self
 import chex
 import jax
 import jax.numpy as jnp
+from jax.sharding import Sharding
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -48,7 +49,13 @@ class USL_APIC(Solver):
         Bp_stack = jnp.zeros((num_particles, 3, 3))
 
         return USL_APIC(dt=dt, Dp=Dp, Dp_inv=Dp_inv, Bp_stack=Bp_stack)
-
+    
+    def distributed(self: Self, device: Sharding):
+        Bp_stack = jax.device_put(self.Bp_stack,device)
+        return self.replace(
+            Bp_stack = Bp_stack,
+        )
+        
     def update(
         self, particles, nodes, shapefunctions, material_stack, forces_stack, step
     ):

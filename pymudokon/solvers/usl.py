@@ -50,6 +50,7 @@ class USL(Solver):
         shapefunctions: ShapeFunction,
         material_stack: List[Material],
         forces_stack: List[Forces],
+        step: int
     ):
         """Perform a single update step of the USL solver."""
         nodes = nodes.refresh()
@@ -75,6 +76,7 @@ class USL(Solver):
                 nodes=nodes,
                 shapefunctions=shapefunctions,
                 dt=self.dt,
+                step = step
             )
             new_forces_stack.append(forces)
 

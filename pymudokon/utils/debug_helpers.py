@@ -1,6 +1,10 @@
 raise NotImplementedError("This module is not implemented yet.")
 
-# def debug_particles(
+
+# Create debug routine to check if all arrays are similar particle shapes, 
+# interactions and num particle same
+# 
+# # def debug_particles(
 #         step: jnp.int32,
 #         particles: pm.Particles,
 #         stress_limit: jnp.float32 = 1e6,

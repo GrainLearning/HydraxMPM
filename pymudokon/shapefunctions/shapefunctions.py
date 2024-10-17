@@ -8,6 +8,8 @@ import chex
 import jax
 import jax.numpy as jnp
 
+from jax.sharding import Sharding
+import jax
 
 @chex.dataclass(mappable_dataclass=False, frozen=True)
 class ShapeFunction:
@@ -90,3 +92,19 @@ class ShapeFunction:
             ).astype(jnp.int32)
 
         return intr_dist, intr_hashes
+
+    def distributed(self: Self, device: Sharding):    
+
+        intr_hash_stack = jax.device_put(self.intr_hash_stack,device)
+        intr_shapef_stack = jax.device_put(self.intr_shapef_stack,device)
+        intr_shapef_grad_stack = jax.device_put(self.intr_shapef_grad_stack,device)
+        intr_id_stack = jax.device_put(self.intr_id_stack,device)
+        stencil = jax.device_put(self.stencil,device)
+
+        return self.replace(
+            intr_hash_stack =  intr_hash_stack,
+            intr_shapef_stack = intr_shapef_stack,
+            intr_shapef_grad_stack = intr_shapef_grad_stack,
+            intr_id_stack = intr_id_stack,
+            stencil = stencil
+        )

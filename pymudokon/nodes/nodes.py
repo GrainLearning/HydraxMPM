@@ -6,6 +6,7 @@ from typing_extensions import Self
 import chex
 import jax
 import jax.numpy as jnp
+from jax.sharding import Sharding
 
 
 @chex.dataclass
@@ -42,10 +43,10 @@ class Nodes:
 
     origin: chex.Array
     end: chex.Array
+    grid_size: chex.Array
     node_spacing: jnp.float32
     small_mass_cutoff: jnp.float32
     num_nodes_total: jnp.int32
-    grid_size: chex.Array
     inv_node_spacing: jnp.float32
 
     mass_stack: chex.Array
@@ -121,6 +122,19 @@ class Nodes:
             moment_stack=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
             moment_nt_stack=jnp.zeros((num_nodes_total, dim)).astype(jnp.float32),
             species_stack=species_stack,
+        )
+
+    def distributed(self: Self, device: Sharding):    
+        mass_stack = jax.device_put(self.mass_stack,device)
+        moment_stack = jax.device_put(self.moment_stack,device)
+        moment_nt_stack = jax.device_put(self.moment_nt_stack,device)
+        species_stack = jax.device_put(self.species_stack,device)
+
+        return self.replace(
+            mass_stack = mass_stack,
+            moment_stack=moment_stack,
+            moment_nt_stack= moment_nt_stack,
+            species_stack = species_stack
         )
 
     def refresh(self: Self) -> Self:

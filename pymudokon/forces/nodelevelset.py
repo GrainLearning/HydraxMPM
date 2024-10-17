@@ -9,6 +9,9 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from jax.sharding import Sharding
+
+
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..shapefunctions.shapefunctions import ShapeFunction
@@ -71,6 +74,14 @@ class NodeLevelSet:
             id_stack=id_stack,
             velocity_stack=velocity_stack,
             mu = mu
+        )
+        
+    def distributed(self: Self, device: Sharding):
+        id_stack = jax.device_put(self.id_stack,device)
+        velocity_stack = jax.device_put(self.velocity_stack,device)
+        return self.replace(
+            id_stack = id_stack,
+            velocity_stack = velocity_stack
         )
     def apply_on_nodes_moments(
         self: Self,

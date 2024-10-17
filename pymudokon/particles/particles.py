@@ -6,6 +6,8 @@ from typing_extensions import Self
 import chex
 import jax.numpy as jnp
 
+from jax.sharding import Sharding
+import jax
 
 @chex.dataclass
 class Particles:
@@ -55,6 +57,8 @@ class Particles:
     stress_stack: chex.Array
     F_stack: chex.Array
     id_stack: chex.Array
+    dim: int
+    num_particles: int
 
     @classmethod
     def create(
@@ -105,7 +109,34 @@ class Particles:
             force_stack=force_stack,
             F_stack=F_stack,
             id_stack=jnp.arange(num_particles),
+            num_particles=num_particles,
+            dim = dim
         )
+    
+    def distributed(self: Self, device: Sharding):
+        position_stack = jax.device_put(self.position_stack,device)
+        velocity_stack = jax.device_put(self.velocity_stack,device)
+        force_stack = jax.device_put(self.force_stack,device)
+        mass_stack = jax.device_put(self.mass_stack,device)
+        volume_stack = jax.device_put(self.volume_stack,device)
+        volume0_stack = jax.device_put(self.volume0_stack,device)
+        L_stack = jax.device_put(self.L_stack,device)
+        stress_stack = jax.device_put(self.stress_stack,device)
+        F_stack = jax.device_put(self.F_stack,device)
+        id_stack = jax.device_put(self.id_stack,device)
+        return self.replace(
+            position_stack = position_stack,
+            velocity_stack = velocity_stack,
+            force_stack = force_stack,
+            mass_stack = mass_stack,
+            volume_stack = volume_stack,
+            volume0_stack = volume0_stack,
+            L_stack = L_stack,
+            stress_stack = stress_stack,
+            F_stack = F_stack,
+            id_stack = id_stack
+        )
+
 
     def calculate_volume(
         self: Self,

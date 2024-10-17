@@ -22,6 +22,8 @@ from ..utils.math_helpers import (
 from .common import get_timestep
 from .material import Material
 
+from jax.sharding import Sharding
+import jax
 
 def plot_yield_surface(
     ax, p_range: Tuple, M: jnp.float32, p_c: jnp.float32, color="black", linestyle="--"
@@ -137,6 +139,16 @@ class ModifiedCamClay(Material):
             absolute_density=absolute_density,
         )
 
+    def distributed(self: Self, device: Sharding):
+        p_c_stack = jax.device_put(self.p_c_stack,device)
+        stress_ref_stack = jax.device_put(self.stress_ref_stack,device)
+        eps_e_stack = jax.device_put(self.eps_e_stack,device)
+
+        return self.replace(
+            stress_ref_stack = stress_ref_stack,
+            p_c_stack = p_c_stack,
+            eps_e_stack = eps_e_stack
+        )
     @classmethod
     def create_from_phi_ref(
         cls: Self,
