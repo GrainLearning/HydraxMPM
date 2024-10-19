@@ -86,11 +86,11 @@ class ShapeFunction:
             )
         else:
             intr_hashes = (
-                intr_n_pos[0]
-                + intr_n_pos[1] * grid_size[0]
-                + intr_n_pos[2] * grid_size[0] * grid_size[1]
+                intr_n_pos[2]
+                + intr_n_pos[0] * grid_size[2]
+                + intr_n_pos[1] * grid_size[2] * grid_size[0]
             ).astype(jnp.int32)
-
+                
         return intr_dist, intr_hashes
 
     def distributed(self: Self, device: Sharding):    

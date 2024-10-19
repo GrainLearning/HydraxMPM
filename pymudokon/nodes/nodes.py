@@ -171,7 +171,7 @@ class Nodes:
 
             y = jnp.linspace(self.origin[1], self.end[1], ny)
             
-            z = jnp.linspace(self.origin[1], self.end[1], nz)
+            z = jnp.linspace(self.origin[2], self.end[2], nz)
 
             xv, yv, zv = jnp.meshgrid(x, y, z)
 
@@ -195,11 +195,22 @@ class Nodes:
                     jnp.int32
                 )
             else:
+                # return (
+                #     rel_pos[0]
+                #     + rel_pos[1] * self.grid_size[0]
+                #     + rel_pos[2] * self.grid_size[0] * self.grid_size[1]
+                # ).astype(jnp.int32)
+                # return (
+                #     rel_pos[1]
+                #     + rel_pos[0] * self.grid_size[1]
+                #     + rel_pos[2] * self.grid_size[1] * self.grid_size[0]
+                # ).astype(jnp.int32)
                 return (
-                    rel_pos[0]
-                    + rel_pos[1] * self.grid_size[0]
-                    + rel_pos[2] * self.grid_size[0] * self.grid_size[1]
+                    rel_pos[2]
+                    + rel_pos[0] * self.grid_size[2]
+                    + rel_pos[1] * self.grid_size[2] * self.grid_size[0]
                 ).astype(jnp.int32)
+            
             
                 
         hash_stack = jax.vmap(calculate_hash)(position_stack)

@@ -111,6 +111,7 @@ class RigidParticles:
             inv_node_spacing=nodes.inv_node_spacing,
             grid_size=nodes.grid_size,
             position_stack=self.position_stack,
+            species_stack=nodes.species_stack,
         )
 
         r_stencil_size, _ = r_shapefunctions.stencil.shape
