@@ -1,5 +1,5 @@
 """State and functions for the material points (called particles)."""
-# TODO: Add support for different initial volume calculation ratios.
+
 
 from typing_extensions import Self
 
@@ -9,8 +9,9 @@ import jax.numpy as jnp
 from jax.sharding import Sharding
 import jax
 
-@chex.dataclass
-class Particles:
+import equinox as eqx
+
+class Particles(eqx.Module):
     """Material points state.
 
     Attributes:
@@ -47,23 +48,24 @@ class Particles:
 
     """
 
-    position_stack: chex.Array
-    velocity_stack: chex.Array
-    force_stack: chex.Array
-    mass_stack: chex.Array
-    volume_stack: chex.Array
-    volume0_stack: chex.Array
-    L_stack: chex.Array
-    stress_stack: chex.Array
-    F_stack: chex.Array
-    id_stack: chex.Array
-    dim: int
-    num_particles: int
+    position_stack: chex.Array  = eqx.field(converter=lambda x: jnp.asarray(x))
+    velocity_stack: chex.Array  = eqx.field(converter=lambda x: jnp.asarray(x))
+    force_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    mass_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    volume_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    volume0_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
 
-    @classmethod
-    def create(
-        cls: Self,
-        position_stack: chex.Array,
+    L_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    stress_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    F_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    dim: int = eqx.field(static=True, converter=lambda x: int(x))
+    num_points: int = eqx.field(static=True, converter=lambda x: int(x))
+
+    
+    def __init__(
+        self: Self,
+        config=None,
+        position_stack: chex.Array= None,
         velocity_stack: chex.Array = None,
         mass_stack: chex.Array = None,
         volume_stack: chex.Array = None,
@@ -72,77 +74,79 @@ class Particles:
         force_stack: chex.Array = None,
         F_stack: chex.Array = None,
     ) -> Self:
-        """Create the initial state of the particles."""
-        num_particles, dim = position_stack.shape
+        if config:
+            self.num_points = config.num_points
+            self.dim =  config.dim
+        else:
+            self.num_points,self.dim = position_stack.shape
+            
+        if position_stack is None:
+            self.position_stack = jnp.zeros((self.num_points,self.dim))
+        else:
+            self.position_stack = position_stack
 
         if velocity_stack is None:
-            velocity_stack = jnp.zeros((num_particles, dim))
-
+            self.velocity_stack = jnp.zeros((self.num_points, self.dim))
+        else:
+            self.velocity_stack = velocity_stack
+            
         if force_stack is None:
-            force_stack = jnp.zeros((num_particles, dim))
-
+            self.force_stack = jnp.zeros((self.num_points, self.dim))
+        else:
+            self.force_stack = force_stack
+            
         if mass_stack is None:
-            mass_stack = jnp.zeros((num_particles))
-
+            self.mass_stack = jnp.zeros((self.num_points))
+        else:
+            self.mass_stack = mass_stack
+        
         if volume_stack is None:
-            volume_stack = jnp.zeros((num_particles))
-
-        volume0_stack = volume_stack
+            self.volume_stack = jnp.zeros((self.num_points))
+        else:
+            self.volume_stack = volume_stack
+        
+        self.volume0_stack = self.volume_stack
 
         if L_stack is None:
-            L_stack = jnp.zeros((num_particles, 3, 3))
-
+            self.L_stack = jnp.zeros((self.num_points, 3, 3))
+        else:
+            self.L_stack = self.L_stack
+            
         if stress_stack is None:
-            stress_stack = jnp.zeros((num_particles, 3, 3))
+            self.stress_stack = jnp.zeros((self.num_points, 3, 3))
+        else:
+            self.stress_stack = stress_stack
 
         if F_stack is None:
-            F_stack = jnp.stack([jnp.eye(3)] * num_particles)
+            self.F_stack = jnp.stack([jnp.eye(3)] * self.num_points)
+        else:
+            self.F_stack = F_stack
 
-        return cls(
-            position_stack=position_stack,
-            velocity_stack=velocity_stack,
-            mass_stack=mass_stack,
-            volume_stack=volume_stack,
-            volume0_stack=volume0_stack,
-            L_stack=L_stack,
-            stress_stack=stress_stack,
-            force_stack=force_stack,
-            F_stack=F_stack,
-            id_stack=jnp.arange(num_particles),
-            num_particles=num_particles,
-            dim = dim
+
+    def refresh(self) -> Self:
+        """Refresh the state of the particles.
+
+        Typically called before each time step to reset the state of the particles.
+
+        Args:
+            cls: Particles state.
+
+        Returns:
+            Particles: Updated state for the MPM particles.
+        """
+        return eqx.tree_at(
+            lambda state: (
+                state.L_stack
+            ),
+            self,
+            (self.L_stack.at[:].set(0.0)),
         )
-    
-    def distributed(self: Self, device: Sharding):
-        position_stack = jax.device_put(self.position_stack,device)
-        velocity_stack = jax.device_put(self.velocity_stack,device)
-        force_stack = jax.device_put(self.force_stack,device)
-        mass_stack = jax.device_put(self.mass_stack,device)
-        volume_stack = jax.device_put(self.volume_stack,device)
-        volume0_stack = jax.device_put(self.volume0_stack,device)
-        L_stack = jax.device_put(self.L_stack,device)
-        stress_stack = jax.device_put(self.stress_stack,device)
-        F_stack = jax.device_put(self.F_stack,device)
-        id_stack = jax.device_put(self.id_stack,device)
-        return self.replace(
-            position_stack = position_stack,
-            velocity_stack = velocity_stack,
-            force_stack = force_stack,
-            mass_stack = mass_stack,
-            volume_stack = volume_stack,
-            volume0_stack = volume0_stack,
-            L_stack = L_stack,
-            stress_stack = stress_stack,
-            F_stack = F_stack,
-            id_stack = id_stack
-        )
-
-
+        
     def calculate_volume(
         self: Self,
-        node_spacing: jnp.float32,
-        particles_per_cell: jnp.int32,
-    ) -> Self:
+        cell_size: jnp.float32,
+        ppc: jnp.int32,
+    ):
         """Calculate the particles' initial volumes.
 
         Should be called after initialization, and before updating state
@@ -159,31 +163,43 @@ class Particles:
         Returns:
             Particles: Updated particles state.
         """
-        num_particles, dim = self.position_stack.shape
 
         volume_stack = (
-            jnp.ones(num_particles) * (node_spacing**dim) / particles_per_cell
+            jnp.ones(self.num_points) * (cell_size**self.dim) / ppc
         )
+        return volume_stack
 
-        volume0_stack = volume_stack
+    
+    # def distributed(self: Self, device: Sharding):
+    #     position_stack = jax.device_put(self.position_stack,device)
+    #     velocity_stack = jax.device_put(self.velocity_stack,device)
+    #     force_stack = jax.device_put(self.force_stack,device)
+    #     mass_stack = jax.device_put(self.mass_stack,device)
+    #     volume_stack = jax.device_put(self.volume_stack,device)
+    #     volume0_stack = jax.device_put(self.volume0_stack,device)
+    #     L_stack = jax.device_put(self.L_stack,device)
+    #     stress_stack = jax.device_put(self.stress_stack,device)
+    #     F_stack = jax.device_put(self.F_stack,device)
+    #     id_stack = jax.device_put(self.id_stack,device)
+    #     return self.replace(
+    #         position_stack = position_stack,
+    #         velocity_stack = velocity_stack,
+    #         force_stack = force_stack,
+    #         mass_stack = mass_stack,
+    #         volume_stack = volume_stack,
+    #         volume0_stack = volume0_stack,
+    #         L_stack = L_stack,
+    #         stress_stack = stress_stack,
+    #         F_stack = F_stack,
+    #         id_stack = id_stack
+    #     )
 
-        return self.replace(volume_stack=volume_stack, volume0_stack=volume0_stack)
 
-    def refresh(self) -> Self:
-        """Refresh the state of the particles.
 
-        Typically called before each time step to reset the state of the particles.
 
-        Args:
-            cls: Particles state.
 
-        Returns:
-            Particles: Updated state for the MPM particles.
-        """
-        return self.replace(L_stack=self.L_stack.at[:].set(0.0))
-
-    def get_phi_stack(self, rho_p):
+    # def get_phi_stack(self, rho_p):
         
-        density_stack = self.mass_stack/self.volume_stack
+    #     density_stack = self.mass_stack/self.volume_stack
 
-        return density_stack/rho_p
+    #     return density_stack/rho_p

@@ -11,7 +11,7 @@ from jax import Array
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..shapefunctions.linear import LinearShapeFunction
+from ..shapefunctions.linear_old import LinearShapeFunction
 from ..shapefunctions.shapefunctions import ShapeFunction
 
 

@@ -19,6 +19,7 @@ chex = "^0.1.86"
 optimistix = "^0.0.7"
 extensysplots = "^1.0.2"
 scienceplots = "^2.1.1"
+equinox = "^0.11.8"
 
 
 [tool.poetry.group.gpu.dependencies]

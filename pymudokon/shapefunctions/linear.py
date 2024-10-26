@@ -5,173 +5,115 @@ from typing import Tuple
 from typing_extensions import Self
 
 import chex
-import jax
+
 import jax.numpy as jnp
+import equinox as eqx
 
-from .shapefunctions import ShapeFunction
+from ..config.mpm_config import MPMConfig
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
-class LinearShapeFunction(ShapeFunction):
-    """Most basic and fast shape functions, yet unstable for traditional solvers.
+class LinearShapeFunction(eqx.Module):
+    shapef_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
+    shapef_grad_stack: chex.Array = eqx.field(converter=lambda x: jnp.asarray(x))
 
-    Requires at least 2 particles per cell (in 2D) for stability.
+    # statics
+    dim: int = eqx.field(static=True, converter=lambda x: int(x))
+    window_size: int = eqx.field(static=True, converter=lambda x: int(x))
+    num_points: int = eqx.field(static=True, converter=lambda x: int(x))
+    origin: int = eqx.field(static=True, converter=lambda x: tuple(x))
+    inv_cell_size: float = eqx.field(static=True, converter=lambda x: float(x))
 
-    C0 continuous and suffers cell crossing instability.
+    def __init__(
+        self,
+        config: MPMConfig,
+        num_points: int = None,
+        dim: int = None,
+        inv_cell_size: float = None,
+        origin: tuple = None,
+    ):
+        if config:
+            window_size = config.window_size
+            dim = config.dim
+            num_points = config.num_points
+            inv_cell_size = config.inv_cell_size
+            origin = config.origin
 
-    The shapefunction forms part of the solver class. However, it can be used as a
-    standalone module.
+        self.num_points = num_points
+        self.window_size = window_size
+        self.dim = dim
+        self.origin = origin
+        self.inv_cell_size = inv_cell_size
 
-    Example:
-    >>> import pymudokon as pm
-    >>> import jax.numpy as jnp
-    >>> positions = jnp.array(
-        [[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]])
-    >>> nodes = pm.Nodes.create(
-        origin=jnp.array([0.0, 0.0]), end=jnp.array([5.0, 5.0]), node_spacing=1.0)
-    >>> linear_shp = pm.LinearShapeFunction.create(num_particles=len(positions), dim=2)
-    """
+        self.shapef_stack = jnp.zeros((self.num_points,self.window_size))
+        self.shapef_grad_stack = jnp.zeros((self.num_points, self.window_size, 3))
 
-    @classmethod
-    def create(cls: Self, num_particles: jnp.int32, dim: jnp.int16) -> Self:
-        """Initializes the state of the linear shape functions.
-
-        Args:
-            cls: Self type reference
-            num_particles: Number of particles
-            dim: Dimension of the problem
-
-        Returns:
-            ShapeFunction: linear shape function state
-        """
-        # Generate stencil by dimension.
-        if dim == 1:
-            stencil = jnp.array([[0.0], [1.0]])
-        if dim == 2:
-            stencil = jnp.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
-        if dim == 3:
-            stencil = jnp.array(
-                [
-                    [0, 0, 0],
-                    [0, 0, 1],
-                    [1, 0, 0],
-                    [1, 0, 1],
-                    [0, 1, 0],
-                    [0, 1, 1],
-                    [1, 1, 0],
-                    [1, 1, 1],
-                ]
-            )
-
-        stencil_size = stencil.shape[0]
-
-        intr_id_stack = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
-
-        return cls(
-            intr_id_stack=intr_id_stack,
-            intr_hash_stack=jnp.zeros((num_particles * stencil_size), dtype=jnp.int32),
-            intr_shapef_stack=jnp.zeros(
-                (num_particles * stencil_size), dtype=jnp.float32
-            ),
-            intr_shapef_grad_stack=jnp.zeros(
-                (num_particles * stencil_size, 3), dtype=jnp.float32
-            ),
-            stencil=stencil,
-        )
-
-    def calculate_shapefunction(
+    def get_shapefunctions(
         self: Self,
-        origin: chex.Array,
-        inv_node_spacing: jnp.float32,
-        grid_size: chex.Array,
-        position_stack: chex.Array,
-        species_stack: chex.Array
-    ) -> Tuple[Self, chex.Array]:
-        """Calculate shape functions and its gradients.
+        grid,
+        particles: chex.Array,
+    ) -> Tuple[chex.Array]:
+        padding = (0, 3 - self.dim)
 
-        Args:
-            self: Shape function at previous state
-            origin: start coordinates of the grid
-            inv_node_spacing: 1/node_spacing (inverse node spacing/ grid spacing)
-            grid_size: Number of nodes in each axis
-            position_stack: All coordinates on the grid
+        def vmap_g2p_shp(p_id, grid_pos, w_id, carry):
+            shape_f_prev, shape_f_grad_prev = carry
 
-        Returns:
-            Tuple:
-                - Updated shape function state
-                - Interaction distances
-        """
-        stencil_size, dim = self.stencil.shape
+            rel_pos = (
+                particles.position_stack.at[p_id].get() - jnp.array(self.origin)
+            ) * self.inv_cell_size
 
-        num_particles = position_stack.shape[0]
+            dist = rel_pos - grid_pos
+            abs_dist = jnp.abs(dist)
 
-        intr_id_stack = jnp.arange(num_particles * stencil_size).astype(jnp.int32)
+            basis = jnp.where(abs_dist < 1.0, 1.0 - abs_dist, 0.0)
 
-        # Get relative interaction distances and hashes, see `ShapeFunction class`
-        intr_dist_stack, intr_hash_stack = self.vmap_intr(
-            intr_id_stack, position_stack, origin, inv_node_spacing, grid_size
-        )
-
-        # Get shape functions and gradients. Batched over intr_dist.
-        intr_shapef_stack, intr_shapef_grad_stack = self.vmap_intr_shp(
-            intr_dist_stack, inv_node_spacing
-        )
-
-        intr_dist_3d_stack = jnp.pad(
-            intr_dist_stack,
-            [(0, 0), (0, 3 - dim)],
-            mode="constant",
-            constant_values=0,
-        )
-
-        return self.replace(
-            intr_shapef_stack=intr_shapef_stack,
-            intr_shapef_grad_stack=intr_shapef_grad_stack,
-            intr_id_stack=intr_id_stack,
-            intr_hash_stack=intr_hash_stack,
-        ), intr_dist_3d_stack
-
-    @partial(jax.vmap, in_axes=(None, 0, None), out_axes=(0))
-    def vmap_intr_shp(
-        self: Self,
-        intr_dist: chex.ArrayBatched,
-        inv_node_spacing: jnp.float32,
-    ) -> Tuple[chex.ArrayBatched, chex.ArrayBatched]:
-        """Vectorized map to compute shapefunctions and gradients.
-
-        Args:
-            intr_dist: Batched particle-node pair interactions distance.
-            inv_node_spacing: Inverse node spacing.
-
-        Returns:
-            Tuple: Shape function and its gradient.
-        """
-        abs_intr_dist = jnp.abs(intr_dist)
-        basis = jnp.where(abs_intr_dist < 1.0, 1.0 - abs_intr_dist, 0.0)
-        dbasis = jnp.where(
-            abs_intr_dist < 1.0, -jnp.sign(intr_dist) * inv_node_spacing, 0.0
-        )
-
-        intr_shapef = jnp.prod(basis)
-
-        dim = basis.shape[0]
-        if dim == 2:
-            intr_shapef_grad = jnp.array(
-                [
-                    dbasis[0] * basis[1],
-                    dbasis[1] * basis[0],
-                    0.0,
-                ]
+            dbasis = jnp.where(
+                abs_dist < 1.0, -jnp.sign(dist) * self.inv_cell_size, 0.0
             )
-        elif dim == 3:
-            intr_shapef_grad = jnp.array(
-                [
-                    dbasis[0] * basis[1] * basis[2],
-                    dbasis[1] * basis[0] * basis[2],
-                    dbasis[2] * basis[0] * basis[1],
-                ]
-            )
-        else:
-            intr_shapef_grad = jnp.array([dbasis, 0.0, 0.0])
 
-        return intr_shapef, intr_shapef_grad
+            shapef = jnp.prod(basis)
+
+            if self.dim == 2:
+                shapef_grad = jnp.array(
+                    [
+                        dbasis.at[0].get() * basis.at[1].get(),
+                        dbasis.at[1].get() * basis.at[0].get(),
+                    ]
+                )
+            elif self.dim == 3:
+                shapef_grad = jnp.array(
+                    [
+                        dbasis.at[0].get() * basis.at[1].get() * basis.at[2].get(),
+                        dbasis.at[1].get() * basis.at[0].get() * basis.at[2].get(),
+                        dbasis.at[2].get() * basis.at[0].get() * basis.at[1].get(),
+                    ]
+                )
+            else:
+                shapef_grad = dbasis
+
+            shapef_grad_padded = jnp.pad(
+                shapef_grad,
+                padding,
+                mode="constant",
+                constant_values=0.0,
+            )
+
+            # jax.debug.print("grid_pos {} self.inv_cell_size {} rel_pos {} dist {} w_id {}",grid_pos,self.inv_cell_size,rel_pos, dist,w_id)
+            new_shapef = shape_f_prev.at[w_id].set(shapef)
+            new_shapef_grad = shape_f_grad_prev.at[w_id, :].set(shapef_grad_padded)
+
+            return (new_shapef, new_shapef_grad)
+
+        new_shapef_stack, new_shapef_grad_stack = grid.vmap_grid_scatter_fori(
+            vmap_g2p_shp,
+            (jnp.zeros(self.window_size), jnp.zeros((self.window_size, 3))),
+            is_grid_hash=False,
+        )
+
+        return eqx.tree_at(
+            lambda state: (
+                state.shapef_stack,
+                state.shapef_grad_stack,
+            ),
+            self,
+            (new_shapef_stack, new_shapef_grad_stack),
+        )
