@@ -7,13 +7,13 @@ import numpy as np
 
 import pymudokon as pm
 
-pm.set_default_gpu(1)
-dir_path = os.path.dirname(os.path.realpath(__file__))
+
 
 fname = "/two_spheres_output.gif"
 
 
 print("Creating simulation")
+
 # Create circles of material points and concatenate them into a single array
 cell_size = 0.05
 mps_per_cell = 4
@@ -83,13 +83,14 @@ shapefunctions = pm.LinearShapeFunction(config)
 particles, nodes, shapefunctions = pm.discretize(
     config, particles, nodes, shapefunctions, density_ref=1000
 )
-
-
 material = pm.LinearIsotropicElastic(config=config, E=1000.0, nu=0.3)
 
 solver = pm.USL(config=config, alpha=0.98)
 
 grid = pm.GridStencilMap(config)
+
+
+print("Running and compiling")
 
 carry, accumulate = pm.run_solver(
     config=config,
@@ -103,21 +104,18 @@ carry, accumulate = pm.run_solver(
         'position_stack', 'velocity_stack', 'mass_stack'),
 )
 
-# print(accumulate)
-
-# print("Simulation done.. plotting might take a while")
+print("Simulation done.. plotting might take a while")
 
 position_stack, velocity_stack, mass_stack = accumulate
 
 KE_stack = pm.get_KE_stack(mass_stack, velocity_stack)
 
 
-pvplot_cmap_ke = pm.PvPointHelper.create(
+pvplot_cmap_ke = pm.PvPointHelper(
    position_stack,
    scalar_stack = KE_stack,
-  scalar_name="p [J]",
-   origin=config.origin,
-   end=config.end,
+   config = config,
+   scalar_name="p [J]",
    subplot = (0,0),
    timeseries_options={
     "clim":[0,1],
@@ -133,9 +131,9 @@ pvplot_cmap_ke = pm.PvPointHelper.create(
            }
    }
 )
+
 plotter = pm.make_pvplots(
     [pvplot_cmap_ke],
     plotter_options={"shape":(1,1),"window_size":([2048, 2048]) },
-    dim=2,
-    file=dir_path + fname,
+    file=config.dir_path + fname,
 )

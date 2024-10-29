@@ -3,6 +3,10 @@ from typing_extensions import Self
 import equinox as eqx
 import jax
 import numpy as np
+import os
+
+from ..utils.jax_helpers import set_default_gpu
+import sys
 
 
 class MPMConfig(eqx.Module):
@@ -30,7 +34,11 @@ class MPMConfig(eqx.Module):
     window_size: int = eqx.field(static=True, converter=lambda x: int(x))
 
     ppc: int = eqx.field(static=True, converter=lambda x: int(x))
+    
     unroll_grid_kernels: bool = eqx.field(static=True, converter=lambda x: bool(x))
+    
+    dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
+ 
     
     def __init__(
         self: Self,
@@ -43,7 +51,8 @@ class MPMConfig(eqx.Module):
         num_steps=0,
         store_every=0,
         dt=0.0,
-        unroll_grid_kernels= True
+        unroll_grid_kernels= True,
+        default_gpu_id: int = None
     ):
         jax.debug.print(
             "Ignore the UserWarning from, the behavior is intended and expected."
@@ -69,7 +78,7 @@ class MPMConfig(eqx.Module):
         if shapefunction_type == "linear":
             window_1D = np.arange(2).astype(int)
         elif shapefunction_type == "cubic":
-            window_1D = np.arange(4).astype(int)
+            window_1D = np.arange(4).astype(int) -1
 
         if self.dim == 2:
             self.forward_window = np.array(np.meshgrid(window_1D, window_1D)).T.reshape(
@@ -88,3 +97,12 @@ class MPMConfig(eqx.Module):
         self.shapefunction_type = shapefunction_type
 
         self.unroll_grid_kernels =unroll_grid_kernels
+        
+        
+        file = sys.argv[0]
+        self.dir_path = os.path.dirname(file) +'/'
+        
+        
+        if default_gpu_id:
+            set_default_gpu(default_gpu_id)
+       

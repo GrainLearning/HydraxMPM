@@ -47,7 +47,7 @@ class LinearShapeFunction(eqx.Module):
         self.shapef_stack = jnp.zeros((self.num_points,self.window_size))
         self.shapef_grad_stack = jnp.zeros((self.num_points, self.window_size, 3))
 
-    def get_shapefunctions(
+    def __call__(
         self: Self,
         grid,
         particles: chex.Array,
@@ -97,7 +97,6 @@ class LinearShapeFunction(eqx.Module):
                 constant_values=0.0,
             )
 
-            # jax.debug.print("grid_pos {} self.inv_cell_size {} rel_pos {} dist {} w_id {}",grid_pos,self.inv_cell_size,rel_pos, dist,w_id)
             new_shapef = shape_f_prev.at[w_id].set(shapef)
             new_shapef_grad = shape_f_grad_prev.at[w_id, :].set(shapef_grad_padded)
 

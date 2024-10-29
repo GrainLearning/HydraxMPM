@@ -1,16 +1,14 @@
 """State and functions for the background MPM grid nodes."""
 # TODO: Add support for Sparse grid. This feature is currently experimental in JAX.
 
-import jax.experimental
-from typing_extensions import Self
 
-from jax.experimental import pallas as pl
+from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 from functools import partial
-import numpy as np
+
 
 from ..config.mpm_config import MPMConfig
 
@@ -27,7 +25,7 @@ class GridStencilMap(eqx.Module):
     cell_id_stack: chex.Array
     point_hash_stack: chex.Array
     point_id_stack: chex.Array
-
+    point_id_sorted_stack: chex.Array
     origin: tuple = eqx.field(static=True, converter=lambda x: tuple(x))
     grid_size: tuple = eqx.field(static=True, converter=lambda x: tuple(x))
     inv_cell_size: float = eqx.field(static=True, converter=lambda x: float(x))
@@ -71,6 +69,7 @@ class GridStencilMap(eqx.Module):
         self.cell_count_stack = jnp.zeros(num_cells).astype(jnp.int32)
         self.point_hash_stack = jnp.zeros(num_points).astype(jnp.int32)
         self.point_id_stack = jnp.arange(num_points).astype(jnp.int32)
+        self.point_id_sorted_stack = jnp.arange(num_points).astype(jnp.int32)
         self.cell_id_stack = jnp.arange(num_cells).astype(jnp.int32)
 
         self.origin = origin
@@ -103,12 +102,18 @@ class GridStencilMap(eqx.Module):
             jnp.zeros(self.num_cells, dtype=jnp.int32).at[new_point_hash_stack].add(1)
         )
 
-        new_point_id_stack = jnp.argsort(new_point_hash_stack)
+        # new_point_id_stack = jnp.argsort(new_point_hash_stack)
+        
+        sorted_hash_indices_stack = jnp.argsort(new_point_hash_stack)
+  
+        sorted_point_hash_stack = new_point_hash_stack.at[sorted_hash_indices_stack].get()
+        
+        sorted_point_id_stack = jnp.arange(self.num_points).astype(jnp.int32).at[sorted_hash_indices_stack].get()
 
+        
         new_cell_start_stack = jnp.searchsorted(
-            a=new_point_hash_stack,
+            a=sorted_point_hash_stack,
             v=self.cell_id_stack,
-            sorter=new_point_id_stack,
             method="sort",
         )
 
@@ -117,14 +122,14 @@ class GridStencilMap(eqx.Module):
                 state.point_hash_stack,
                 state.cell_start_stack,
                 state.cell_count_stack,
-                state.point_id_stack,
+                state.point_id_sorted_stack,
             ),
             self,
             (
                 new_point_hash_stack,
                 new_cell_start_stack,
                 new_cell_count_stack,
-                new_point_id_stack,
+                sorted_point_id_stack,
             ),
         )
 
@@ -137,6 +142,8 @@ class GridStencilMap(eqx.Module):
                 window = jnp.array(self.forward_window)[w_id]
 
                 neighbor = point_grid_pos + window
+                
+                # jax.debug.print("window {}",window)
 
                 if is_grid_hash:
                     neighbor = get_hash_id(neighbor, self.grid_size)
@@ -175,8 +182,8 @@ class GridStencilMap(eqx.Module):
                 # jax.debug.print(" cell_pos {} window {} | neighbor {} neighbor_id {} {}",cell_pos,window,neighbor,cell_id,count)
 
                 def inner_2(step, carry_fori):
-                    p_id = self.cell_start_stack.at[neighbor_id].get() + step
-                    p_id = self.point_id_stack.at[p_id].get()
+                    index = self.cell_start_stack.at[neighbor_id].get() + step
+                    p_id = self.point_id_sorted_stack.at[index].get()
                     new_carry_fori = p2g_func(p_id, cell_id, w_id, carry_fori)
                     return new_carry_fori
 

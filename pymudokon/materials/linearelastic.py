@@ -64,7 +64,7 @@ class LinearIsotropicElastic(eqx.Module):
         self.G = get_shear_modulus(E, nu)
         self.lam = get_lame_modulus(E, nu)
 
-    def update_from_particles(
+    def __call__(
         self: Self, particles: Particles
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""

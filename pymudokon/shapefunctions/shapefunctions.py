@@ -11,6 +11,7 @@ import jax.numpy as jnp
 from jax.sharding import Sharding
 import jax
 
+
 @chex.dataclass(mappable_dataclass=False, frozen=True)
 class ShapeFunction:
     """Contains base method to calculate relative distances between particles and nodes.
@@ -90,21 +91,20 @@ class ShapeFunction:
                 + intr_n_pos[0] * grid_size[2]
                 + intr_n_pos[1] * grid_size[2] * grid_size[0]
             ).astype(jnp.int32)
-                
+
         return intr_dist, intr_hashes
 
-    def distributed(self: Self, device: Sharding):    
-
-        intr_hash_stack = jax.device_put(self.intr_hash_stack,device)
-        intr_shapef_stack = jax.device_put(self.intr_shapef_stack,device)
-        intr_shapef_grad_stack = jax.device_put(self.intr_shapef_grad_stack,device)
-        intr_id_stack = jax.device_put(self.intr_id_stack,device)
-        stencil = jax.device_put(self.stencil,device)
+    def distributed(self: Self, device: Sharding):
+        intr_hash_stack = jax.device_put(self.intr_hash_stack, device)
+        intr_shapef_stack = jax.device_put(self.intr_shapef_stack, device)
+        intr_shapef_grad_stack = jax.device_put(self.intr_shapef_grad_stack, device)
+        intr_id_stack = jax.device_put(self.intr_id_stack, device)
+        stencil = jax.device_put(self.stencil, device)
 
         return self.replace(
-            intr_hash_stack =  intr_hash_stack,
-            intr_shapef_stack = intr_shapef_stack,
-            intr_shapef_grad_stack = intr_shapef_grad_stack,
-            intr_id_stack = intr_id_stack,
-            stencil = stencil
+            intr_hash_stack=intr_hash_stack,
+            intr_shapef_stack=intr_shapef_stack,
+            intr_shapef_grad_stack=intr_shapef_grad_stack,
+            intr_id_stack=intr_id_stack,
+            stencil=stencil,
         )

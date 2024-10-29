@@ -49,7 +49,7 @@ class USL(eqx.Module):
         self.alpha = alpha
         self.dim = dim
 
-    def update(
+    def __call__(
         self: Self,
         prev_particles: Particles,
         prev_nodes: Nodes,
@@ -65,9 +65,7 @@ class USL(eqx.Module):
 
         new_grid = prev_grid.partition(new_particles.position_stack)
 
-        new_shapefunctions = prev_shapefunctions.get_shapefunctions(
-            new_grid, new_particles
-        )
+        new_shapefunctions = prev_shapefunctions(new_grid, new_particles)
 
         new_nodes = self.p2g(
             particles=new_particles,
@@ -78,15 +76,15 @@ class USL(eqx.Module):
 
         # Apply forces here
         new_forces_stack = []
-        # for forces in forces_stack:
-        #     nodes, forces = forces.apply_on_nodes_moments(
-        #         particles=particles,
-        #         nodes=nodes,
-        #         shapefunctions=shapefunctions,
-        #         dt=self.dt,
-        #         step=step,
-        #     )
-        #     new_forces_stack.append(forces)
+        for forces in prev_forces_stack:
+            new_nodes, new_forces = forces(
+                particles=new_particles,
+                nodes=new_nodes,
+                grid = new_grid,
+                shapefunctions=new_shapefunctions,
+                step=step,
+            )
+            new_forces_stack.append(new_forces)
 
         new_particles = self.g2p(
             particles=new_particles,
@@ -95,12 +93,9 @@ class USL(eqx.Module):
             grid=new_grid,
         )
 
-
         new_material_stack = []
         for material in prev_material_stack:
-            new_particles, new_material = material.update_from_particles(
-                particles=new_particles
-            )
+            new_particles, new_material = material(particles=new_particles)
             new_material_stack.append(new_material)
 
         return (
@@ -110,7 +105,7 @@ class USL(eqx.Module):
             new_shapefunctions,
             new_grid,
             new_material_stack,
-            new_forces_stack
+            new_forces_stack,
         )
 
     def p2g(

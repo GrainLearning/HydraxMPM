@@ -17,7 +17,9 @@ from .partition.grid_stencil_map import GridStencilMap
 from .solvers.usl import USL
 from .particles.particles import Particles
 from .nodes.nodes import Nodes
+
 from .shapefunctions.linear import LinearShapeFunction
+from .shapefunctions.cubic import CubicShapeFunction
 
 from .materials.linearelastic import LinearIsotropicElastic
 
@@ -31,8 +33,10 @@ from .materials_analysis.plot import (
     PlotHelper,
 )
 from .solvers.run_solver import run_solver
-# run_solver_io
+from .forces.nodelevelset import NodeLevelSet
+from .forces.gravity import Gravity
 
+# run_solver_io
 
 
 # from .utils.jax_helpers import create_shapefunction
@@ -40,8 +44,7 @@ from .solvers.run_solver import run_solver
 
 # from .forces.dirichletbox import DirichletBox
 # from .forces.forces import Forces
-# from .forces.gravity import Gravity
-# from .forces.nodelevelset import NodeLevelSet
+
 # from .forces.nodewall import NodeWall
 # from .forces.rigidparticles import RigidParticles
 # from .materials.druckerprager import DruckerPrager
@@ -64,8 +67,6 @@ from .solvers.run_solver import run_solver
 # from .nodes.nodes_grid import NodesGrid
 
 
-
-
 # from .shapefunctions.cubic import CubicShapeFunction
 # from .shapefunctions.cubic_old import CubicShapeFunction2
 # # from .shapefunctions.linear import LinearShapeFunction
@@ -78,46 +79,46 @@ from .solvers.run_solver import run_solver
 # from .solvers.usl_asflip import USL_ASFLIP
 
 from .utils.math_helpers import (
-#     e_to_phi,
-#     e_to_phi_stack,
-#     get_dev_strain,
-#     get_dev_strain_stack,
-#     get_dev_stress,
-#     get_dev_stress_stack,
-#     get_e_from_bulk_density,
-#     get_hencky_strain_stack,
-#     get_inertial_number,
-#     get_inertial_number_stack,
-#     get_J2,
-#     get_J2_stack,
-#     get_k0_stress,
-#     get_KE,
+    #     e_to_phi,
+    #     e_to_phi_stack,
+    #     get_dev_strain,
+    #     get_dev_strain_stack,
+    #     get_dev_stress,
+    #     get_dev_stress_stack,
+    #     get_e_from_bulk_density,
+    #     get_hencky_strain_stack,
+    #     get_inertial_number,
+    #     get_inertial_number_stack,
+    #     get_J2,
+    #     get_J2_stack,
+    #     get_k0_stress,
+    #     get_KE,
     get_KE_stack,
-#     get_phi_from_bulk_density,
-#     get_phi_from_bulk_density_stack,
-#     get_phi_from_L,
-#     get_plastic_strain,
-#     get_plastic_strain_stack,
-#     get_pressure,
-#     get_pressure_stack,
-#     get_q_vm,
-#     get_q_vm_stack,
-#     get_scalar_shear_strain,
-#     get_scalar_shear_strain_stack,
-#     get_scalar_shear_stress,
-#     get_scalar_shear_stress_stack,
-#     get_skew_tensor,
-#     get_skew_tensor_stack,
-#     get_small_strain,
-#     get_small_strain_stack,
-#     get_strain_rate_from_L,
-#     get_strain_rate_from_L_stack,
-#     get_sym_tensor,
-#     get_sym_tensor_stack,
-#     get_volumetric_strain,
-#     get_volumetric_strain_stack,
-#     phi_to_e,
-#     phi_to_e_stack,
+    #     get_phi_from_bulk_density,
+    #     get_phi_from_bulk_density_stack,
+    #     get_phi_from_L,
+    #     get_plastic_strain,
+    #     get_plastic_strain_stack,
+    #     get_pressure,
+        get_pressure_stack,
+    #     get_q_vm,
+    #     get_q_vm_stack,
+    #     get_scalar_shear_strain,
+    #     get_scalar_shear_strain_stack,
+    #     get_scalar_shear_stress,
+    #     get_scalar_shear_stress_stack,
+    #     get_skew_tensor,
+    #     get_skew_tensor_stack,
+    #     get_small_strain,
+    #     get_small_strain_stack,
+    #     get_strain_rate_from_L,
+    #     get_strain_rate_from_L_stack,
+    #     get_sym_tensor,
+    #     get_sym_tensor_stack,
+    #     get_volumetric_strain,
+    #     get_volumetric_strain_stack,
+    #     phi_to_e,
+    #     phi_to_e_stack,
 )
 
 from .utils.mpm_plot_helpers import make_pvplots, points_to_3D, PvPointHelper

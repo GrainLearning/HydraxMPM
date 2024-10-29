@@ -48,7 +48,7 @@ def test_calc_shp_2d():
     particles = pm.Particles(config, position_stack=position_stack)
     shapefunction = pm.LinearShapeFunction(config)
 
-    shapefunction = shapefunction.get_shapefunctions(grid, particles)
+    shapefunction = shapefunction(grid, particles)
 
     expected_shapef_stack = jnp.array(
         [
@@ -97,7 +97,7 @@ def test_calc_shp_3d():
     particles = pm.Particles(config, position_stack=position_stack)
     shapefunction = pm.LinearShapeFunction(config)
 
-    shapefunction = shapefunction.get_shapefunctions(grid, particles)
+    shapefunction = shapefunction(grid, particles)
 
     expected_shapef_stack = jnp.array(
         [
@@ -204,4 +204,3 @@ def test_calc_shp_3d():
     np.testing.assert_allclose(
         expected_shapef_grad_stack, shapefunction.shapef_grad_stack, rtol=1e-4
     )
-

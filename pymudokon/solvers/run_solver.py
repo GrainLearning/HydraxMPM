@@ -119,7 +119,7 @@ def run_solver(
             new_grid,
             new_material_stack,
             new_forces_stack,
-        ) = prev_solver.update(
+        ) = prev_solver(
             prev_particles,
             prev_nodes,
             prev_shapefunctions,

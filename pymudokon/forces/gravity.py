@@ -7,13 +7,19 @@ import chex
 import jax
 import jax.numpy as jnp
 
+from pymudokon.config.mpm_config import MPMConfig
+
+from ..partition.grid_stencil_map import GridStencilMap
+
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..shapefunctions.shapefunctions import ShapeFunction
 
+import equinox as eqx
+from functools import partial
 
-@chex.dataclass
-class Gravity:
+
+class Gravity(eqx.Module):
     """Gravity force enforced on the background grid.
 
     Attributes:
@@ -33,48 +39,44 @@ class Gravity:
     increment: chex.Array
     stop_increment: jnp.int32
 
+    dt: float = eqx.field(static=True, converter=lambda x: float(x))
 
-    @classmethod
-    def create(cls: Self, gravity: chex.Array=None, increment : chex.Array = None,stop_increment : jnp.int32 = 0) -> Self:
+    def __init__(
+        self: Self,
+        config: MPMConfig,
+        gravity: chex.Array = None,
+        increment: chex.Array = None,
+        stop_increment: jnp.int32 = 0,
+        dt: float = 0.0,
+    ) -> Self:
         """Initialize Gravity force on Nodes."""
-        return cls(gravity=gravity, increment= increment, stop_increment=stop_increment)
+        if config:
+            dt = config.dt
 
-    def apply_on_nodes_moments(
+        self.dt = dt
+        self.gravity = gravity
+        self.increment = increment
+        self.stop_increment = stop_increment
+
+    def __call__(
         self: Self,
         nodes: Nodes,
+        grid: GridStencilMap = None,
         particles: Particles = None,
         shapefunctions: ShapeFunction = None,
-        dt: jnp.float32 = 0.0,
-        step: jnp.int32 = 0
+        step: int = 0,
     ) -> Tuple[Nodes, Self]:
         """Apply gravity on the nodes."""
-        
-        if self.increment is not None:
-            # jax.debug.print("grav step {} {} {}",step, self.stop_increment, is_done)
-            self = jax.lax.cond(
-                self.stop_increment >= step,
-                lambda:  self.replace(gravity = self.gravity + self.increment),
-                lambda: self
-                )
 
-        
-        moment_stack, moment_nt_stack = self.apply_gravity(
-            nodes.moment_stack, nodes.moment_nt_stack, nodes.mass_stack, dt
+        moment_gravity = nodes.mass_stack.reshape(-1, 1) * self.gravity * self.dt
+
+        new_moment_nt_stack = nodes.moment_nt_stack + moment_gravity
+
+        new_nodes = eqx.tree_at(
+            lambda state: state.moment_nt_stack,
+            nodes,
+            new_moment_nt_stack,
         )
-        return nodes.replace(
-            moment_nt_stack=moment_nt_stack,
-        ), self
 
-    def apply_gravity(
-        self,
-        moment: chex.Array,
-        moment_nt: chex.Array,
-        masses: chex.Array,
-        dt: jnp.float32,
-    ) -> Tuple[chex.Array, chex.Array]:
-        """Apply gravity on the nodes moments."""
-        moment_gravity = masses.reshape(-1, 1) * self.gravity * dt
-
-        moment_nt = moment_nt + moment_gravity
-
-        return moment, moment_nt
+        # self is updated if there is a gravity ramp
+        return new_nodes, self
