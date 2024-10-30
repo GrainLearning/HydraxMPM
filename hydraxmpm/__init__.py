@@ -8,6 +8,7 @@ from .nodes.grid import Grid
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .solvers.usl import USL
+from .solvers.usl_apic import USL_APIC
 from .shapefunctions.shapefunctions import SHAPEFUNCTION
 from .utils.mpm_domain_helpers import discretize, fill_domain_with_particles
 from .materials.linearelastic import LinearIsotropicElastic

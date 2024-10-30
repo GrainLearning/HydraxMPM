@@ -40,14 +40,14 @@ class Grid(eqx.Module):
         )
 
         self.intr_dist_stack = jnp.zeros(
-            (config.num_points * config.window_size, config.dim)
-        )
+            (config.num_points * config.window_size, 3)
+        )  # 3D needed for APIC / AFLIP
 
         self.intr_shapef_stack = jnp.zeros((config.num_points * config.window_size))
         self.intr_shapef_grad_stack = jnp.zeros(
             (config.num_points * config.window_size, 3)
         )
-        
+
         if config.shapefunction == SHAPEFUNCTION.linear:
             self.shapefunction_call = vmap_linear_shapefunction
         elif config.shapefunction == SHAPEFUNCTION.cubic:
@@ -78,7 +78,15 @@ class Grid(eqx.Module):
 
             shapef, shapef_grad_padded = self.shapefunction_call(intr_dist, self.config)
 
-            return intr_dist, intr_hash, shapef, shapef_grad_padded
+            # is there a more efficient way to do this?
+            intr_dist_padded = jnp.pad(
+                intr_dist,
+                self.config.padding,
+                mode="constant",
+                constant_values=0.0,
+            )
+
+            return intr_dist_padded, intr_hash, shapef, shapef_grad_padded
 
         (
             new_intr_dist_stack,
@@ -118,4 +126,28 @@ class Grid(eqx.Module):
 
         return jax.vmap(vmap_g2p)(
             self.intr_hash_stack, self.intr_shapef_stack, self.intr_shapef_grad_stack
+        )
+
+    # adding relative distance
+    def vmap_intr_scatter_dist(self, p2g_func: Callable):
+        def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad, intr_dist):
+            point_id = (intr_id / self.config.window_size).astype(jnp.uint32)
+            return p2g_func(point_id, intr_shapef, intr_shapef_grad, intr_dist)
+
+        return jax.vmap(vmap_p2g)(
+            self.intr_id_stack,
+            self.intr_shapef_stack,
+            self.intr_shapef_grad_stack,
+            self.intr_dist_stack,
+        )
+
+    def vmap_intr_gather_dist(self, g2p_func: Callable):
+        def vmap_g2p(intr_hash, intr_shapef, intr_shapef_grad, intr_dist):
+            return g2p_func(intr_hash, intr_shapef, intr_shapef_grad,intr_dist)
+
+        return jax.vmap(vmap_g2p)(
+            self.intr_hash_stack,
+            self.intr_shapef_stack,
+            self.intr_shapef_grad_stack,
+            self.intr_dist_stack,
         )
