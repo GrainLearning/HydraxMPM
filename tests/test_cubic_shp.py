@@ -3,14 +3,14 @@
 import jax.numpy as jnp
 import numpy as np
 
-import pymudokon as pm
+import hydraxmpm as hdx
 import jax
 
 
 def test_create():
     """Test creation of cubic shape function."""
 
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[
             1.0,
@@ -18,17 +18,16 @@ def test_create():
         ],
         cell_size=0.1,
         num_points=2,
-        shapefunction_type="cubic",
+        shapefunction=hdx.SHAPEFUNCTION.cubic,
     )
-    shapefunction = pm.CubicShapeFunction(config)
 
-    assert isinstance(shapefunction, pm.CubicShapeFunction)
+    grid = hdx.Grid(config)
 
-    np.testing.assert_allclose(shapefunction.shapef_stack, jnp.zeros((2, 16)))
+    np.testing.assert_allclose(grid.intr_shapef_stack, jnp.zeros((2 * 16)))
 
     np.testing.assert_allclose(
-        shapefunction.shapef_grad_stack,
-        jnp.zeros((2, 16, 3), dtype=jnp.float32),
+        grid.intr_shapef_grad_stack,
+        jnp.zeros((2 * 16, 3), dtype=jnp.float32),
     )
 
 
@@ -36,7 +35,7 @@ def test_calc_shp_2d():
     """Test the cubic shape function for 2D."""
     position_stack = jnp.array([[0.45, 0.21], [0.3, 0.4]])
 
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[
             1.0,
@@ -44,108 +43,91 @@ def test_calc_shp_2d():
         ],
         cell_size=0.1,
         num_points=2,
-        shapefunction_type="cubic",
+        shapefunction=hdx.SHAPEFUNCTION.cubic,
     )
 
-    shapefunction = pm.CubicShapeFunction(config)
+    grid = hdx.Grid(config)
 
-    grid = pm.GridStencilMap(config)
-
-    particles = pm.Particles(config, position_stack)
-
-    grid = grid.partition(particles.position_stack)
-
-    new_shapefunction = shapefunction(grid, particles)
+    grid = grid.get_interactions(position_stack)
 
     np.testing.assert_allclose(
-        new_shapefunction.shapef_stack.shape,
-        (
-            2,
-            16,
-        ),
+        grid.intr_shapef_stack.shape,
+        (2 * 16),
     )
     expected_shapef_stack = [
-        [
-            2.5312577e-03,
-            1.3691000e-02,
-            4.6076472e-03,
-            3.4694935e-06,
-            5.8218818e-02,
-            3.1489241e-01,
-            1.0597569e-01,
-            7.9798207e-05,
-            5.8218818e-02,
-            3.1489241e-01,
-            1.0597569e-01,
-            7.9798207e-05,
-            2.5312577e-03,
-            1.3691000e-02,
-            4.6076472e-03,
-            3.4694935e-06,
-        ],
-        [
-            2.7777765e-02,
-            1.1111109e-01,
-            2.7777774e-02,
-            -1.9868210e-08,
-            1.1111109e-01,
-            4.4444448e-01,
-            1.1111113e-01,
-            -7.9472862e-08,
-            2.7777774e-02,
-            1.1111113e-01,
-            2.7777784e-02,
-            -1.9868217e-08,
-            -1.9868210e-08,
-            -7.9472862e-08,
-            -1.9868217e-08,
-            1.4210855e-14,
-        ],
+        2.5312577e-03,
+        1.3691000e-02,
+        4.6076472e-03,
+        3.4694935e-06,
+        5.8218818e-02,
+        3.1489241e-01,
+        1.0597569e-01,
+        7.9798207e-05,
+        5.8218818e-02,
+        3.1489241e-01,
+        1.0597569e-01,
+        7.9798207e-05,
+        2.5312577e-03,
+        1.3691000e-02,
+        4.6076472e-03,
+        3.4694935e-06,
+        2.7777765e-02,
+        1.1111109e-01,
+        2.7777774e-02,
+        -1.9868210e-08,
+        1.1111109e-01,
+        4.4444448e-01,
+        1.1111113e-01,
+        -7.9472862e-08,
+        2.7777774e-02,
+        1.1111113e-01,
+        2.7777784e-02,
+        -1.9868217e-08,
+        -1.9868210e-08,
+        -7.9472862e-08,
+        -1.9868217e-08,
+        1.4210855e-14,
     ]
 
-    np.testing.assert_allclose(expected_shapef_stack, new_shapefunction.shapef_stack)
+    np.testing.assert_allclose(expected_shapef_stack, grid.intr_shapef_stack)
 
     expected_shapef_grad_stack = [
-        [
-            [-1.5187517e-01, -8.4375188e-02, 0.0000000e00],
-            [-8.2145840e-01, -3.8541708e-02, 0.0000000e00],
-            [-2.7645829e-01, 1.2187522e-01, 0.0000000e00],
-            [-2.0816922e-04, 1.0416677e-03, 0.0000000e00],
-            [-7.5937581e-01, -1.9406257e00, 0.0000000e00],
-            [-4.1072922e00, -8.8645762e-01, 0.0000000e00],
-            [-1.3822916e00, 2.8031249e00, 0.0000000e00],
-            [-1.0408461e-03, 2.3958312e-02, 0.0000000e00],
-            [7.5937581e-01, -1.9406257e00, 0.0000000e00],
-            [4.1072922e00, -8.8645762e-01, 0.0000000e00],
-            [1.3822916e00, 2.8031249e00, 0.0000000e00],
-            [1.0408461e-03, 2.3958312e-02, 0.0000000e00],
-            [1.5187517e-01, -8.4375188e-02, 0.0000000e00],
-            [8.2145840e-01, -3.8541708e-02, 0.0000000e00],
-            [2.7645829e-01, 1.2187522e-01, 0.0000000e00],
-            [2.0816922e-04, 1.0416677e-03, 0.0000000e00],
-        ],
-        [
-            [-8.3333313e-01, -8.3333313e-01, 0.0000000e00],
-            [-3.3333335e00, -0.0000000e00, 0.0000000e00],
-            [-8.3333343e-01, 8.3333313e-01, 0.0000000e00],
-            [5.9604645e-07, 0.0000000e00, 0.0000000e00],
-            [-0.0000000e00, -3.3333335e00, 0.0000000e00],
-            [-0.0000000e00, -0.0000000e00, 0.0000000e00],
-            [-0.0000000e00, 3.3333335e00, 0.0000000e00],
-            [0.0000000e00, 0.0000000e00, 0.0000000e00],
-            [8.3333313e-01, -8.3333343e-01, 0.0000000e00],
-            [3.3333335e00, -0.0000000e00, 0.0000000e00],
-            [8.3333343e-01, 8.3333343e-01, 0.0000000e00],
-            [-5.9604645e-07, 0.0000000e00, 0.0000000e00],
-            [0.0000000e00, 5.9604645e-07, 0.0000000e00],
-            [0.0000000e00, 0.0000000e00, 0.0000000e00],
-            [0.0000000e00, -5.9604645e-07, 0.0000000e00],
-            [-0.0000000e00, -0.0000000e00, 0.0000000e00],
-        ],
+        [-1.5187517e-01, -8.4375188e-02, 0.0000000e00],
+        [-8.2145840e-01, -3.8541708e-02, 0.0000000e00],
+        [-2.7645829e-01, 1.2187522e-01, 0.0000000e00],
+        [-2.0816922e-04, 1.0416677e-03, 0.0000000e00],
+        [-7.5937581e-01, -1.9406257e00, 0.0000000e00],
+        [-4.1072922e00, -8.8645762e-01, 0.0000000e00],
+        [-1.3822916e00, 2.8031249e00, 0.0000000e00],
+        [-1.0408461e-03, 2.3958312e-02, 0.0000000e00],
+        [7.5937581e-01, -1.9406257e00, 0.0000000e00],
+        [4.1072922e00, -8.8645762e-01, 0.0000000e00],
+        [1.3822916e00, 2.8031249e00, 0.0000000e00],
+        [1.0408461e-03, 2.3958312e-02, 0.0000000e00],
+        [1.5187517e-01, -8.4375188e-02, 0.0000000e00],
+        [8.2145840e-01, -3.8541708e-02, 0.0000000e00],
+        [2.7645829e-01, 1.2187522e-01, 0.0000000e00],
+        [2.0816922e-04, 1.0416677e-03, 0.0000000e00],
+        [-8.3333313e-01, -8.3333313e-01, 0.0000000e00],
+        [-3.3333335e00, -0.0000000e00, 0.0000000e00],
+        [-8.3333343e-01, 8.3333313e-01, 0.0000000e00],
+        [5.9604645e-07, 0.0000000e00, 0.0000000e00],
+        [-0.0000000e00, -3.3333335e00, 0.0000000e00],
+        [-0.0000000e00, -0.0000000e00, 0.0000000e00],
+        [-0.0000000e00, 3.3333335e00, 0.0000000e00],
+        [0.0000000e00, 0.0000000e00, 0.0000000e00],
+        [8.3333313e-01, -8.3333343e-01, 0.0000000e00],
+        [3.3333335e00, -0.0000000e00, 0.0000000e00],
+        [8.3333343e-01, 8.3333343e-01, 0.0000000e00],
+        [-5.9604645e-07, 0.0000000e00, 0.0000000e00],
+        [0.0000000e00, 5.9604645e-07, 0.0000000e00],
+        [0.0000000e00, 0.0000000e00, 0.0000000e00],
+        [0.0000000e00, -5.9604645e-07, 0.0000000e00],
+        [-0.0000000e00, -0.0000000e00, 0.0000000e00],
     ]
 
     np.testing.assert_allclose(
-        expected_shapef_grad_stack, new_shapefunction.shapef_grad_stack, rtol=1e-5
+        expected_shapef_grad_stack, grid.intr_shapef_grad_stack, rtol=1e-5
     )
 
 
@@ -153,31 +135,25 @@ def test_calc_shp_3d():
     """Test the cubic shape function for 3D."""
     # only test 1 particle here for clarity
     position_stack = jnp.array([[0.45, 0.21, 0.1]])
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0, 0.0],
         end=[1.0, 1.0, 1.0],
         cell_size=0.1,
         num_points=1,
-        shapefunction_type="cubic",
+        shapefunction=hdx.SHAPEFUNCTION.cubic,
     )
 
-    shapefunction = pm.CubicShapeFunction(config)
+    grid = hdx.Grid(config)
 
-    grid = pm.GridStencilMap(config)
-
-    particles = pm.Particles(config, position_stack)
-
-    grid = grid.partition(particles.position_stack)
-
-    new_shapefunction = shapefunction(grid, particles)
+    grid = grid.get_interactions(position_stack)
 
     np.testing.assert_allclose(
-        new_shapefunction.shapef_stack.shape,
-        (1, 64),
+        grid.intr_shapef_stack.shape,
+        (64,)
     )
 
     expected_shapef_stack = [
-        [
+
             4.2187618e-04,
             2.2818327e-03,
             7.6794100e-04,
@@ -242,15 +218,13 @@ def test_calc_shp_3d():
             -1.6320943e-09,
             -5.4927435e-10,
             -4.1359586e-13,
-        ]
     ]
 
-    np.testing.assert_allclose(expected_shapef_stack, new_shapefunction.shapef_stack)
+    np.testing.assert_allclose(expected_shapef_stack, grid.intr_shapef_stack)
 
-    np.testing.assert_allclose(jnp.prod(new_shapefunction.shapef_stack), 0.0)
+    np.testing.assert_allclose(jnp.prod(grid.intr_shapef_stack), 0.0)
 
     expected_shapef_grad_stack = [
-        [
             [-2.5312522e-02, -1.4062528e-02, -1.2656288e-02],
             [-1.3690969e-01, -6.4236163e-03, -6.8454996e-02],
             [-4.6076372e-02, 2.0312531e-02, -2.3038236e-02],
@@ -315,12 +289,8 @@ def test_calc_shp_3d():
             [-9.7925472e-08, 4.5945296e-09, 0.0000000e00],
             [-3.2956397e-08, -1.4528658e-08, 0.0000000e00],
             [-2.4815705e-11, -1.2417646e-10, 0.0000000e00],
-        ]
     ]
 
     np.testing.assert_allclose(
-        expected_shapef_grad_stack, new_shapefunction.shapef_grad_stack
+        expected_shapef_grad_stack, grid.intr_shapef_grad_stack
     )
-
-
-test_calc_shp_3d()

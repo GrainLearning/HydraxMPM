@@ -1,40 +1,51 @@
-site_name: Pymudokon
+site_name: HydraxMPM
 nav:
   - Home: index.md
   - Installation: installing.md
-  - Usage: usage/index.md
-  - API:
-    - Solvers: api/solvers.md
-    - Shape functions: api/shapefunctions.md
-    - Materials: api/materials.md
-    - Math utils: api/math.md
-  - About: about.md
+  # - Usage: usage/index.md
+  - Basic API:
+    - Particles: api/particles.md
+    - Shapefunctions: api/shapefunctions.md
+  - Examples: 
+    - Two sphere impact: examples/two_sphere_impact.md
+    # - Solvers: api/solvers.md
+    # - Shape functions: api/shapefunctions.md
+  #   - Materials: api/materials.md
+  #   - Math utils: api/math.md
+  # - About: about.md
 
 theme:
     name: material
     palette:
-      scheme: slate
       primary: amber
-      accent: red
+      scheme: slate
+      accent: purple
       features:
         - navigation.sections
+        - content.code.copy
 
 markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences # Code highlighting for material theme
+  - pymdownx.superfences
   - admonition
   - def_list
+  - footnotes
   - pymdownx.details
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.arithmatex:
       generic: true
 
-
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css: [extra.css]
 
 plugins:
   - search
@@ -43,13 +54,18 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [pymudokon]
+          paths: [hydraxmpm,examples]
           options:
             show_source: false
-            docstring_section_style: list
+            docstring_section_style: table
             signature_crossrefs: true
             show_bases: false
-
+            show_symbol_type_heading: true
+            ignore_init_summary: false
+            trim_doctest_flags: true
+            relative_crossrefs: true
+            show_if_no_docstring: false
+            show_docstring_modules: false
             # docstring_section_style: list
           #   show_if_no_docstring: true
           #   show_source: false  # don't include source code

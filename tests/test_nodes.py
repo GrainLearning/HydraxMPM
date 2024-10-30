@@ -4,14 +4,14 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import pymudokon as pm
+import hydraxmpm as hdx
 import equinox as eqx
 
 
 def test_create():
     """Unit test to create grid nodes over multiple dimensions."""
 
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[
             1.0,
@@ -20,20 +20,22 @@ def test_create():
         cell_size=0.1,
         num_points=1,
     )
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
-    assert isinstance(nodes, pm.Nodes)
+    assert isinstance(nodes, hdx.Nodes)
 
-    assert nodes.num_nodes_total == 121
+    assert nodes.config.num_cells == 121
+
+    print(nodes.intr_dist_stack)
 
 
 def test_refresh():
     """Unit test to reset node state."""
 
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=0.5, num_points=1
     )
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
     nodes = eqx.tree_at(
         lambda state: (state.mass_stack), nodes, (jnp.ones(9).astype(jnp.float32))

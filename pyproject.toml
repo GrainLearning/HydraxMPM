@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "pymudokon"
+name = "hydraxmpm"
 version = "0.1.0"
 description = ""
-authors = ["Retief Lubbe <retieflubbe@outlook.com>"]
+authors = ["Retief Lubbe <r.lubbe@utwente.nl>","Hongyang Cheng <h.cheng@utwente.nl>"]
 readme = "README.md"
 packages = [
-    { include = "pymudokon" }
+    { include = "hydraxmpm" }
 ]
 
 [tool.poetry.dependencies]
@@ -48,6 +48,7 @@ mkdocstrings-python = "^1.11.1"
 mkdocstrings = "^0.26.1"
 mkdocs-autorefs = "^1.2.0"
 mkdocs-material = "^9.5.39"
+pygments = "^2.18.0"
 
 
 

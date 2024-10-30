@@ -3,13 +3,14 @@
 import jax.numpy as jnp
 import numpy as np
 
-import pymudokon as pm
+import hydraxmpm as hdx
+import jax
 
 
 def test_create():
     """Unit test to initialize usl solver."""
 
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[
             1.0,
@@ -19,13 +20,13 @@ def test_create():
         num_points=1,
         dt=0.001,
     )
-    usl = pm.USL(config, alpha=0.1)
-    assert isinstance(usl, pm.USL)
+    usl = hdx.USL(config, alpha=0.1)
+    assert isinstance(usl, hdx.USL)
 
 
 def test_p2g_2d():
     """Unit test to perform particle-to-grid transfer for 2D."""
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[
             1.0,
@@ -34,9 +35,10 @@ def test_p2g_2d():
         cell_size=1.0,
         num_points=2,
         dt=0.001,
+        shapefunction=hdx.SHAPEFUNCTION.linear,
     )
 
-    particles = pm.Particles(
+    particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
         velocity_stack=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -44,21 +46,17 @@ def test_p2g_2d():
         volume_stack=jnp.array([0.7, 0.4]),
     )
 
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
-    shapefunction = pm.LinearShapeFunction(config)
+    usl = hdx.USL(config=config, alpha=0.99)
 
-    grid = pm.GridStencilMap(config)
+    @jax.jit
+    def usl_p2g(usl, particles, nodes):
+        nodes = nodes.get_interactions(particles.position_stack)
+        nodes = usl.p2g(particles, nodes)
+        return nodes
 
-    grid = grid.partition(particles.position_stack)
-
-    shapefunction = shapefunction.get_shapefunctions(grid=grid, particles=particles)
-
-    usl = pm.USL(config=config, alpha=0.99)
-
-    nodes = usl.p2g(
-        particles=particles, nodes=nodes, shapefunctions=shapefunction, grid=grid
-    )
+    nodes = usl_p2g(usl, particles, nodes)
 
     expected_mass_stack = jnp.array([0.27, 0.09, 0.03, 0.01])
 
@@ -75,15 +73,16 @@ def test_p2g_2d():
 
 def test_p2g_3d():
     """Unit test to perform particle-to-grid transfer in 3D."""
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0, 0.0],
         end=[1.0, 1.0, 1.0],
         cell_size=1.0,
         num_points=2,
         dt=0.001,
+        shapefunction=hdx.SHAPEFUNCTION.linear,
     )
 
-    particles = pm.Particles(
+    particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.1, 0.25, 0.3], [0.1, 0.25, 0.3]]),
         velocity_stack=jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
@@ -92,21 +91,17 @@ def test_p2g_3d():
         stress_stack=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
     )
 
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
-    shapefunction = pm.LinearShapeFunction(config)
+    usl = hdx.USL(config=config, alpha=0.99)
 
-    grid = pm.GridStencilMap(config)
+    @jax.jit
+    def usl_p2g(usl, particles, nodes):
+        nodes = nodes.get_interactions(particles.position_stack)
+        nodes = usl.p2g(particles, nodes)
+        return nodes
 
-    grid = grid.partition(particles.position_stack)
-
-    shapefunction = shapefunction.get_shapefunctions(grid=grid, particles=particles)
-
-    usl = pm.USL(config=config, alpha=0.99)
-
-    nodes = usl.p2g(
-        particles=particles, nodes=nodes, shapefunctions=shapefunction, grid=grid
-    )
+    nodes = usl_p2g(usl, particles, nodes)
 
     # note these values have not been verified analytically
     expected_mass_stack = jnp.array(
@@ -132,7 +127,7 @@ def test_p2g_3d():
 
 
 def test_g2p_2d():
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[
             1.0,
@@ -143,7 +138,7 @@ def test_g2p_2d():
         dt=0.1,
     )
 
-    particles = pm.Particles(
+    particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
         velocity_stack=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -152,24 +147,18 @@ def test_g2p_2d():
         stress_stack=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
     )
 
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
-    shapefunction = pm.LinearShapeFunction(config)
+    usl = hdx.USL(config=config, alpha=0.99)
 
-    grid = pm.GridStencilMap(config)
+    @jax.jit
+    def usl_p2g_g2p(usl, particles, nodes):
+        nodes = nodes.get_interactions(particles.position_stack)
+        nodes = usl.p2g(particles, nodes)
+        particles = usl.g2p(particles, nodes)
+        return particles
 
-    grid = grid.partition(particles.position_stack)
-
-    shapefunction = shapefunction.get_shapefunctions(grid=grid, particles=particles)
-
-    usl = pm.USL(config=config, alpha=0.99)
-
-    nodes = usl.p2g(
-        nodes=nodes, particles=particles, shapefunctions=shapefunction, grid=grid
-    )
-    particles = usl.g2p(
-        particles=particles, nodes=nodes, shapefunctions=shapefunction, grid=grid
-    )
+    particles = usl_p2g_g2p(usl, particles, nodes)
 
     expected_volume_stack = jnp.array([0.49855555, 0.2848889])
 
@@ -226,7 +215,7 @@ def test_g2p_2d():
 
 
 def test_g2p_3d():
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0, 0.0],
         end=[1.0, 1.0, 1.0],
         cell_size=1.0,
@@ -234,7 +223,7 @@ def test_g2p_3d():
         dt=0.1,
     )
 
-    particles = pm.Particles(
+    particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.1, 0.25, 0.3], [0.1, 0.25, 0.3]]),
         velocity_stack=jnp.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
@@ -243,24 +232,18 @@ def test_g2p_3d():
         stress_stack=jnp.stack([jnp.ones((3, 3)), jnp.zeros((3, 3))]),
     )
 
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
-    shapefunction = pm.LinearShapeFunction(config)
+    usl = hdx.USL(config=config, alpha=0.99)
 
-    grid = pm.GridStencilMap(config)
+    @jax.jit
+    def usl_p2g_g2p(usl, particles, nodes):
+        nodes = nodes.get_interactions(particles.position_stack)
+        nodes = usl.p2g(particles, nodes)
+        particles = usl.g2p(particles, nodes)
+        return particles
 
-    grid = grid.partition(particles.position_stack)
-
-    shapefunction = shapefunction.get_shapefunctions(grid=grid, particles=particles)
-
-    usl = pm.USL(config=config, alpha=0.99)
-
-    nodes = usl.p2g(
-        particles=particles, nodes=nodes, shapefunctions=shapefunction, grid=grid
-    )
-    particles = usl.g2p(
-        particles=particles, nodes=nodes, shapefunctions=shapefunction, grid=grid
-    )
+    particles = usl_p2g_g2p(usl, particles, nodes)
 
     expected_volume_stack = jnp.array([0.4402222222222, 0.25155553])
 
@@ -316,7 +299,7 @@ def test_g2p_3d():
 def test_update():
     """Unit test to update the state of the USL solver."""
 
-    config = pm.MPMConfig(
+    config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[1.0, 1.0],
         cell_size=0.5,
@@ -324,7 +307,7 @@ def test_update():
         dt=0.001,
     )
 
-    particles = pm.Particles(
+    particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.1, 0.1], [0.7, 0.1]]),
         velocity_stack=jnp.array([[1.0, 2.0], [0.3, 0.1]]),
@@ -332,23 +315,13 @@ def test_update():
         mass_stack=jnp.array([1.0, 3.0]),
     )
 
-    nodes = pm.Nodes(config)
+    nodes = hdx.Nodes(config)
 
-    shapefunctions = pm.LinearShapeFunction(config)
+    usl = hdx.USL(config=config, alpha=0.1)
 
-    usl = pm.USL(config=config, alpha=0.1)
-    grid = pm.GridStencilMap(config)
-
-    usl, particles, nodes, shapefunctions, grid, [], [] = usl.update(
+    usl, particles, nodes, [], [] = usl.update(
         particles=particles,
         nodes=nodes,
-        shapefunctions=shapefunctions,
-        grid=grid,
         material_stack=(),
         forces_stack=(),
     )
-
-
-pm.set_default_gpu(1)
-
-test_update()
