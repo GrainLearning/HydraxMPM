@@ -28,10 +28,7 @@ def test_p2g_2d():
     """Unit test to perform particle-to-grid transfer for 2D."""
     config = hdx.MPMConfig(
         origin=[0.0, 0.0],
-        end=[
-            1.0,
-            1.0,
-        ],
+        end=[1.0,1.0],
         cell_size=1.0,
         num_points=2,
         dt=0.001,

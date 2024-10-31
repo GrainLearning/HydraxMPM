@@ -21,7 +21,6 @@ _MPMConfig = partial(
 )
 
 
-
 _discretize = partial(hdx.discretize, density_ref=997.5)
 
 _water = partial(hdx.NewtonFluid, K=2.0 * 10**6, viscosity=0.002)
@@ -32,8 +31,10 @@ def get_sv(func, val):
 
 
 # time step depends on the cell_size, bulk modulus and initial density
-dt = 0.1*get_sv(_MPMConfig, "cell_size") / np.sqrt(
-    get_sv(_water, "K") / get_sv(_discretize, "density_ref")
+dt = (
+    0.1
+    * get_sv(_MPMConfig, "cell_size")
+    / np.sqrt(get_sv(_water, "K") / get_sv(_discretize, "density_ref"))
 )
 
 # separation of particles depend on the cell size and particles per cell
@@ -67,10 +68,7 @@ gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, -9.81]))
 
 box = hdx.NodeLevelSet(config=config, mu=0.4)
 
-solver = hdx.USL(
-    config=config,
-    alpha=0.99,
-)
+solver = hdx.USL_APIC(config=config)
 
 
 print("Running and compiling")

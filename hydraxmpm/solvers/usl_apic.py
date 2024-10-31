@@ -13,6 +13,7 @@ from ..particles.particles import Particles
 from ..solvers.solver import Solver
 import equinox as eqx
 
+
 class USL_APIC(Solver):
     """
     Explicit Update Stress Last (USL) Affine Particle in Cell (APIC) MPM solver.
@@ -41,66 +42,43 @@ class USL_APIC(Solver):
         self.Bp_stack = jnp.zeros((config.num_points, 3, 3))
         super().__init__(config)
 
-    # def update(
-    #     self, particles, nodes, shapefunctions, material_stack, forces_stack, step
-    # ):
-    #     nodes = nodes.refresh()
-    #     particles = particles.refresh()
+    def update(self, particles, nodes, material_stack, forces_stack, step):
+        nodes = nodes.refresh()
+        particles = particles.refresh()
 
-    #     shapefunctions, intr_dist_3d_stack = shapefunctions.calculate_shapefunction(
-    #         origin=nodes.origin,
-    #         inv_node_spacing=nodes.inv_node_spacing,
-    #         grid_size=nodes.grid_size,
-    #         position_stack=particles.position_stack,
-    #         species_stack=nodes.species_stack,
-    #     )
+        nodes = nodes.get_interactions(particles.position_stack)
 
-    #     # transform from grid space to particle space
-    #     intr_dist_3d_stack = -1.0 * intr_dist_3d_stack * nodes.node_spacing
+        nodes = self.p2g(particles=particles, nodes=nodes)
 
-    #     nodes = self.p2g(
-    #         particles=particles,
-    #         nodes=nodes,
-    #         shapefunctions=shapefunctions,
-    #         intr_dist_3d_stack=intr_dist_3d_stack,
-    #     )
+        # Apply forces here
+        new_forces_stack = []
+        for forces in forces_stack:
+            nodes, new_forces = forces.apply_on_nodes(
+                particles=particles,
+                nodes=nodes,
+                step=step,
+            )
+            new_forces_stack.append(new_forces)
 
-    #     new_forces_stack = []
-    #     for forces in forces_stack:
-    #         nodes, forces = forces.apply_on_nodes_moments(
-    #             particles=particles,
-    #             nodes=nodes,
-    #             shapefunctions=shapefunctions,
-    #             dt=self.dt,
-    #             step=step,
-    #         )
-    #         new_forces_stack.append(forces)
+        particles, self = self.g2p(particles=particles, nodes=nodes)
 
-    #     particles, self = self.g2p(
-    #         particles=particles,
-    #         nodes=nodes,
-    #         shapefunctions=shapefunctions,
-    #         intr_dist_3d_stack=intr_dist_3d_stack,
-    #     )
+        new_material_stack = []
+        for material in material_stack:
+            particles, new_material = material.update_from_particles(
+                particles=particles
+            )
+            new_material_stack.append(new_material)
 
-    #     new_material_stack = []
-    #     for material in material_stack:
-    #         particles, material = material.update_from_particles(
-    #             particles=particles, dt=self.dt
-    #         )
-    #         new_material_stack.append(material)
-
-    #     return (
-    #         self,
-    #         particles,
-    #         nodes,
-    #         shapefunctions,
-    #         new_material_stack,
-    #         new_forces_stack,
-    #     )
+        return (
+            self,
+            particles,
+            nodes,
+            new_material_stack,
+            new_forces_stack,
+        )
 
     def p2g(self: Self, particles: Particles, nodes: Nodes) -> Nodes:
-        def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad,intr_dist):
+        def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = particles.mass_stack.at[point_id].get()
             intr_volumes = particles.volume_stack.at[point_id].get()
             intr_velocities = particles.velocity_stack.at[point_id].get()
@@ -109,20 +87,22 @@ class USL_APIC(Solver):
 
             intr_Bp = self.Bp_stack.at[point_id].get()  # APIC affine matrix
 
-            affine_velocity = (intr_Bp @ jnp.linalg.inv(self.Dp)) @ intr_dist #intr_dist is 3D
+            affine_velocity = (
+                intr_Bp @ jnp.linalg.inv(self.Dp)
+            ) @ intr_dist  # intr_dist is 3D
 
             scaled_mass = intr_shapef * intr_masses
             scaled_moments = scaled_mass * (
-                intr_velocities + affine_velocity.at[:self.config.dim].get()
+                intr_velocities + affine_velocity.at[: self.config.dim].get()
             )
             scaled_ext_force = intr_shapef * intr_ext_forces
             scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
 
-            scaled_total_force = scaled_int_force.at[:self.config.dim].get() + scaled_ext_force
+            scaled_total_force = (
+                scaled_int_force.at[: self.config.dim].get() + scaled_ext_force
+            )
 
             return scaled_mass, scaled_moments, scaled_total_force
-
-
 
         # form a batched interaction
         scaled_mass_stack, scaled_moment_stack, scaled_total_force_stack = (
@@ -160,119 +140,131 @@ class USL_APIC(Solver):
             (new_mass_stack, new_moment_stack, nodes_moment_nt_stack),
         )
 
-    # def g2p(
-    #     self: Self,
-    #     particles: Particles,
-    #     nodes: Nodes,
-    #     shapefunctions: ShapeFunction,
-    #     intr_dist_3d_stack: jax.Array,
-    # ) -> Tuple[Particles, Self]:
-    #     stencil_size, dim = shapefunctions.stencil.shape
+    def g2p(self: Self, particles: Particles, nodes: Nodes) -> Tuple[Particles, Self]:
+        def vmap_intr_g2p(
+            intr_hashes: chex.ArrayBatched,
+            intr_shapef: chex.ArrayBatched,
+            intr_shapef_grad: chex.ArrayBatched,
+            intr_dist: chex.ArrayBatched,
+        ):
+            intr_masses = nodes.mass_stack.at[intr_hashes].get()
+            intr_moments_nt = nodes.moment_nt_stack.at[intr_hashes].get()
 
-    #     padding = (0, 3 - dim)
+            intr_vels_nt = jax.lax.cond(
+                intr_masses > nodes.small_mass_cutoff,
+                lambda x: x / intr_masses,
+                lambda x: jnp.zeros_like(x),
+                intr_moments_nt,
+            )
 
-    #     @partial(jax.vmap, in_axes=(0, 0, 0, 0))
-    #     def vmap_intr_scatter(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist_3d):
-    #         intr_masses = nodes.mass_stack.at[intr_hashes].get()
-    #         intr_moments_nt = nodes.moment_nt_stack.at[intr_hashes].get()
+            intr_scaled_vels_nt = intr_shapef * intr_vels_nt
 
-    #         intr_vels_nt = jax.lax.cond(
-    #             intr_masses > nodes.small_mass_cutoff,
-    #             lambda x: x / intr_masses,
-    #             lambda x: jnp.zeros_like(x),
-    #             intr_moments_nt,
-    #         )
+            # Pad velocities for plane strain
+            intr_vels_nt_padded = jnp.pad(
+                intr_vels_nt,
+                self.config.padding,
+                mode="constant",
+                constant_values=0,
+            )
 
-    #         intr_scaled_vels_nt = intr_shapef * intr_vels_nt
+            # APIC affine matrix
+            intr_Bp = (
+                intr_shapef
+                * intr_vels_nt_padded.reshape(-1, 1)
+                @ intr_dist.reshape(-1, 1).T
+            )
 
-    #         # Pad velocities for plane strain
-    #         intr_vels_nt_padded = jnp.pad(
-    #             intr_vels_nt,
-    #             padding,
-    #             mode="constant",
-    #             constant_values=0,
-    #         )
+            intr_scaled_velgrad = intr_Bp @ self.Dp_inv
 
-    #         # APIC affine matrix
-    #         intr_Bp = (
-    #             intr_shapef
-    #             * intr_vels_nt_padded.reshape(-1, 1)
-    #             @ intr_dist_3d.reshape(-1, 1).T
-    #         )
+            return intr_scaled_vels_nt, intr_scaled_velgrad, intr_Bp
 
-    #         intr_scaled_velgrad = intr_Bp @ self.Dp_inv
+        (
+            new_intr_scaled_vel_nt_stack,
+            new_intr_scaled_velgrad_stack,
+            new_intr_Bp_stack,
+        ) = nodes.vmap_intr_gather_dist(vmap_intr_g2p)
 
-    #         return intr_scaled_vels_nt, intr_scaled_velgrad, intr_Bp
+        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0))
+        def vmap_particles_update(
+            intr_vels_nt_reshaped,
+            intr_velgrad_reshaped,
+            intr_Bp,
+            p_positions,
+            p_F,
+            p_volumes_orig,
+        ):
+            # Update particle quantities
+            p_velgrads_next = jnp.sum(intr_velgrad_reshaped, axis=0)
 
-    #     @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0))
-    #     def vmap_particles_update(
-    #         intr_vels_nt_reshaped,
-    #         intr_velgrad_reshaped,
-    #         intr_Bp,
-    #         p_positions,
-    #         p_F,
-    #         p_volumes_orig,
-    #     ):
-    #         # Update particle quantities
-    #         p_velgrads_next = jnp.sum(intr_velgrad_reshaped, axis=0)
+            vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
 
-    #         vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
+            p_Bp_next = jnp.sum(intr_Bp, axis=0)
 
-    #         p_Bp_next = jnp.sum(intr_Bp, axis=0)
-    #         if dim == 2:
-    #             p_Bp_next = p_Bp_next.at[2, 2].set(0)
+            if self.config.dim == 2:
+                p_Bp_next = p_Bp_next.at[2, 2].set(0)
 
-    #         p_velocities_next = vels_nt
+            p_velocities_next = vels_nt
 
-    #         p_positions_next = p_positions + vels_nt * self.dt
+            p_positions_next = p_positions + vels_nt * self.config.dt
 
-    #         if dim == 2:
-    #             p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
+            if self.config.dim == 2:
+                p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
 
-    #         p_F_next = (jnp.eye(3) + p_velgrads_next * self.dt) @ p_F
+            p_F_next = (jnp.eye(3) + p_velgrads_next * self.config.dt) @ p_F
 
-    #         if dim == 2:
-    #             p_F_next = p_F_next.at[2, 2].set(1)
+            if self.config.dim == 2:
+                p_F_next = p_F_next.at[2, 2].set(1)
 
-    #         p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
-    #         return (
-    #             p_velocities_next,
-    #             p_positions_next,
-    #             p_F_next,
-    #             p_volumes_next,
-    #             p_velgrads_next,
-    #             p_Bp_next,
-    #         )
+            p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
+            return (
+                p_velocities_next,
+                p_positions_next,
+                p_F_next,
+                p_volumes_next,
+                p_velgrads_next,
+                p_Bp_next,
+            )
 
-    #     intr_scaled_vels_nt_stack, intr_scaled_velgrad_stack, intr_Bp_stack = (
-    #         vmap_intr_scatter(
-    #             shapefunctions.intr_hash_stack,
-    #             shapefunctions.intr_shapef_stack,
-    #             shapefunctions.intr_shapef_grad_stack,
-    #             intr_dist_3d_stack,
-    #         )
-    #     )
+        (
+            new_velocity_stack,
+            new_position_stack,
+            new_F_stack,
+            new_volume_stack,
+            new_L_stack,
+            new_Bp_stack,
+        ) = vmap_particles_update(
+            new_intr_scaled_vel_nt_stack.reshape(
+                -1, self.config.window_size, self.config.dim
+            ),
+            new_intr_scaled_velgrad_stack.reshape(-1, self.config.window_size, 3, 3),
+            new_intr_Bp_stack.reshape(-1, self.config.window_size, 3, 3),
+            particles.position_stack,
+            particles.F_stack,
+            particles.volume0_stack,
+        )
 
-    #     (
-    #         p_velocities_next_stack,
-    #         p_positions_next_stack,
-    #         p_F_next_stack,
-    #         p_volumes_next_stack,
-    #         p_velgrads_next_stack,
-    #         p_Bp_next_stack,
-    #     ) = vmap_particles_update(
-    #         intr_scaled_vels_nt_stack.reshape(-1, stencil_size, dim),
-    #         intr_scaled_velgrad_stack.reshape(-1, stencil_size, 3, 3),
-    #         intr_Bp_stack.reshape(-1, stencil_size, 3, 3),
-    #         particles.position_stack,
-    #         particles.F_stack,
-    #         particles.volume0_stack,
-    #     )
+        new_solver = eqx.tree_at(
+            lambda state: (state.Bp_stack),
+            self,
+            (new_Bp_stack),
+        )
 
-    #     return particles.replace(
-    #         velocity_stack=p_velocities_next_stack,
-    #         position_stack=p_positions_next_stack,
-    #         F_stack=p_F_next_stack,
-    #         volume_stack=p_volumes_next_stack,
-    #         L_stack=p_velgrads_next_stack,
-    #     ), self.replace(Bp_stack=p_Bp_next_stack)
+        new_particles = eqx.tree_at(
+            lambda state: (
+                state.volume_stack,
+                state.F_stack,
+                state.L_stack,
+                state.position_stack,
+                state.velocity_stack,
+            ),
+            particles,
+            (
+                new_volume_stack,
+                new_F_stack,
+                new_L_stack,
+                new_position_stack,
+                new_velocity_stack,
+            ),
+        )
+
+        return new_particles, new_solver

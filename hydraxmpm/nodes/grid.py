@@ -85,7 +85,10 @@ class Grid(eqx.Module):
                 mode="constant",
                 constant_values=0.0,
             )
-
+            
+            # transform to grid coordinates
+            intr_dist_padded = -1.0*intr_dist_padded*self.config.cell_size
+            
             return intr_dist_padded, intr_hash, shapef, shapef_grad_padded
 
         (
