@@ -89,28 +89,10 @@ class NodeLevelSet(Forces):
         nodes: Nodes,
         step: int = 0,
     ):
-        def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad):
-            intr_masses = particles.mass_stack.at[point_id].get()
-            intr_normal = (intr_shapef_grad * intr_masses).at[: self.config.dim].get()
-            return intr_normal
-
-        intr_normal_stack = nodes.vmap_intr_scatter(vmap_intr_p2g)
-
-        nodes_normal_stack = (
-            jnp.zeros_like(nodes.moment_nt_stack)
-            .at[nodes.intr_hash_stack]
-            .add(intr_normal_stack)
-        )
-
-        @partial(
-            jax.vmap,
-            in_axes=(
-                0,
-                0,
-            ),
-        )
+        
+        @partial(jax.vmap, in_axes=(0, 0))
         def vmap_selected_nodes(n_id, levelset_vel):
-            normal = nodes_normal_stack.at[n_id].get()
+            normal = nodes.normal_stack.at[n_id].get()
             moment_nt = nodes.moment_nt_stack.at[n_id].get()
             mass = nodes.mass_stack.at[n_id].get()
 

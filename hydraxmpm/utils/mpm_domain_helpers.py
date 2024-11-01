@@ -18,8 +18,6 @@ def discretize(
     particles: Particles,
     nodes: Nodes,
     density_ref: float = 1000,
-    ppc: int = 2,
-    cell_size: float = 1,
 ) -> Tuple[Particles, Nodes]:
     """Discretize the domain.
 
@@ -34,9 +32,6 @@ def discretize(
         Tuple[Particles, Nodes, ShapeFunction]: Discretized particles,
         nodes and shapefunctions.
     """
-    if config:
-        ppc = config.ppc
-        cell_size = config.cell_size
 
     new_volume_stack = particles.calculate_volume()
 

@@ -12,10 +12,10 @@ from .solvers.usl_apic import USL_APIC
 from .shapefunctions.shapefunctions import SHAPEFUNCTION
 from .utils.mpm_domain_helpers import discretize, fill_domain_with_particles
 from .materials.linearelastic import LinearIsotropicElastic
-from .solvers.run_solver import run_solver
-
+from .materials.mu_i_rheology_incompressible import MuI_incompressible
+from .solvers.run_solver import run_solver, run_solver_io
+from .forces.rigidparticles import RigidParticles
 from .materials.newtonfluid import NewtonFluid
-#
 
 from .materials_analysis.plot import (
     add_plot,
@@ -24,7 +24,12 @@ from .materials_analysis.plot import (
     make_plots_3d,
     PlotHelper,
 )
-from .utils.mpm_plot_helpers import make_pvplots, points_to_3D, PvPointHelper
+from .utils.mpm_plot_helpers import (
+    make_pvplots,
+    points_to_3D,
+    point_to_3D,
+    PvPointHelper,
+)
 from .forces.gravity import Gravity
 from .forces.nodelevelset import NodeLevelSet
 
@@ -48,7 +53,7 @@ from .forces.nodelevelset import NodeLevelSet
 # # from .forces.forces import Forces
 
 # # from .forces.nodewall import NodeWall
-# # from .forces.rigidparticles import RigidParticles
+
 # # from .materials.druckerprager import DruckerPrager
 # # from .materials.experimental.mcc_mrm import MCC_MRM
 # # from .materials.experimental.mcc_reg import ModifiedCamClayReg
@@ -58,7 +63,6 @@ from .forces.nodelevelset import NodeLevelSet
 
 # # from .materials.material import Material
 # # from .materials.modifiedcamclay import ModifiedCamClay
-# # from .materials.mu_i_rheology_incompressible import MuI_incompressible
 # # from .materials.newtonfluid import NewtonFluid
 # # from .materials_analysis.mix_control import mix_control
 # # from .materials_analysis.mp_benchmarks import MPBenchmark

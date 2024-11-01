@@ -14,6 +14,16 @@ def points_to_3D(points, dim=2):
     return np.pad(points, [(0, 0), (0, 1)], mode="constant")
 
 
+def point_to_3D(config, point):
+    """Convert 2D points to 3D points."""
+    return np.pad(
+        np.array(point),
+        config.padding,
+        mode="constant",
+        constant_values=0.0,
+    )
+
+
 @dataclasses.dataclass
 class PvPointHelper:
     timeseries: pv.MultiBlock = None

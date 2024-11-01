@@ -1,3 +1,4 @@
+from ast import Call
 from typing_extensions import Self, Tuple, Callable
 
 import chex
@@ -85,10 +86,10 @@ class Grid(eqx.Module):
                 mode="constant",
                 constant_values=0.0,
             )
-            
+
             # transform to grid coordinates
-            intr_dist_padded = -1.0*intr_dist_padded*self.config.cell_size
-            
+            intr_dist_padded = -1.0 * intr_dist_padded * self.config.cell_size
+
             return intr_dist_padded, intr_hash, shapef, shapef_grad_padded
 
         (
@@ -113,6 +114,72 @@ class Grid(eqx.Module):
                 new_intr_shapef_grad_stack,
             ),
         )
+
+    def vmap_interactions_and_scatter(
+        self, p2g_func: Callable, position_stack: chex.Array
+    ) -> Self:
+        def vmap_intr(intr_id: chex.ArrayBatched) -> Tuple[chex.Array, chex.Array]:
+            point_id = (intr_id / self.config.window_size).astype(jnp.uint32)
+
+            stencil_id = (intr_id % self.config.window_size).astype(jnp.uint16)
+
+            # Relative position of the particle to the node.
+            particle_pos = position_stack.at[point_id].get()
+
+            rel_pos = (
+                particle_pos - jnp.array(self.config.origin)
+            ) * self.config.inv_cell_size
+
+            stencil_pos = jnp.array(self.config.forward_window).at[stencil_id].get()
+
+            intr_grid_pos = jnp.floor(rel_pos) + stencil_pos
+
+            intr_hash = jnp.ravel_multi_index(
+                intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
+            )
+
+            intr_dist = rel_pos - intr_grid_pos
+
+            shapef, shapef_grad_padded = self.shapefunction_call(intr_dist, self.config)
+
+            # is there a more efficient way to do this?
+            intr_dist_padded = jnp.pad(
+                intr_dist,
+                self.config.padding,
+                mode="constant",
+                constant_values=0.0,
+            )
+
+            # transform to grid coordinates
+            intr_dist_padded = -1.0 * intr_dist_padded * self.config.cell_size
+
+            out_stack = p2g_func(point_id, shapef, shapef_grad_padded, intr_dist_padded)
+
+            return intr_dist_padded, intr_hash, shapef, shapef_grad_padded, out_stack
+
+        (
+            new_intr_dist_stack,
+            new_intr_hash_stack,
+            new_intr_shapef_stack,
+            new_intr_shapef_grad_stack,
+            out_stack,
+        ) = jax.vmap(vmap_intr)(self.intr_id_stack)
+
+        return eqx.tree_at(
+            lambda state: (
+                state.intr_dist_stack,
+                state.intr_hash_stack,
+                state.intr_shapef_stack,
+                state.intr_shapef_grad_stack,
+            ),
+            self,
+            (
+                new_intr_dist_stack,
+                new_intr_hash_stack,
+                new_intr_shapef_stack,
+                new_intr_shapef_grad_stack,
+            ),
+        ), out_stack
 
     def vmap_intr_scatter(self, p2g_func: Callable):
         def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad):
@@ -146,7 +213,7 @@ class Grid(eqx.Module):
 
     def vmap_intr_gather_dist(self, g2p_func: Callable):
         def vmap_g2p(intr_hash, intr_shapef, intr_shapef_grad, intr_dist):
-            return g2p_func(intr_hash, intr_shapef, intr_shapef_grad,intr_dist)
+            return g2p_func(intr_hash, intr_shapef, intr_shapef_grad, intr_dist)
 
         return jax.vmap(vmap_g2p)(
             self.intr_hash_stack,

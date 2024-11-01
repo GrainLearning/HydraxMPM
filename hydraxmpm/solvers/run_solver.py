@@ -13,7 +13,7 @@ from ..materials.material import Material
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from ..utils.jax_helpers import scan_kth
-
+from .solver import Solver
 from .usl import USL
 
 from ..config.mpm_config import MPMConfig
@@ -50,8 +50,6 @@ def run_solver(
         solver: Any solver class e.g., USL, USL_APIC
         particles: MPM particles dataclass
         nodes: Nodes dataclass
-        shapefunctions: Shapefunctions dataclass
-            e.g.,`LinearShapeFunction`, `CubicShapeFunction`
         material_stack:
             List of material dataclasses e.g., `LinearIsotropicElastic`
         forces_stack:
@@ -132,12 +130,11 @@ def run_solver(
 
         for key in materials_output:
             for new_material in new_material_stack:
-                if key in new_material:
-                    accumulate.append(new_material.__getattribute__(key))
+                accumulate.append(new_material.__getattribute__(key))
 
         for key in forces_output:
             for new_force in new_forces_stack:
-                if key in new_force:
+                if key in new_force.__dict__.keys():
                     accumulate.append(new_force.__getattribute__(key))
 
         return new_carry, accumulate
@@ -160,78 +157,58 @@ def run_solver(
     )
 
 
-# @partial(jax.jit, static_argnums=(6, 7, 8, 9, 10, 11))
-# def run_solver_io(
-#     solver: Solver,
-#     particles: Particles,
-#     nodes: Nodes,
-#     shapefunctions: ShapeFunction,
-#     material_stack: List[Material],
-#     forces_stack: List[Forces] = None,
-#     num_steps: jnp.int32 = 1,
-#     store_every: jnp.int32 = 1,
-#     callback: Callable = None,
-#     particles_output: Tuple[str] = None,
-#     nodes_output: Tuple[str] = None,
-#     materials_output: Tuple[str] = None,
-#     forces_output: Tuple[str] = None,
-# ) -> Tuple[
-#     Tuple[Particles, Nodes, ShapeFunction, List[Material], List[Forces]],
-#     Tuple[Solver, chex.Array],
-# ]:
+@partial(
+    jax.jit,
+    static_argnames=("config", "callback"),
+)
+def run_solver_io(
+    config: MPMConfig,
+    solver: Solver,
+    particles: Particles,
+    nodes: Nodes,
+    material_stack: List[Material],
+    forces_stack: List[Forces] = None,
+    callback: Callable = None,
+) -> Tuple[
+    Tuple[Particles, Nodes, List[Material], List[Forces]],
+    Tuple[Solver, chex.Array],
+]:
+    def main_loop(step, carry):
+        solver, particles, nodes, material_stack, forces_stack = carry
 
-#     def main_loop(step,carry):
-#         solver, particles, nodes, shapefunctions, material_stack, forces_stack = (
-#             carry
-#         )
+        solver, particles, nodes, material_stack, forces_stack = solver.update(
+            particles, nodes, material_stack, forces_stack, step
+        )
 
-#         solver, particles, nodes, shapefunctions, material_stack, forces_stack = (
-#             solver.update(
-#                 particles, nodes, shapefunctions, material_stack, forces_stack, step
-#             )
-#         )
+        carry = (solver, particles, nodes, material_stack, forces_stack)
 
-#         carry = (
-#             solver,
-#             particles,
-#             nodes,
-#             shapefunctions,
-#             material_stack,
-#             forces_stack
-#         )
+        return carry
 
-#         return carry
+    def scan_fn(carry, step):
+        step_next = step + config.store_every
+        solver, particles, nodes, material_stack, forces_stack = (
+            jax.lax.fori_loop(step, step_next, main_loop, carry)
+        )
 
-#     def scan_fn(carry, step):
-#         step_next = step + store_every
-#         solver, particles, nodes, shapefunctions, material_stack, forces_stack = jax.lax.fori_loop(
-#             step,
-#             step_next,
-#             main_loop,
-#             carry
-#         )
+        carry = (
+            solver,
+            particles,
+            nodes,
+            material_stack,
+            forces_stack,
+        )
 
-#         carry = (
-#             solver,
-#             particles,
-#             nodes,
-#             shapefunctions,
-#             material_stack,
-#             forces_stack,
-#         )
+        callback(carry, step_next)
 
-#         if callback:
-#             jax.debug.callback(callback,carry,step_next)
+        return carry, []
 
-#         return carry,[]
+    xs = jnp.arange(0, config.num_steps, config.store_every).astype(jnp.int32)
 
-#     xs = jnp.arange(0,num_steps,store_every).astype(jnp.int32)
+    carry, accumulate = jax.lax.scan(
+        scan_fn,
+        (solver, particles, nodes, material_stack, forces_stack),
+        xs=xs,
+        unroll=1,
+    )
 
-#     carry,accumulate = jax.lax.scan(
-#         scan_fn,
-#         (solver, particles, nodes, shapefunctions, material_stack, forces_stack),
-#         xs= xs,
-#         unroll=1
-#     )
-
-#     return carry
+    return carry

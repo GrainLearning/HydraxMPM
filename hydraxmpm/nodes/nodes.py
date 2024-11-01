@@ -16,6 +16,8 @@ class Nodes(Grid):
     mass_stack: chex.Array
     moment_stack: chex.Array
     moment_nt_stack: chex.Array
+    normal_stack: chex.Array
+    
     small_mass_cutoff: int = eqx.field(static=True, converter=lambda x: float(x))
 
     def __init__(
@@ -28,6 +30,7 @@ class Nodes(Grid):
         self.mass_stack = jnp.zeros((config.num_cells))
         self.moment_stack = jnp.zeros((config.num_cells, config.dim))
         self.moment_nt_stack = jnp.zeros((config.num_cells, config.dim))
+        self.normal_stack = jnp.zeros((config.num_cells,config.dim))
         self.small_mass_cutoff = small_mass_cutoff
         super().__init__(config)
 

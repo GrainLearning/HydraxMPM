@@ -24,13 +24,7 @@ from .solver import Solver
 
 
 class USL(Solver):
-    """Update Stress Last (USL) Material Point Method (MPM) solver.
-
-    Attributes:
-        alpha: FLIP-PIC ratio
-        dt: time step of the solver
-
-    """
+    """Update Stress Last (USL) Material Point Method (MPM) solver."""
 
     alpha: float = eqx.field(static=True, converter=lambda x: float(x))
 
@@ -49,8 +43,6 @@ class USL(Solver):
         particles = particles.refresh()
         nodes = nodes.refresh()
 
-        nodes = nodes.get_interactions(particles.position_stack)
-
         nodes = self.p2g(particles=particles, nodes=nodes)
 
         # Apply forces here
@@ -67,7 +59,9 @@ class USL(Solver):
 
         new_material_stack = []
         for material in material_stack:
-            particles, new_material = material.update_from_particles(particles=particles)
+            particles, new_material = material.update_from_particles(
+                particles=particles
+            )
             new_material_stack.append(new_material)
 
         return (
@@ -79,7 +73,8 @@ class USL(Solver):
         )
 
     def p2g(self, particles, nodes):
-        def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad):
+   
+        def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = particles.mass_stack.at[point_id].get()
             intr_volumes = particles.volume_stack.at[point_id].get()
             intr_velocities = particles.velocity_stack.at[point_id].get()
@@ -92,44 +87,60 @@ class USL(Solver):
             scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
 
             scaled_total_force = scaled_int_force[: self.config.dim] + scaled_ext_force
-            return scaled_mass, scaled_moments, scaled_total_force
 
-        # Get interaction id and respective particle belonging to interaction
+            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.config.dim].get()
 
-        # form a batched interaction
-        scaled_mass_stack, scaled_moment_stack, scaled_total_force_stack = (
-            nodes.vmap_intr_scatter(vmap_intr_p2g)
-        )
+            return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
+        # note the interactions and shapefunctions are calculated on the first 
+        # p2g to reduce computational overhead.
+        (
+            new_nodes,
+            (
+                scaled_mass_stack,
+                scaled_moment_stack,
+                scaled_total_force_stack,
+                scaled_normal_stack,
+            ),
+        ) = nodes.vmap_interactions_and_scatter(vmap_intr_p2g, particles.position_stack)
+
+ 
         # Sum all interaction quantities.
         new_mass_stack = (
-            jnp.zeros_like(nodes.mass_stack)
-            .at[nodes.intr_hash_stack]
+            jnp.zeros_like(new_nodes.mass_stack)
+            .at[new_nodes.intr_hash_stack]
             .add(scaled_mass_stack)
         )
 
         new_moment_stack = (
-            jnp.zeros_like(nodes.moment_stack)
-            .at[nodes.intr_hash_stack]
+            jnp.zeros_like(new_nodes.moment_stack)
+            .at[new_nodes.intr_hash_stack]
             .add(scaled_moment_stack)
         )
 
         new_force_stack = (
-            jnp.zeros_like(nodes.moment_stack)
-            .at[nodes.intr_hash_stack]
+            jnp.zeros_like(new_nodes.moment_stack)
+            .at[new_nodes.intr_hash_stack]
             .add(scaled_total_force_stack)
         )
 
-        nodes_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
+        new_normal_stack = (
+            jnp.zeros_like(new_nodes.normal_stack)
+            .at[new_nodes.intr_hash_stack]
+            .add(scaled_normal_stack)
+        )
+
+        new_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
 
         return eqx.tree_at(
             lambda state: (
                 state.mass_stack,
                 state.moment_stack,
                 state.moment_nt_stack,
+                state.normal_stack,
             ),
-            nodes,
-            (new_mass_stack, new_moment_stack, nodes_moment_nt_stack),
+            new_nodes,
+            (new_mass_stack, new_moment_stack, new_moment_nt_stack, new_normal_stack),
         )
 
     def g2p(self, particles: Particles, nodes: Nodes):
@@ -264,4 +275,3 @@ class USL(Solver):
                 new_velocity_stack,
             ),
         )
- 

@@ -52,7 +52,6 @@ class NewtonFluid(Material):
     def update_from_particles(self: Self, particles: Particles) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
         
-        
         # uses reference density to calculate the pressure
         # Todo check if rho_p / rho_ref == phi/phi_ref...
         phi_stack = particles.volume0_stack / particles.volume_stack

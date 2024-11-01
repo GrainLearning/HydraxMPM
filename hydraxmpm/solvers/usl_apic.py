@@ -102,30 +102,44 @@ class USL_APIC(Solver):
                 scaled_int_force.at[: self.config.dim].get() + scaled_ext_force
             )
 
-            return scaled_mass, scaled_moments, scaled_total_force
+            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.config.dim].get()
+
+            return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
         # form a batched interaction
-        scaled_mass_stack, scaled_moment_stack, scaled_total_force_stack = (
-            nodes.vmap_intr_scatter_dist(vmap_intr_p2g)
-        )
+        (
+            new_nodes,
+            (
+                scaled_mass_stack,
+                scaled_moment_stack,
+                scaled_total_force_stack,
+                scaled_normal_stack,
+            ),
+        ) = nodes.vmap_interactions_and_scatter(vmap_intr_p2g, particles.position_stack)
 
         # Sum all interaction quantities.
         new_mass_stack = (
-            jnp.zeros_like(nodes.mass_stack)
-            .at[nodes.intr_hash_stack]
+            jnp.zeros_like(new_nodes.mass_stack)
+            .at[new_nodes.intr_hash_stack]
             .add(scaled_mass_stack)
         )
 
         new_moment_stack = (
-            jnp.zeros_like(nodes.moment_stack)
-            .at[nodes.intr_hash_stack]
+            jnp.zeros_like(new_nodes.moment_stack)
+            .at[new_nodes.intr_hash_stack]
             .add(scaled_moment_stack)
         )
 
         new_force_stack = (
-            jnp.zeros_like(nodes.moment_stack)
-            .at[nodes.intr_hash_stack]
+            jnp.zeros_like(new_nodes.moment_stack)
+            .at[new_nodes.intr_hash_stack]
             .add(scaled_total_force_stack)
+        )
+
+        new_normal_stack = (
+            jnp.zeros_like(new_nodes.normal_stack)
+            .at[new_nodes.intr_hash_stack]
+            .add(scaled_normal_stack)
         )
 
         nodes_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
@@ -135,9 +149,10 @@ class USL_APIC(Solver):
                 state.mass_stack,
                 state.moment_stack,
                 state.moment_nt_stack,
+                state.normal_stack,
             ),
-            nodes,
-            (new_mass_stack, new_moment_stack, nodes_moment_nt_stack),
+            new_nodes,
+            (new_mass_stack, new_moment_stack, nodes_moment_nt_stack, new_normal_stack),
         )
 
     def g2p(self: Self, particles: Particles, nodes: Nodes) -> Tuple[Particles, Self]:
