@@ -16,7 +16,7 @@ class PlotHelper:
     xlim: List[float] = dataclasses.field(default_factory=lambda: [None, None])
     ylim: List[float] = dataclasses.field(default_factory=lambda: [None, None])
     zlim: List[float] = dataclasses.field(default_factory=lambda: [None, None])
-
+    lw: int = None
     ls: str = "-"
     markersize: int = None
     markeredgecolor: str = None
@@ -134,6 +134,7 @@ def create_plot_3d(plot, axis):
         alpha=plot.alpha,
         edgecolor=plot.edgecolor,
         markevery=plot.markevery,
+        lw=plot.lw
     )
     if plot.start_end_markers:
         axis.plot(plot.x[0], plot.y[0], plot.z[0], ".", color=line.get_color())

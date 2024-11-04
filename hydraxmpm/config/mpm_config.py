@@ -113,3 +113,4 @@ class MPMConfig(eqx.Module):
         print(f"[MPMConfig] num_points = {self.num_points}")
         print(f"[MPMConfig] num_cells = {self.num_cells}") 
         print(f"[MPMConfig] num_interactions = {self.num_points*self.window_size}")
+        

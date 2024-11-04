@@ -2,6 +2,18 @@ import operator
 import jax.numpy as jnp
 import jax
 
+from inspect import signature
+
+
+def get_sv(func, val):
+    return signature(func).parameters[val].default
+
+
+def get_dirpath():
+    import sys
+    import os
+    file = sys.argv[0]
+    return os.path.dirname(file) + "/"
 
 def simple_warning(condition: jnp.bool_, place: str, message: str):
     jax.lax.cond(

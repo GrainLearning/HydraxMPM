@@ -12,18 +12,19 @@ from ..materials.material import Material
 from ..utils.math_helpers import (
     get_phi_from_L,
 )
+from ..config.ip_config import IPConfig
 
 
-@partial(jax.jit, static_argnames=("output"))
+@partial(jax.jit, static_argnames=("config", "output"))
 def mix_control(
+    config: IPConfig,
     material: Material,
-    dt: jnp.float32,
+    stress_ref: chex.Array,
+    phi_ref: jnp.float32,
     L_control_stack: chex.Array,
     stress_control_stack: chex.Array = None,
     stress_mask_indices: chex.Array = None,
-    stress_ref: chex.Array = None,
     F_ref: chex.Array = None,
-    phi_ref: jnp.float32 = None,
     output: Tuple[str] = None,
 ) -> Material:
     chex.assert_shape(phi_ref, ())
@@ -33,20 +34,13 @@ def mix_control(
     if F_ref is None:
         F_ref = jnp.eye(3)
 
-    if stress_ref is None:
-        stress_ref = jnp.zeros((3, 3))
-
-    if phi_ref is None:
-        phi_ref = 0.0
-
     if output is None:
         output = []
 
     servo_params = None
 
     if stress_mask_indices is not None:
-        servo_params = jnp.zeros((3,3)).at[stress_mask_indices].get()
-
+        servo_params = jnp.zeros((3, 3)).at[stress_mask_indices].get()
 
     def scan_fn(carry, control):
         (
@@ -59,23 +53,20 @@ def mix_control(
         ) = carry
 
         L_control, stress_control = control
-        
+
         if stress_mask_indices is not None:
             stress_control_target = stress_control.at[stress_mask_indices].get()
-        
+
         def update_from_params(L_next):
+            F_next = (jnp.eye(3) + L_next * config.dt) @ F_prev
 
-
-            F_next = (jnp.eye(3) + L_next * dt) @ F_prev
-
-            phi_next = get_phi_from_L(L_next, phi_prev, dt)
+            phi_next = get_phi_from_L(L_next, phi_prev, config.dt)
 
             stress_next, material_next = material_prev.update(
                 stress_prev.reshape(1, 3, 3),
                 F_next.reshape(1, 3, 3),
                 L_next.reshape(1, 3, 3),
                 jnp.array([phi_next]),
-                dt,
             )
 
             stress_next = stress_next.reshape((3, 3))
@@ -84,7 +75,6 @@ def mix_control(
             return stress_next, aux
 
         def servo_controller(sol, args):
-            
             L_next = L_control.at[stress_mask_indices].set(sol)
 
             stress_next, aux = update_from_params(L_next)
@@ -109,7 +99,7 @@ def mix_control(
                 has_aux=True,
                 max_steps=20,
             )
-            
+
             stress_next, *aux_next = sol.aux
 
         F_next, L_next, phi_next, material_next = aux_next
@@ -134,8 +124,8 @@ def mix_control(
                 accumulate.append(L_next)
             elif key == "phi":
                 accumulate.append(phi_next)
-            elif key in material_next:
-                accumulate.append(jnp.squeeze(material_next[key]))
+            elif key in material_next.__dict__.keys():
+                accumulate.append(jnp.squeeze(material_next.__getattribute__(key)))
         return carry, accumulate
 
     carry, accumulate = jax.lax.scan(

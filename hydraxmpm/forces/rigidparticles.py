@@ -185,13 +185,15 @@ class RigidParticles(Forces):
             r_nodes_contact_mask_stack,
         )
 
-        new_position_stack,new_velocity_stack = self.update_rigid_particles(
-            step,                                                        
-            self.position_stack,
-            self.velocity_stack,
-            self.config)
-        
-        
+        if self.update_rigid_particles:
+            new_position_stack,new_velocity_stack = self.update_rigid_particles(
+                step,                                                        
+                self.position_stack,
+                self.velocity_stack,
+                self.config)
+        else:
+            new_position_stack = self.position_stack
+            new_velocity_stack = self.velocity_stack
         
         new_nodes = eqx.tree_at(
             lambda state: (state.moment_nt_stack),

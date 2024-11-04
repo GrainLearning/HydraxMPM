@@ -15,6 +15,13 @@ from ..shapefunctions.cubic import vmap_linear_cubicfunction
 from ..shapefunctions.shapefunctions import SHAPEFUNCTION
 
 
+def get_hash(pos, grid, dim):
+    if dim == 2:
+        return (pos[1] + pos[0] * grid[1]).astype(jnp.int32)
+
+    return (pos[2] + pos[0] * grid[2] + pos[1] * grid[2] * grid[0]).astype(jnp.int32)
+
+
 class Grid(eqx.Module):
     intr_id_stack: jax.Array
     intr_shapef_stack: chex.Array
@@ -37,7 +44,7 @@ class Grid(eqx.Module):
         )
 
         self.intr_hash_stack = jnp.zeros(config.num_points * config.window_size).astype(
-            jnp.uint32
+            jnp.int32
         )
 
         self.intr_dist_stack = jnp.zeros(
@@ -71,13 +78,22 @@ class Grid(eqx.Module):
 
             intr_grid_pos = jnp.floor(rel_pos) + stencil_pos
 
-            intr_hash = jnp.ravel_multi_index(
-                intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
+            # intr_hash = jnp.ravel_multi_index(
+            #     intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
+            # )
+            intr_hash = get_hash(
+                intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
             )
 
             intr_dist = rel_pos - intr_grid_pos
 
             shapef, shapef_grad_padded = self.shapefunction_call(intr_dist, self.config)
+
+            # shapef = jax.lax.cond(
+            #     ((intr_hash<0) | (intr_hash>=self.config.num_cells)),
+            #     lambda : 0.0,
+            #     lambda : shapef
+            # )
 
             # is there a more efficient way to do this?
             intr_dist_padded = jnp.pad(
@@ -134,13 +150,24 @@ class Grid(eqx.Module):
 
             intr_grid_pos = jnp.floor(rel_pos) + stencil_pos
 
-            intr_hash = jnp.ravel_multi_index(
-                intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
+            # intr_hash = jnp.ravel_multi_index(
+            #     intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
+            # )
+            intr_hash = get_hash(
+                intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
             )
+
 
             intr_dist = rel_pos - intr_grid_pos
 
             shapef, shapef_grad_padded = self.shapefunction_call(intr_dist, self.config)
+            
+            shapef = jax.lax.cond(
+                ((intr_hash < 0) | (intr_hash >= self.config.num_cells)),
+                lambda x: 0.0,
+                lambda x: x,
+                shapef,
+            )
 
             # is there a more efficient way to do this?
             intr_dist_padded = jnp.pad(

@@ -26,8 +26,6 @@ _discretize = partial(hdx.discretize, density_ref=997.5)
 _water = partial(hdx.NewtonFluid, K=2.0 * 10**6, viscosity=0.002)
 
 
-def get_sv(func, val):
-    return signature(func).parameters[val].default
 
 
 # time step depends on the cell_size, bulk modulus and initial density

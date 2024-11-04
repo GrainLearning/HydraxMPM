@@ -4,6 +4,7 @@ Built with JAX.
 """
 
 from .config.mpm_config import MPMConfig
+from .config.ip_config import IPConfig
 from .nodes.grid import Grid
 from .nodes.nodes import Nodes
 from .particles.particles import Particles
@@ -16,6 +17,8 @@ from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .solvers.run_solver import run_solver, run_solver_io
 from .forces.rigidparticles import RigidParticles
 from .materials.newtonfluid import NewtonFluid
+from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
+from .materials.experimental.csuh import CSUH
 
 from .materials_analysis.plot import (
     add_plot,
@@ -33,10 +36,22 @@ from .utils.mpm_plot_helpers import (
 from .forces.gravity import Gravity
 from .forces.nodelevelset import NodeLevelSet
 
+from .utils.jax_helpers import get_sv, get_dirpath, set_default_gpu
+
+from .utils.stl_helpers import (
+    get_stl_bounds,
+    sample_points_in_volume,
+    sample_points_on_surface,
+)
+
+from .materials_analysis.mp_benchmarks import mp_benchmark_volume_control_shear
+
+# save_object,
+
 # # from .materials.mu_i_softness import MuISoft
 # # from .materials.UH_model import UHModel
 
-# from .utils.jax_helpers import dump_restart_files, save_object, set_default_gpu
+#
 
 
 #
@@ -56,7 +71,7 @@ from .forces.nodelevelset import NodeLevelSet
 
 # # from .materials.druckerprager import DruckerPrager
 # # from .materials.experimental.mcc_mrm import MCC_MRM
-# # from .materials.experimental.mcc_reg import ModifiedCamClayReg
+
 # # from .materials.experimental.mrm_steadystate import MRMSteady
 # # from .materials.experimental.uh_model import UHModel
 # # from .materials.experimental.mcc_mrm_reg import MCC_MRM_Reg
@@ -65,7 +80,7 @@ from .forces.nodelevelset import NodeLevelSet
 # # from .materials.modifiedcamclay import ModifiedCamClay
 # # from .materials.newtonfluid import NewtonFluid
 # # from .materials_analysis.mix_control import mix_control
-# # from .materials_analysis.mp_benchmarks import MPBenchmark
+# #
 
 # # from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
 # # from .nodes.nodes import Nodes
@@ -131,11 +146,6 @@ from .utils.math_helpers import (
 # # from .utils.mpm_postprocessing_helpers import (
 # #     post_processes_grid_gradient_stack,
 # #     post_processes_stress_stack,
-# # )
-# # from .utils.stl_helpers import (
-# #     get_stl_bounds,
-# #     sample_points_in_volume,
-# #     sample_points_on_surface,
 # # )
 
 
