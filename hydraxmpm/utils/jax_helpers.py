@@ -12,8 +12,10 @@ def get_sv(func, val):
 def get_dirpath():
     import sys
     import os
+
     file = sys.argv[0]
     return os.path.dirname(file) + "/"
+
 
 def simple_warning(condition: jnp.bool_, place: str, message: str):
     jax.lax.cond(
@@ -38,10 +40,10 @@ def save_object(obj, l, file_path):
 
 
 def dump_restart_files(
+    config,
     solver=None,
     particles=None,
     nodes=None,
-    shapefunctions=None,
     material_stack=None,
     forces_stack=None,
     suffix="",
@@ -50,11 +52,15 @@ def dump_restart_files(
     import pickle
 
     if directory is None:
-        directory = "./"
+        directory = "/restart"
 
     def dump(object, name):
-        with open(f"{directory}/{name}{suffix}.pickle", "wb") as handle:
+        with open(
+            f"{config.dir_path}/restart/{config.project}/{name}-{suffix}.pickle", "wb"
+        ) as handle:
             pickle.dump(object, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    dump(config, "config")
 
     if solver is not None:
         dump(solver, "solver")
@@ -64,9 +70,6 @@ def dump_restart_files(
 
     if nodes is not None:
         dump(nodes, "nodes")
-
-    if shapefunctions is not None:
-        dump(shapefunctions, "shapefunctions")
 
     if material_stack is not None:
         dump(material_stack, "material_stack")

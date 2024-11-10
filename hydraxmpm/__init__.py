@@ -10,13 +10,20 @@ from .nodes.nodes import Nodes
 from .particles.particles import Particles
 from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
+from .solvers.usl_asflip import USL_ASFLIP
 from .shapefunctions.shapefunctions import SHAPEFUNCTION
-from .utils.mpm_domain_helpers import discretize, fill_domain_with_particles
+from .utils.mpm_domain_helpers import (
+    discretize,
+    generate_mesh,
+    fill_domain_with_particles,
+)
+from .materials.druckerprager import DruckerPrager
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .solvers.run_solver import run_solver, run_solver_io
 from .forces.rigidparticles import RigidParticles
 from .materials.newtonfluid import NewtonFluid
+from .materials.modifiedcamclay import ModifiedCamClay
 from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
 from .materials.experimental.csuh import CSUH
 
@@ -36,7 +43,7 @@ from .utils.mpm_plot_helpers import (
 from .forces.gravity import Gravity
 from .forces.nodelevelset import NodeLevelSet
 
-from .utils.jax_helpers import get_sv, get_dirpath, set_default_gpu
+from .utils.jax_helpers import get_sv, get_dirpath, set_default_gpu, dump_restart_files
 
 from .utils.stl_helpers import (
     get_stl_bounds,
@@ -46,6 +53,7 @@ from .utils.stl_helpers import (
 
 from .materials_analysis.mp_benchmarks import mp_benchmark_volume_control_shear
 
+from .utils.mpm_callback_helpers import io_vtk_callback
 # save_object,
 
 # # from .materials.mu_i_softness import MuISoft
@@ -69,7 +77,7 @@ from .materials_analysis.mp_benchmarks import mp_benchmark_volume_control_shear
 
 # # from .forces.nodewall import NodeWall
 
-# # from .materials.druckerprager import DruckerPrager
+# #
 # # from .materials.experimental.mcc_mrm import MCC_MRM
 
 # # from .materials.experimental.mrm_steadystate import MRMSteady

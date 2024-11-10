@@ -170,6 +170,8 @@ class CSUH(Material):
     phi_ref_stack: chex.Array
     H_stack: chex.Array
 
+    rho_p: jnp.float32
+
     def __init__(
         self: Self,
         config: Union[MPMConfig, IPConfig],
@@ -181,6 +183,7 @@ class CSUH(Material):
         ln_N: jnp.float32,
         m_par: jnp.float32,
         chi: jnp.float32,
+        rho_p: jnp.float32 = None,
         ln_v_c: jnp.float32 = None,
         ln_Z: jnp.float32 = None,
         p_ref_stack: chex.Array = None,
@@ -202,12 +205,12 @@ class CSUH(Material):
 
         self.eps_p_stack = jnp.zeros((config.num_points, 3, 3))
 
-        self.p_c_ref_stack = p_ref_stack
-
         self.ln_N = ln_N
         self.ln_v_c = ln_v_c
 
         self.cp = lam - kap
+
+        self.rho_p = rho_p
 
         if ln_v_c is None:
             self.ps = jnp.exp((ln_N - ln_Z) / lam) - 1.0
@@ -223,6 +226,8 @@ class CSUH(Material):
 
         if phi_ref_stack is None:
             self.phi_ref_stack = self.get_phi_ref(p_ref_stack)
+
+        self.p_c_ref_stack = p_ref_stack
 
     def get_phi_ref(self, p_ref_stack: chex.Array, dim=3):
         """Assuming we are on ncl."""
@@ -246,12 +251,41 @@ class CSUH(Material):
         xi = -self.cp * jnp.log(self.R)
 
         ln_v_stack = ln_v_m_stack - xi
-        
-        print(ln_v_stack, self.ln_v_c)
-        
+
         phi_stack = 1.0 / jnp.exp(ln_v_stack)
 
+        # print("ln_v_stack",ln_v_stack, self.ln_v_c)
+        # print("phi_stack",phi_stack)
         return phi_stack
+
+    def update_from_particles(
+        self: Self, particles: Particles
+    ) -> Tuple[Particles, Self]:
+        """Update the material state and particle stresses for MPM solver."""
+        phi_stack = particles.get_solid_volume_fraction_stack(self.rho_p)
+
+        new_stress_stack, new_eps_p_stack, new_H_stack = self.vmap_update_ip(
+            particles.F_stack,
+            self.eps_p_stack,
+            self.p_ref_stack,
+            self.p_c_ref_stack,
+            self.H_stack,
+            phi_stack,
+        )
+
+        jax.debug.print("{}", new_stress_stack)
+        new_particles = eqx.tree_at(
+            lambda state: (state.stress_stack),
+            particles,
+            (new_stress_stack),
+        )
+        new_self = eqx.tree_at(
+            lambda state: (state.eps_p_stack, state.H_stack),
+            self,
+            (new_eps_p_stack, new_H_stack),
+        )
+
+        return new_particles, new_self
 
     def update(
         self: Self,
@@ -305,7 +339,7 @@ class CSUH(Material):
 
         q_tr = get_q_vm(dev_stress=s_tr, dim=self.config.dim)
 
-        eps_p_v_prev = get_volumetric_strain(eps_p_prev)
+        # eps_p_v_prev = get_volumetric_strain(eps_p_prev)
 
         # p_c_tr = get_non_linear_hardening_pressure(
         #     p_c_ref, self.ps, self.kap, self.lam, eps_p_v_prev
@@ -412,9 +446,13 @@ class CSUH(Material):
 
                 solver = optx.Newton(rtol=1e-8, atol=1e-8)
                 sol = optx.root_find(
-                    residuals, solver, init_val, throw=False, has_aux=True,
+                    residuals,
+                    solver,
+                    init_val,
+                    throw=False,
+                    has_aux=True,
                     # max_steps=20
-                    max_steps=5
+                    max_steps=5,
                 )
                 return sol.value
 

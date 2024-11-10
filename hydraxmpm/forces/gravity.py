@@ -23,30 +23,37 @@ class Gravity(Forces):
 
     gravity: chex.Array
     increment: chex.Array
-    stop_increment: jnp.int32
+    stop_ramp_step: jnp.int32
 
     def __init__(
         self: Self,
         config: MPMConfig,
         gravity: chex.Array = None,
         increment: chex.Array = None,
-        stop_increment: jnp.int32 = 0,
+        stop_ramp_step: jnp.int32 = 0,
     ) -> Self:
         """Initialize Gravity force on Nodes."""
         self.gravity = gravity
         self.increment = increment
-        self.stop_increment = stop_increment
+        self.stop_ramp_step = stop_ramp_step
         super().__init__(config)
 
     def apply_on_nodes(
         self: Self,
         particles: Particles = None,
-        nodes: Nodes =None,
+        nodes: Nodes = None,
         step: int = 0,
     ) -> Tuple[Nodes, Self]:
         """Apply gravity on the nodes."""
 
-        moment_gravity = nodes.mass_stack.reshape(-1, 1) * self.gravity * self.config.dt
+        if self.increment is not None:
+            gravity = self.gravity + self.increment * jnp.minimum(
+                step, self.stop_ramp_step
+            )
+        else:
+            gravity = self.gravity
+
+        moment_gravity = nodes.mass_stack.reshape(-1, 1) * gravity * self.config.dt
 
         new_moment_nt_stack = nodes.moment_nt_stack + moment_gravity
 

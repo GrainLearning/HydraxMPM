@@ -17,7 +17,7 @@ _MPMConfig = partial(
     cell_size=6 / 69,
     shapefunction=hdx.SHAPEFUNCTION.cubic,
     num_steps=20000,
-    store_every=500
+    store_every=500,
 )
 
 
@@ -26,17 +26,15 @@ _discretize = partial(hdx.discretize, density_ref=997.5)
 _water = partial(hdx.NewtonFluid, K=2.0 * 10**6, viscosity=0.002)
 
 
-
-
 # time step depends on the cell_size, bulk modulus and initial density
 dt = (
     0.1
-    * get_sv(_MPMConfig, "cell_size")
-    / np.sqrt(get_sv(_water, "K") / get_sv(_discretize, "density_ref"))
+    * hdx.get_sv(_MPMConfig, "cell_size")
+    / np.sqrt(hdx.get_sv(_water, "K") / hdx.get_sv(_discretize, "density_ref"))
 )
 
 # separation of particles depend on the cell size and particles per cell
-sep = get_sv(_MPMConfig, "cell_size") / get_sv(_MPMConfig, "ppc")
+sep = hdx.get_sv(_MPMConfig, "cell_size") / hdx.get_sv(_MPMConfig, "ppc")
 
 # create dam
 dam_height = 2.0

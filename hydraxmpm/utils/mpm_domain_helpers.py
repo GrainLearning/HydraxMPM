@@ -46,33 +46,42 @@ def discretize(
     return new_particles, nodes
 
 
-def fill_domain_with_particles(nodes: Nodes, dim=3):
-    """Fill the background grid with 2x2 (or 2x2x2 in 3D) particles.
+def generate_mesh(config: MPMConfig):
+    x = jnp.linspace(config.origin[0], config.end[0], config.grid_size[0])
+    y = jnp.linspace(config.origin[1], config.end[1], config.grid_size[1])
 
+    if config.dim == 3:
+        z = jnp.linspace(config.origin[2], config.end[2], config.grid_size[2])
+        X, Y, Z = jnp.meshgrid(x, y, z)
+        return jnp.array([X, Y, Z]).T
+    else:
+        X, Y = jnp.meshgrid(x, y)
+        return jnp.array([X, Y]).T
+
+
+def fill_domain_with_particles(config: MPMConfig, thickness=3):
+    """Fill the background grid with 2x2 (or 2x2x2 in 3D) particles.
     Args:
         nodes (Nodes): Nodes class
     """
 
-    node_coordinate_stack = nodes.get_coordinate_stack(dim=dim)
+    node_mesh = generate_mesh(config)
 
-    node_coords = node_coordinate_stack.reshape(*nodes.grid_size, dim)
-
-    if dim == 2:
-        node_coords = node_coords.at[3:, :].get()
-        node_coords = node_coords.at[:, 3:].get()
-        node_coords = node_coords.at[:-4, :].get()
-        node_coords = node_coords.at[:, :-4].get()
-
+    if config.dim == 2:
+        node_mesh = node_mesh.at[thickness:, :].get()
+        node_mesh = node_mesh.at[:, thickness:].get()
+        node_mesh = node_mesh.at[: -1 - thickness, :].get()
+        node_mesh = node_mesh.at[:, : -1 - thickness].get()
         pnt_opt = jnp.array(
             [[0.2113, 0.2113], [0.2113, 0.7887], [0.7887, 0.2113], [0.7887, 0.7887]]
         )
     else:
-        node_coords = node_coords.at[3:, :, :].get()
-        node_coords = node_coords.at[:-4, :, :].get()
-        node_coords = node_coords.at[:, 3:, :].get()
-        node_coords = node_coords.at[:, :-4, :].get()
-        node_coords = node_coords.at[:, :, 3:].get()
-        node_coords = node_coords.at[:, :, :-4].get()
+        node_mesh = node_mesh.at[thickness:, :, :].get()
+        node_mesh = node_mesh.at[: -1 - thickness, :, :].get()
+        node_mesh = node_mesh.at[:, thickness:, :].get()
+        node_mesh = node_mesh.at[:, : -1 - thickness, :].get()
+        node_mesh = node_mesh.at[:, :, thickness:].get()
+        node_mesh = node_mesh.at[:, :, : -1 - thickness].get()
         pnt_opt = jnp.array(
             [
                 [0.2113, 0.2113, 0.2113],
@@ -85,12 +94,13 @@ def fill_domain_with_particles(nodes: Nodes, dim=3):
                 [0.7887, 0.7887, 0.7887],
             ]
         )
-    node_coords = node_coords.reshape(-1, dim)
+
+    node_coords_stack = node_mesh.reshape(-1, config.dim)
 
     def get_opt(node_coords, pnt_opt):
-        return pnt_opt * nodes.node_spacing + node_coords
+        return pnt_opt * config.cell_size + node_coords
 
-    pnt_stack = jax.vmap(get_opt, in_axes=(0, None))(node_coords, pnt_opt).reshape(
-        -1, dim
-    )
-    return pnt_stack, node_coordinate_stack
+    pnt_stack = jax.vmap(get_opt, in_axes=(0, None))(
+        node_coords_stack, pnt_opt
+    ).reshape(-1, config.dim)
+    return pnt_stack, node_coords_stack

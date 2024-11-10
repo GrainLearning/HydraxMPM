@@ -2,12 +2,17 @@
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self
+from typing_extensions import Self, Union
 
 import chex
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+
+from ..config.mpm_config import MPMConfig
+from ..config.ip_config import IPConfig
+
+import equinox as eqx
 
 from ..particles.particles import Particles
 from ..utils.math_helpers import (
@@ -17,6 +22,7 @@ from ..utils.math_helpers import (
     get_pressure_stack,
     get_q_vm,
     get_sym_tensor_stack,
+    get_sym_tensor,
     get_volumetric_strain,
 )
 from .common import get_timestep
@@ -24,6 +30,7 @@ from .material import Material
 
 from jax.sharding import Sharding
 import jax
+
 
 def plot_yield_surface(
     ax, p_range: Tuple, M: jnp.float32, p_c: jnp.float32, color="black", linestyle="--"
@@ -54,8 +61,8 @@ def get_elas_non_linear_pressure(deps_e_v, kap, p_prev):
     # return jnp.nan_to_num(out, neginf=0, nan=0)
 
 
-def get_elas_dev_stress(eps_e_d, s_ref, G):
-    return 2.0 * G * eps_e_d + s_ref
+def get_elas_dev_stress(eps_e_d, G):
+    return 2.0 * G * eps_e_d
 
 
 def get_non_linear_hardening_pressure(deps_p_v, lam, kap, p_c_prev):
@@ -77,160 +84,142 @@ def get_G(nu, K):
     return (3.0 * (1.0 - 2.0 * nu)) / (2.0 * (1.0 + nu)) * K
 
 
-@chex.dataclass
 class ModifiedCamClay(Material):
     """
     Return mapping follows implementation of
-
 
     """
 
     p_c_stack: chex.Array
     eps_e_stack: chex.Array
-    stress_ref_stack: chex.Array
-    nu: jnp.float32
-    M: jnp.float32
-    R: jnp.float32
-    lam: jnp.float32
-    kap: jnp.float32
-    Vs: jnp.float32
-    phi_c: jnp.float32
-    rho_p: jnp.float32
+    p_ref_stack: chex.Array
 
-    @classmethod
-    def create(
-        cls: Self,
+    rho_p: float = eqx.field(static=True, converter=lambda x: float(x))
+    kap: float = eqx.field(static=True, converter=lambda x: float(x))
+    lam: float = eqx.field(static=True, converter=lambda x: float(x))
+    R: float = eqx.field(static=True, converter=lambda x: float(x))
+    M: float = eqx.field(static=True, converter=lambda x: float(x))
+    nu: float = eqx.field(static=True, converter=lambda x: float(x))
+
+    def __init__(
+        self: Self,
+        config: Union[MPMConfig, IPConfig],
         nu: jnp.float32,
         M: jnp.float32,
         R: jnp.float32,
         lam: jnp.float32,
         kap: jnp.float32,
-        Vs: jnp.float32,
-        phi_c: jnp.float32,
-        rho_p: jnp.float32,
-        stress_ref_stack: chex.Array = None,
-        absolute_density: jnp.float32 = 1.0,
-        dim: jnp.int16 = 3,
+        p_ref_stack: chex.Array,
+        rho_p: jnp.float32 = 0.0,
     ) -> Self:
         # Check if kappa less than lambda
 
-        num_particles = stress_ref_stack.shape[0]
-        eps_e_stack = jnp.zeros((num_particles, 3, 3))
-
-        if stress_ref_stack is None:
-            stress_ref_stack = jnp.zeros((num_particles, 3, 3), dtype=jnp.float32)
-
-        p_ref_stack = get_pressure_stack(stress_ref_stack, dim)
+        eps_e_stack = jnp.zeros((config.num_points, 3, 3))
 
         p_c_stack = p_ref_stack * R
 
-        return cls(
-            stress_ref_stack=stress_ref_stack,
-            eps_e_stack=eps_e_stack,
-            p_c_stack=p_c_stack,
-            nu=nu,
-            M=M,
-            R=R,
-            lam=lam,
-            kap=kap,
-            Vs=Vs,
-            phi_c=phi_c,
-            rho_p=rho_p,
-            absolute_density=absolute_density,
-        )
+        self.p_ref_stack = p_ref_stack
+        self.eps_e_stack = eps_e_stack
+        self.p_c_stack = p_c_stack
+        self.nu = nu
+        self.M = M
+        self.R = R
+        self.lam = lam
+        self.kap = kap
+        self.rho_p = rho_p
 
-    def distributed(self: Self, device: Sharding):
-        p_c_stack = jax.device_put(self.p_c_stack,device)
-        stress_ref_stack = jax.device_put(self.stress_ref_stack,device)
-        eps_e_stack = jax.device_put(self.eps_e_stack,device)
+        self.config = config
 
-        return self.replace(
-            stress_ref_stack = stress_ref_stack,
-            p_c_stack = p_c_stack,
-            eps_e_stack = eps_e_stack
-        )
-    @classmethod
-    def create_from_phi_ref(
-        cls: Self,
-        nu: jnp.float32,
-        M: jnp.float32,
-        R: jnp.float32,
-        lam: jnp.float32,
-        kap: jnp.float32,
-        phi_c: jnp.float32,
-        rho_p: jnp.float32,
-        phi_ref_stack: chex.Array = None,
-        absolute_density: jnp.float32 = 1.0,
-        dim: jnp.int16 = 3,
-    ):
-        p_ref_stack = jax.vmap(cls.get_p_ref_phi, in_axes=(0, None, None, None))(
-            phi_ref_stack, phi_c, lam, kap
-        )
+    # def update_from_particles(
+    #     self: Self, particles: Particles
+    # ) -> Tuple[Particles, Self]:
+    #     """Update the material state and particle stresses for MPM solver."""
 
-        def create_stress_ref(p_ref):
-            return -jnp.eye(3) * p_ref
+    #     stress_stack, self = self.update(
+    #         particles.stress_stack, particles.F_stack, particles.L_stack, None, dt
+    #     )
 
-        stress_ref_stack = jax.vmap(create_stress_ref)(p_ref_stack)
+    #     return particles.replace(stress_stack=stress_stack), self
 
-        return cls.create(
-            nu=nu,
-            M=M,
-            R=R,
-            lam=lam,
-            kap=kap,
-            Vs=1.0,
-            phi_c=phi_c,
-            rho_p=rho_p,
-            stress_ref_stack=stress_ref_stack,
-            absolute_density=1.0,
-            dim=dim,
-        )
+    # def update(
+    #     self: Self,
+    #     stress_prev_stack: chex.Array,
+    #     F_stack: chex.Array,
+    #     L_stack: chex.Array,
+    #     phi_stack: chex.Array,
+    #     dt: jnp.float32,
+    # ) -> Tuple[chex.Array, Self]:
+    #     deps_stack = get_sym_tensor_stack(L_stack) * dt
+    #     stress_next_stack, eps_e_next_stack, p_c_next_stack = self.vmap_update_stress(
+    #         deps_stack,
+    #         self.stress_ref_stack,
+    #         stress_prev_stack,
+    #         self.eps_e_stack,
+    #         self.p_c_stack,
+    #     )
+
+    #     return (
+    #         stress_next_stack,
+    #         self.replace(eps_e_stack=eps_e_next_stack, p_c_stack=p_c_next_stack),
+    # )
 
     def update_from_particles(
-        self: Self, particles: Particles, dt: jnp.float32
+        self: Self, particles: Particles
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
+        # phi_stack = particles.get_solid_volume_fraction_stack(self.rho_p)
 
-        stress_stack, self = self.update(
-            particles.stress_stack, particles.F_stack, particles.L_stack, None, dt
+        new_stress_stack, new_eps_e_stack, new_p_c_stack = self.vmap_update_ip(
+            particles.L_stack,
+            self.p_ref_stack,
+            particles.stress_stack,
+            self.eps_e_stack,
+            self.p_c_stack,
         )
 
-        return particles.replace(stress_stack=stress_stack), self
+        # jax.debug.print("{}", new_stress_stack)
+        new_particles = eqx.tree_at(
+            lambda state: (state.stress_stack),
+            particles,
+            (new_stress_stack),
+        )
+        new_self = eqx.tree_at(
+            lambda state: (state.eps_e_stack, state.p_c_stack),
+            self,
+            (new_eps_e_stack, new_p_c_stack),
+        )
+
+        return new_particles, new_self
 
     def update(
         self: Self,
         stress_prev_stack: chex.Array,
         F_stack: chex.Array,
         L_stack: chex.Array,
-        phi_stack: chex.Array,
-        dt: jnp.float32,
+        phi_stack: chex.Array
     ) -> Tuple[chex.Array, Self]:
-        deps_stack = get_sym_tensor_stack(L_stack) * dt
-        stress_next_stack, eps_e_next_stack, p_c_next_stack = self.vmap_update_stress(
-            deps_stack,
-            self.stress_ref_stack,
+        new_stress_stack, new_eps_e_stack, new_p_c_stack = self.vmap_update_ip(
+            L_stack,
+            self.p_ref_stack,
             stress_prev_stack,
             self.eps_e_stack,
             self.p_c_stack,
         )
-
-        return (
-            stress_next_stack,
-            self.replace(eps_e_stack=eps_e_next_stack, p_c_stack=p_c_next_stack),
+ 
+        new_self = eqx.tree_at(
+            lambda state: (state.eps_e_stack, state.p_c_stack),
+            self,
+            (new_eps_e_stack, new_p_c_stack),
         )
 
+        return (new_stress_stack, new_self)
+
     @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0), out_axes=(0, 0, 0))
-    def vmap_update_stress(
-        self, deps_next, stress_ref, stress_prev, eps_e_prev, p_c_prev
-    ):
+    def vmap_update_ip(self, L, p_ref, stress_prev, eps_e_prev, p_c_prev):
+        deps_next = get_sym_tensor(L) * self.config.dt
         dim = deps_next.shape[0]
 
         p_prev = get_pressure(stress_prev, dim)
-
-        # Reference pressure and deviatoric stress
-        p_ref = get_pressure(stress_ref, dim)
-
-        s_ref = get_dev_stress(stress_ref, p_ref, dim)
 
         # Trail Elastic strain
         eps_e_tr = eps_e_prev + deps_next
@@ -247,7 +236,7 @@ class ModifiedCamClay(Material):
 
         G_tr = get_G(self.nu, K_tr)
 
-        s_tr = get_elas_dev_stress(eps_e_d_tr, s_ref, G_tr)
+        s_tr = get_elas_dev_stress(eps_e_d_tr, G_tr)
 
         q_tr = get_q_vm(dev_stress=s_tr)
 
@@ -258,7 +247,6 @@ class ModifiedCamClay(Material):
         is_ep = yf > 0
 
         def elastic_update():
-
             stress_next = s_tr - p_tr * jnp.eye(3)
 
             return stress_next, eps_e_tr, p_c_prev
@@ -311,7 +299,7 @@ class ModifiedCamClay(Material):
                     init_val,
                     throw=False,
                     has_aux=True,
-                    max_steps=20,
+                    max_steps=5,
                 )
 
                 return sol.value
@@ -325,7 +313,7 @@ class ModifiedCamClay(Material):
 
             eps_e_v_next = eps_e_v_tr - deps_p_v_next
 
-            eps_e_d_next = (s_next - s_ref) / (2.0 * G_next)
+            eps_e_d_next = s_next / (2.0 * G_next)
 
             eps_e_next = eps_e_d_next - (1.0 / 3) * eps_e_v_next * jnp.eye(3)
 
@@ -345,22 +333,52 @@ class ModifiedCamClay(Material):
         return dt
 
     @classmethod
-    def get_p_ref_phi(cls, phi_ref, phi_c, lam, kap):
-
+    def get_p_ref(cls, phi_ref, ln_N, lam, kap):
         v_ref = 1.0 / phi_ref
 
-        Gamma = 1.0 / phi_c  # phi to specific volume
-
-        log_N = jnp.log(Gamma) + (lam - kap) * jnp.log(2)
-
         # p on ICL
-        log_p = (log_N - jnp.log(v_ref)) / lam
+        log_p = (ln_N - jnp.log(v_ref)) / lam
 
         return jnp.exp(log_p)
 
-    def estimate_timestep(self, p, density, cell_size, factor):
+    # def estimate_timestep(self, p, density, cell_size, factor):
+    #     K = get_K(self.kap, p)
+    #     G = get_G(self.nu, K)
 
-        K = get_K(self.kap, p)
-        G = get_G(self.nu, K)
+    #     return get_timestep(cell_size, K, G, density, factor)
+    # @classmethod
+    # def create_from_phi_ref(
+    #     cls: Self,
+    #     nu: jnp.float32,
+    #     M: jnp.float32,
+    #     R: jnp.float32,
+    #     lam: jnp.float32,
+    #     kap: jnp.float32,
+    #     phi_c: jnp.float32,
+    #     rho_p: jnp.float32,
+    #     phi_ref_stack: chex.Array = None,
+    #     absolute_density: jnp.float32 = 1.0,
+    #     dim: jnp.int16 = 3,
+    # ):
+    #     p_ref_stack = jax.vmap(cls.get_p_ref_phi, in_axes=(0, None, None, None))(
+    #         phi_ref_stack, phi_c, lam, kap
+    #     )
 
-        return get_timestep(cell_size, K, G, density, factor)
+    #     def create_stress_ref(p_ref):
+    #         return -jnp.eye(3) * p_ref
+
+    #     stress_ref_stack = jax.vmap(create_stress_ref)(p_ref_stack)
+
+    #     return cls.create(
+    #         nu=nu,
+    #         M=M,
+    #         R=R,
+    #         lam=lam,
+    #         kap=kap,
+    #         Vs=1.0,
+    #         phi_c=phi_c,
+    #         rho_p=rho_p,
+    #         stress_ref_stack=stress_ref_stack,
+    #         absolute_density=1.0,
+    #         dim=dim,
+    #     )

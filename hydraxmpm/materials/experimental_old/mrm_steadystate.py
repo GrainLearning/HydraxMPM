@@ -84,7 +84,7 @@ class MRMSteady(Material):
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
 
-        phi_stack = particles.get_phi_stack(self.rho_p)
+        phi_stack = particles.get_solid_volume_fraction_stack(self.rho_p)
 
         stress_stack, self = self.update(
             particles.stress_stack, particles.F_stack, particles.L_stack, phi_stack, dt

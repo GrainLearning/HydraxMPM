@@ -1,4 +1,4 @@
-from typing_extensions import Self
+from typing_extensions import Self,Generic
 
 import equinox as eqx
 import jax
@@ -41,13 +41,15 @@ class MPMConfig(eqx.Module):
     unroll_grid_kernels: bool = eqx.field(static=True, converter=lambda x: bool(x))
 
     dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
+    
+    project: str = eqx.field(static=True, converter=lambda x: str(x))
 
     def __init__(
         self: Self,
         origin: list,
         end: list,
         cell_size: float,
-        num_points: int,
+        num_points: int = 0,
         shapefunction: SHAPEFUNCTION = SHAPEFUNCTION.linear,
         ppc=1,
         num_steps=0,
@@ -55,6 +57,8 @@ class MPMConfig(eqx.Module):
         dt=0.0,
         unroll_grid_kernels=True,
         default_gpu_id: int = None,
+        project: str = "",
+        **kwargs: Generic
     ):
         jax.debug.print(
             "Ignore the UserWarning from, the behavior is intended and expected."
@@ -105,12 +109,15 @@ class MPMConfig(eqx.Module):
         file = sys.argv[0]
         self.dir_path = os.path.dirname(file) + "/"
 
+        self.project = project
         if default_gpu_id:
             set_default_gpu(default_gpu_id)
 
     def print_summary(self):
-        
+        print(f"[MPMConfig] project = {self.project}")
+        print(f"[MPMConfig] dim = {self.dim}")
         print(f"[MPMConfig] num_points = {self.num_points}")
         print(f"[MPMConfig] num_cells = {self.num_cells}") 
         print(f"[MPMConfig] num_interactions = {self.num_points*self.window_size}")
-        
+        print(f"[MPMConfig] domain origin = {self.origin}")
+        print(f"[MPMConfig] domain end = {self.end}")

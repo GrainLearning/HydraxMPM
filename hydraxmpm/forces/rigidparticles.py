@@ -27,11 +27,11 @@ class RigidParticles(Forces):
 
     position_stack: Array
     velocity_stack: Array
-
+    com: Array
     mu: float
 
     grid: Grid
-    
+
     update_rigid_particles: Callable = eqx.field(static=True)
 
     def __init__(
@@ -40,11 +40,12 @@ class RigidParticles(Forces):
         position_stack: Array,
         velocity_stack: Array = None,
         mu: float = 0.0,
-        update_rigid_particles: Callable=None
+        com: Array = None,
+        update_rigid_particles: Callable = None,
     ) -> Self:
         """Initialize the rigid particles."""
         num_rigid = position_stack.shape[0]
-        
+
         if velocity_stack is None:
             velocity_stack = jnp.zeros((num_rigid, config.dim))
 
@@ -54,6 +55,7 @@ class RigidParticles(Forces):
         self.grid = Grid(config)
         self.mu = mu
         self.update_rigid_particles = update_rigid_particles
+        self.com = com
         super().__init__(config)
 
     def apply_on_nodes(
@@ -186,15 +188,20 @@ class RigidParticles(Forces):
         )
 
         if self.update_rigid_particles:
-            new_position_stack,new_velocity_stack = self.update_rigid_particles(
-                step,                                                        
-                self.position_stack,
-                self.velocity_stack,
-                self.config)
+            new_position_stack, new_velocity_stack, new_com = (
+                self.update_rigid_particles(
+                    step,
+                    self.position_stack,
+                    self.velocity_stack,
+                    self.com,
+                    self.config,
+                )
+            )
         else:
             new_position_stack = self.position_stack
             new_velocity_stack = self.velocity_stack
-        
+            new_com = self.com
+
         new_nodes = eqx.tree_at(
             lambda state: (state.moment_nt_stack),
             nodes,
@@ -202,11 +209,9 @@ class RigidParticles(Forces):
         )
 
         new_self = eqx.tree_at(
-            lambda state: (state.position_stack, state.velocity_stack),
+            lambda state: (state.position_stack, state.velocity_stack, state.com),
             self,
-            (new_position_stack,new_velocity_stack),
+            (new_position_stack, new_velocity_stack, new_com),
         )
 
-        
-    
         return new_nodes, new_self

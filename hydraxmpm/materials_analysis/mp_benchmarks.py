@@ -23,7 +23,7 @@ def mp_benchmark_volume_control_shear(
     output=None,
     early_stop_iter=None,
     debug=False,
-    return_carry =False
+    return_carry=False,
 ):
     """
             Strain rate control
@@ -50,7 +50,7 @@ def mp_benchmark_volume_control_shear(
     carry, accumulated = mix_control(
         config=config,
         material=material,
-        L_control_stack=L_control_stack,
+        L_control_stack=L_control_stack.at[:early_stop_iter].get(),
         stress_control_stack=None,
         stress_mask_indices=None,
         stress_ref=stress_ref,
@@ -67,6 +67,9 @@ def mp_benchmark_volume_control_shear(
     if return_carry:
         return accumulated_next, carry
     return accumulated_next
+
+
+
 
 
 #     return self.replace(
