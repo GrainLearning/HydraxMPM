@@ -17,7 +17,9 @@ from .utils.mpm_domain_helpers import (
     generate_mesh,
     fill_domain_with_particles,
 )
-from .materials.druckerprager import DruckerPrager
+
+# from .materials.druckerprager import DruckerPrager
+from .materials.druckerprager_ep import DruckerPragerEP as DruckerPragerEP
 from .materials.linearelastic import LinearIsotropicElastic
 from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .solvers.run_solver import run_solver, run_solver_io

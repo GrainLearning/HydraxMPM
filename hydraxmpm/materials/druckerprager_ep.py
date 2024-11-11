@@ -26,6 +26,7 @@ from ..utils.math_helpers import (
     get_q_vm,
     get_sym_tensor_stack,
     get_volumetric_strain,
+    get_J2,
 )
 from .common import (
     get_bulk_modulus,
@@ -39,13 +40,16 @@ import equinox as eqx
 
 
 def yield_function(
-    q: jnp.float32, p: jnp.float32, M: jnp.float32, M2: jnp.float32, c: jnp.float32
+    sqrt_J2_tr: jnp.float32,
+    p: jnp.float32,
+    mu_1: jnp.float32,
+    mu_2: jnp.float32,
+    c: jnp.float32,
 ):
-    """Drucker-Prager yield function."""
-    return q - M * p - M2 * c
+    return sqrt_J2_tr - mu_1 * p - mu_2 * c
 
 
-class DruckerPrager(Material):
+class DruckerPragerEP(Material):
     r"""Non-associated Drucker-Prager model.
 
     The Drucker-Prager model is a smooth approximation to the Mohr-Coulomb model.
@@ -70,9 +74,6 @@ class DruckerPrager(Material):
 
     deps_dev = s/sqrt(2)J_2
 
-
-
-
     Attributes:
         E: Young's modulus.
         nu: Poisson's ratio.
@@ -93,14 +94,15 @@ class DruckerPrager(Material):
     K: jnp.float32
 
     eps_e_stack: chex.Array
-    eps_p_acc_stack: chex.Array
     p_ref_stack: chex.Array
 
-    M: jnp.float32
-    M_hat: jnp.float32
-    M2: jnp.float32
+    mu_1: jnp.float32
+    mu_2: jnp.float32
     c0: jnp.float32
 
+    mu_1_hat: jnp.float32
+
+    eps_p_acc_stack: chex.Array
     H: jnp.float32
 
     def __init__(
@@ -108,12 +110,12 @@ class DruckerPrager(Material):
         config: Union[MPMConfig, IPConfig],
         E: jnp.float32,
         nu: jnp.float32,
-        M: jnp.float32,
-        M2: jnp.float32 = 0.0,
-        M_hat: jnp.float32 = 0.0,
+        mu_1: jnp.float32,
+        mu_2: jnp.float32 = 0.0,
         c0: jnp.float32 = 0.0,
-        H: jnp.float32 = 0.0,
         p_ref_stack: chex.Array = 1.0,
+        mu_1_hat: jnp.float32 = 0.0,
+        H: jnp.float32 = 0.0,
     ) -> Self:
         """Create a non-associated Drucker-Prager material model."""
 
@@ -127,34 +129,29 @@ class DruckerPrager(Material):
         self.eps_p_acc_stack = jnp.zeros(config.num_points)
 
         self.p_ref_stack = p_ref_stack
+        self.c0 = c0
+        self.config = config
 
+        self.mu_1 = mu_1
+        self.mu_2 = mu_2
         self.H = H
 
-        self.c0 = c0
-
-        # self.M_hat = jnp.maximum(M_hat, 1e-10)
-        self.M_hat = M_hat
-        self.M = M
-        self.M2 = M2
+        self.mu_1_hat = mu_1_hat
         self.config = config
 
     def update_from_particles(
         self: Self, particles: Particles
     ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
-        # phi_stack = particles.get_solid_volume_fraction_stack(self.rho_p)
+
         deps_stack = get_sym_tensor_stack(particles.L_stack) * self.config.dt
 
         new_stress_stack, new_eps_e_stack, new_eps_p_acc_stack = (
             self.vmap_update_stress(
-                deps_stack,
-                self.p_ref_stack,
-                self.eps_e_stack,
-                self.eps_p_acc_stack,
+                deps_stack, self.p_ref_stack, self.eps_e_stack, self.eps_p_acc_stack
             )
         )
 
-        # jax.debug.print("{}", new_stress_stack)
         new_particles = eqx.tree_at(
             lambda state: (state.stress_stack),
             particles,
@@ -181,10 +178,7 @@ class DruckerPrager(Material):
 
         new_stress_stack, new_eps_e_stack, new_eps_p_acc_stack = (
             self.vmap_update_stress(
-                deps_stack,
-                self.p_ref_stack,
-                self.eps_e_stack,
-                self.eps_p_acc_stack,
+                deps_stack, self.p_ref_stack, self.eps_e_stack, self.eps_p_acc_stack
             )
         )
 
@@ -210,11 +204,12 @@ class DruckerPrager(Material):
 
         p_tr = p_tr + p_ref
 
-        q_tr = get_q_vm(dev_stress=s_tr, pressure=p_tr)
+        # linear hardening
+        c = self.c0 + self.H * eps_p_acc_prev
 
-        c = self.c0 + self.H * eps_p_acc_prev  # linear hardening
+        sqrt_J2_tr = jnp.sqrt(get_J2(dev_stress=s_tr))
 
-        yf = yield_function(q_tr, p_tr, self.M, self.M2, c=c)
+        yf = yield_function(sqrt_J2_tr, p_tr, self.mu_1, self.mu_2, c=c)
 
         is_ep = yf > 0.0
 
@@ -232,29 +227,28 @@ class DruckerPrager(Material):
 
                 # solve non associated flow rules
                 # volumetric plastic strain increment
-                deps_p_v = pmulti * self.M_hat
-                # deps_p_v = pmulti * self.M_hat
+                # deps_p_v = -pmulti * self.mu_1_hat
+                # deps_p_v = 0.0
+                deps_p_v = pmulti * self.mu_1_hat
 
                 # deviatoric plastic strain increment
                 # flow vector is coaxial to deviatoric stress
 
-                deps_p_dev = ((pmulti * jnp.sqrt(3)) / 2.0) * (s_tr / q_tr)
-
-                # deps_p_dev = jnp.nan_to_num(deps_p_dev)
+                # deps_p_dev = pmulti * (self.G / ) * s_tr
 
                 # Trail isotropic linear elastic law
-                p_next = p_tr - self.K * deps_p_v
-                s_next = s_tr - 2.0 * self.G * deps_p_dev
-                q_next = get_q_vm(dev_stress=s_next, pressure=p_next)
 
-                # linear hardening
-                eps_p_acc_next = eps_p_acc_prev + self.M2 * deps_p_v
+                p_next = p_tr - self.K * deps_p_v
+                s_next = s_tr * (1.0 - (pmulti * self.G) / sqrt_J2_tr)
+
+                sqrt_J2_next = sqrt_J2_tr - self.G * pmulti
+                eps_p_acc_next = eps_p_acc_prev + self.mu_2 * pmulti
 
                 c_next = self.c0 + self.H * eps_p_acc_next
 
-                aux = p_next, s_next, eps_p_acc_next, q_next
+                aux = p_next, s_next, eps_p_acc_next, sqrt_J2_next
 
-                R = yield_function(q_next, p_next, self.M, self.M2, c=c_next)
+                R = yield_function(sqrt_J2_next, p_next, self.mu_1, self.mu_2, c=c_next)
 
                 return R, aux
 
@@ -264,10 +258,10 @@ class DruckerPrager(Material):
                 sol = optx.root_find(
                     residuals_cone,
                     solver,
-                    1e-10,
+                    0.0,
                     throw=False,
                     has_aux=True,
-                    max_steps=10,
+                    max_steps=5,
                 )
 
                 return sol.value
@@ -278,15 +272,16 @@ class DruckerPrager(Material):
                 R, aux = residuals_cone(pmulti, None)
                 return aux, pmulti
 
-            (p_next, s_next, eps_p_acc_next, q_next), pmulti = jax.lax.cond(
-                q_tr > 0.0,
+            (p_next, s_next, eps_p_acc_next, sqrt_J2_next), pmulti = jax.lax.cond(
+                sqrt_J2_tr > 0.0,
                 pull_to_cone,
-                lambda: ((p_tr, jnp.zeros((3, 3)), 0.0, 0.0), 0.0),
+                lambda: ((p_tr, jnp.zeros((3, 3)), 0.0, sqrt_J2_tr), 0.0),
             )
 
-            alpha = self.M2 / self.M
+            alpha = self.mu_2 / self.mu_1
 
-            q_res = (2 / 3) * q_tr - self.G * pmulti
+            beta = jnp.nan_to_num(self.mu_2 / self.mu_1_hat, posinf=0.0, neginf=0.0)
+
 
             def residuals_apex(sol, args):
                 """Reduced system for non-associated flow rule."""
@@ -299,13 +294,9 @@ class DruckerPrager(Material):
                 c_next = self.c0 + self.H * eps_p_acc_next
 
                 # ensure no division by zero when no hardening is present, & non associative flow rule
-                R = (
-                    jnp.nan_to_num(self.M2 / self.M_hat, posinf=0.0, neginf=0.0)
-                    * c_next
-                    + p_next
-                )
+                R = beta * c_next + p_next
 
-                aux = p_next, jnp.zeros((3, 3)), eps_p_acc_next, 0.0
+                aux = p_next, jnp.zeros((3, 3)), 0.0
                 return R, aux
 
             def find_roots_apex():
@@ -328,10 +319,10 @@ class DruckerPrager(Material):
                 R, aux = residuals_apex(deps_v_p, None)
                 return aux
 
-            p_next, s_next, eps_p_acc_next, q_next = jax.lax.cond(
-                q_res <= 0.0,
+            p_next, s_next, eps_p_acc_next = jax.lax.cond(
+                sqrt_J2_next <= 0.0,
                 pull_to_apex,
-                lambda: (p_next, s_next, eps_p_acc_next, q_next),
+                lambda: (p_next, s_next, eps_p_acc_next),
             )
 
             stress_next = s_next - p_next * jnp.eye(3)

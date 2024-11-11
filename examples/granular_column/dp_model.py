@@ -21,11 +21,11 @@ column_height = 0.4  # [m]
 # material parameters
 phi_c = 0.648  # [-] rigid limit
 phi_0 = 0.65  # [-] initial solid volume fraction
-rho_p = 2000  # [kg/m^3] particle (skeletan density)
-# rho = rho_p * phi_0  # [kg/m^3] bulk density
+rho_p = 1200  # [kg/m^3] particle (skeletan density)
+rho = rho_p * phi_0  # [kg/m^3] bulk density
 # rho = 1500
-rho = 2000
-rho = 1
+# rho = 2000
+# rho = 1
 d = 0.0053  # [m] particle diameter
 
 # gravity
@@ -34,7 +34,7 @@ g = -9.8  # [m/s^2]
 _MPMConfig = partial(
     hdx.MPMConfig,
     origin=[0.0, 0.0],
-    end=np.array([2.0, 0.6]),
+    end=np.array([1.0, 0.6]),
     ppc=4,
     dim=2,
     default_gpu_id=6,
@@ -92,15 +92,15 @@ particles = eqx.tree_at(
 # )
 # 0.3819
 
-material = hdx.DruckerPrager(
+material = hdx.DruckerPragerEP(
     config=config,
-    E=100000,
+    E=100_000,
     nu=0.3,
-    M=0.66,
-    M2=0.0,
+    mu_1=0.6,
+    mu_2=0.6,
     c0=0.0,
     H=0.0,
-    M_hat=0.00,
+    mu_1_hat=0.0,
     p_ref_stack=p_ref * jnp.ones(config.num_points),
 )
 
@@ -113,8 +113,8 @@ solver = hdx.USL_ASFLIP(config=config)
 
 start_time = time.time()
 
+# Run solver    mu_2=0.0,
 
-# # Run solver
 carry = hdx.run_solver_io(
     config=config,
     solver=solver,
