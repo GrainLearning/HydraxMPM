@@ -1,7 +1,7 @@
 
-Differentiable Material Point Method solver developed with [JAX](https://jax.readthedocs.io/en/latest/quickstart.html)
+A Material Point Method solver developed with [JAX](https://jax.readthedocs.io/en/latest/quickstart.html)
 
-This is a pre-release version that is still in development.
+This code is still in pre-alpha, i.e., all models may not be feature-complete.
 
 
 ## Current features
@@ -11,20 +11,18 @@ Materials ( Drucker Prager, Linear isotropic Elastic, Modified Cam Clay, Newtoni
 Forces (Rigid body contact, gravity, slip and no slip boundaries)
 
 ## Installation instructions
-- Clone repository
-- Install poetry [here](https://python-poetry.org/docs/)
-- `poetry install`
-- `poetry shell`
+- Install uv [here](https://docs.astral.sh/uv/getting-started/installation/)
+- Clone repository `git clone git@github.com:GrainLearning/HydraxMPM.git && cd HydraxMPM`
+- For GPU `uv sync --group plot`
+- For CPU `uv sync --group cpu plot`
+- Run an example, e.g., `uv run examples/dambreak/dambreak.py`. Output is found in the `./examples/dambreak/` directory.
 
-Examples that should work
-- Cube fall 3D, Cube fall, dambreak, sphere impact, CHOPS2024
-- To run example, run `python <name of script>`
 
 ## Contributors:
-Retief Lubbe, Hongyang Cheng, Stefan Luding, Vanessa Magnanimo
+Retief Lubbe, Hongyang Cheng
 
-University of Twente, SMM & M&S
+University of Twente, SMM
 
 ## Acknowledgements
-This research is part of the project TUSAIL (Training in Upscaling Particle Systems: Advancing Industry across Length-scales, https://tusail.eu)  and has received funding from the European Horizon2020 Framework Programme for research, technological development and demonstration under grant agreement ID 955661.
+This research is part of the project TUSAIL [Training in Upscaling Particle Systems: Advancing Industry across Length-scales](https://tusail.eu)  and has received funding from the European Horizon2020 Framework Programme for research, technological development and demonstration under grant agreement ID 955661.
 
