@@ -87,11 +87,6 @@ particles = eqx.tree_at(
     (stress_ref_stack),
 )
 
-# model_create = partial(
-#     hdx.DruckerPrager, E=1000, nu=0.3, M=1.2, M2=0.0, c0=0.0, H=0.0, M_hat=0.0
-# )
-# 0.3819
-
 material = hdx.DruckerPragerEP(
     config=config,
     E=100_000,
@@ -109,11 +104,8 @@ gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, g]))
 box = hdx.NodeLevelSet(config, mu=1.0)
 
 solver = hdx.USL_ASFLIP(config=config)
-# solver = hdx.USL(config=config,alpha=0.98)
 
 start_time = time.time()
-
-# Run solver    mu_2=0.0,
 
 carry = hdx.run_solver_io(
     config=config,

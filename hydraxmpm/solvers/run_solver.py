@@ -208,7 +208,7 @@ def run_solver_io(
         scan_fn,
         (solver, particles, nodes, material_stack, forces_stack),
         xs=xs,
-        unroll=1,
+        unroll=False,
     )
 
     return carry

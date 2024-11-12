@@ -104,6 +104,8 @@ class DruckerPragerEP(Material):
 
     eps_p_acc_stack: chex.Array
     H: jnp.float32
+    
+    rho_p: jnp.float32
 
     def __init__(
         self: Self,
@@ -116,6 +118,7 @@ class DruckerPragerEP(Material):
         p_ref_stack: chex.Array = 1.0,
         mu_1_hat: jnp.float32 = 0.0,
         H: jnp.float32 = 0.0,
+        rho_p: jnp.float32 = 0.0
     ) -> Self:
         """Create a non-associated Drucker-Prager material model."""
 
@@ -137,6 +140,8 @@ class DruckerPragerEP(Material):
         self.H = H
 
         self.mu_1_hat = mu_1_hat
+        
+        self.rho_p = rho_p
         self.config = config
 
     def update_from_particles(
