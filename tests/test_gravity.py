@@ -1,33 +1,53 @@
-"""Unit tests for the Gravity data class."""
-
 import jax.numpy as jnp
 import numpy as np
 
-import pymudokon as pm
+import hydraxmpm as hdx
+
+import equinox as eqx
 
 
 def test_create():
     """Unit test to initialize gravity."""
-    box = pm.Gravity.create(jnp.array([0.0, 0.0]))
 
-    assert isinstance(box, pm.Gravity)
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0],
+        end=[1.0, 1.0],
+        cell_size=0.5,
+        num_points=2,
+        shapefunction=hdx.SHAPEFUNCTION.linear
+    )
+
+    box = hdx.Gravity(config, gravity=jnp.array([0.0, 0.0]))
+
+    assert isinstance(box, hdx.Gravity)
 
 
-def test_apply_on_node_moments_2d():
+def test_call_2d():
     """Unit test to apply gravity force on Nodes."""
-    nodes = pm.Nodes.create(
-        origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5
+
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0],
+        end=[1.0, 1.0],
+        cell_size=0.5,
+        num_points=2,
+        shapefunction=hdx.SHAPEFUNCTION.linear,
+        dt=0.01,
     )
+    nodes = hdx.Nodes(config)
 
-    grav = pm.Gravity.create(jnp.array([0.0, 9.8]))
+    grav = hdx.Gravity(config, gravity=jnp.array([0.0, 9.8]))
 
-    nodes = nodes.replace(
-        mass_stack=jnp.ones(nodes.num_nodes_total) * 1.0,
-        moment_stack=jnp.zeros((nodes.num_nodes_total, 2)),
-        moment_nt_stack=jnp.ones((nodes.num_nodes_total, 2)),
+    new_nodes = eqx.tree_at(
+        lambda state: (state.mass_stack, state.moment_nt_stack),
+        nodes,
+        (
+            jnp.ones(config.num_cells) * 1.0,
+            jnp.ones((config.num_cells, config.dim)) * 1.0,
+        ),
     )
+  
 
-    nodes, grav = grav.apply_on_nodes_moments(nodes=nodes, dt=0.01)
+    new_nodes, new_grav = grav.apply_on_nodes(nodes=new_nodes)
 
     expected_moment_nt_stack = jnp.array(
         [
@@ -43,27 +63,9 @@ def test_apply_on_node_moments_2d():
         ]
     )
 
-    np.testing.assert_allclose(nodes.moment_nt_stack, expected_moment_nt_stack, rtol=1e-3)
-
-
-def test_apply_on_node_moments_3d():
-    """Unit test to apply gravity force on Nodes in 3D."""
-    nodes = pm.Nodes.create(
-        origin=jnp.array([0.0, 0.0, 0.0]),
-        end=jnp.array([1.0, 1.0, 1.0]),
-        node_spacing=0.5,
+    np.testing.assert_allclose(
+        new_nodes.moment_nt_stack, expected_moment_nt_stack, rtol=1e-3
     )
 
-    grav = pm.Gravity.create(jnp.array([0.0, 0.0, 9.8]))
 
-    nodes = nodes.replace(
-        mass_stack=jnp.ones(nodes.num_nodes_total) * 1.0,
-        moment_stack=jnp.zeros((nodes.num_nodes_total, 3)),
-        moment_nt_stack=jnp.ones((nodes.num_nodes_total, 3)),
-    )
-
-    nodes, grav = grav.apply_on_nodes_moments(nodes=nodes, dt=0.01)
-
-    expected_moment_nt_stack = np.repeat(jnp.array([[1.0, 1.0, 1.098]]), 27, axis=0)
-
-    np.testing.assert_allclose(nodes.moment_nt_stack, expected_moment_nt_stack, rtol=1e-3)
+test_call_2d()

@@ -1,55 +1,75 @@
 """Unit tests for rigid particles."""
 
 import jax.numpy as jnp
+
+import hydraxmpm as hdx
+
+import equinox as eqx
 import numpy as np
 
-import pymudokon as pm
-
-
 def test_init():
-    """Unit test to initialize rigid particles."""
+    """Unit test to initialize the DirichletBox class."""
 
-    rigid_particles = pm.RigidParticles.create(
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0],
+        end=[1.0, 1.0],
+        cell_size=0.1,
+        num_points=2,
+        shapefunction=hdx.SHAPEFUNCTION.linear,
+    )
+
+    box = hdx.RigidParticles(
+        config,
         position_stack=jnp.array([[0.45, 0.21], [0.8, 0.4]]),
         velocity_stack=jnp.array([[0.0, 0.0], [0.0, 0.0]]),
-        shapefunction=pm.CubicShapeFunction.create(num_particles=2, dim=2),
-    )
-    assert isinstance(rigid_particles, pm.RigidParticles)
-
-
-def test_apply_on_node_moments():
-    """Unit test apply rigid particles on nodes moments."""
-    nodes = pm.Nodes.create(
-        origin=jnp.array([0.0, 0.0]), end=jnp.array([1.0, 1.0]), node_spacing=0.5
     )
 
-    particles = pm.Particles.create(
-        position_stack=jnp.array([[0.2, 0.7]]), mass_stack=jnp.array([1.0])
+    assert isinstance(box, hdx.RigidParticles)
+
+
+def test_call_2d():
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0],
+        end=[1.0, 1.0],
+        cell_size=0.5,
+        num_points=2,
+        shapefunction=hdx.SHAPEFUNCTION.linear,
     )
 
-    shapefunctions = pm.LinearShapeFunction.create(num_particles=1, dim=2)
-
-    shapefunctions, _ = shapefunctions.calculate_shapefunction(
-        origin=nodes.origin,
-        inv_node_spacing=nodes.inv_node_spacing,
-        grid_size=nodes.grid_size,
-        position_stack=particles.position_stack,
+    particles = hdx.Particles(
+        config=config,
+        position_stack=jnp.array([[0.2, 0.7]]),
+        mass_stack=jnp.array([1.0,1.0]),
     )
 
-    r_shapefunctions = pm.LinearShapeFunction.create(num_particles=1, dim=2)
+    nodes = hdx.Nodes(config)
+    
+    usl = hdx.USL(config)
+    
+    nodes = usl.p2g(
+        particles,
+        nodes
+    )
+    
+    # print(nodes.normal_stack)
 
-    rigid_particles = pm.RigidParticles.create(
+    rigid_particles = hdx.RigidParticles(
+        config=config,
         position_stack=jnp.array([[0.7, 0.2]]),
         velocity_stack=jnp.array([[0.0, 0.0]]),
-        shapefunction=r_shapefunctions,
     )
-    nodes = nodes.replace(
-        moment_nt_stack=jnp.ones(nodes.moment_nt_stack.shape, dtype=jnp.float32),
-        mass_stack=jnp.ones(nodes.mass_stack.shape, dtype=jnp.float32),
+
+    nodes = eqx.tree_at(
+        lambda state: (
+            state.mass_stack,
+            state.moment_nt_stack,
+        ),
+        nodes,
+        (nodes.mass_stack.at[:].set(1.0), nodes.moment_nt_stack.at[:].set(1.0)),
     )
-    nodes, rigid_particles = rigid_particles.apply_on_nodes_moments(
-        nodes, particles, shapefunctions
-    )
+
+    nodes, rigid_particles = rigid_particles.apply_on_nodes(nodes, particles, 0)
+
     expected_moment_nt_stack = jnp.array(
         [
             [
@@ -88,3 +108,4 @@ def test_apply_on_node_moments():
         ]
     )
     np.testing.assert_allclose(nodes.moment_nt_stack, expected_moment_nt_stack)
+

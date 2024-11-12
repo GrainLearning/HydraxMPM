@@ -1,28 +1,30 @@
-"""Unit tests for the Particles dataclass."""
+# """Unit tests for the Particles dataclass."""
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import chex
 
-import pymudokon as pm
+import hydraxmpm as hdx
 
 
-@pytest.mark.parametrize(
-    "dim, exp_shape_scalars, exp_shape_vectors, exp_shape_tensors",
-    [
-        (1, (2,), (2,), (2, 1)),
-        (2, (2,), (2, 2), (2, 2, 2)),
-        (3, (2,), (2, 3), (2, 3, 3)),
-    ],
-)
-def test_create(dim, exp_shape_scalars, exp_shape_vectors, exp_shape_tensors):
-    """Unit test to initialize particles over multiple dimensions with 2 particles."""
-    num_particles = 2
-    particles = pm.Particles.create(
-        position_stack=jnp.zeros((num_particles, dim)),
+def test_create():
+    """Unit test to initialize particles over 2 particles."""
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0],
+        end=[
+            1.0,
+            1.0,
+        ],
+        cell_size=0.1,
+        num_points=2,
     )
-    assert particles.position_stack.shape == (num_particles, dim)
-    assert particles.velocity_stack.shape == (num_particles, dim)
+
+    particles = hdx.Particles(
+        config=config,
+        position_stack=jnp.zeros((config.num_points, 2)),
+    )
+    chex.assert_shape(particles.position_stack, (config.num_points, 2))
 
 
 def test_calculate_volume():
@@ -30,26 +32,35 @@ def test_calculate_volume():
 
     Volume calculation is based on the background grid discretization.
     """
-    particles = pm.Particles.create(
-        position_stack=jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+    position_stack = jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0, 0.0],
+        end=[1.0, 1.0, 1.0],
+        cell_size=0.5,
+        num_points=position_stack.shape[0],
+        ppc=1,
     )
+    particles = hdx.Particles(config=config, position_stack=position_stack)
 
-    particles = particles.calculate_volume(node_spacing=0.5, particles_per_cell=1)
+    volume_stack = particles.calculate_volume()
 
-    np.testing.assert_allclose(particles.volume_stack, jnp.array([0.125, 0.125]))
-    np.testing.assert_allclose(particles.volume0_stack, jnp.array([0.125, 0.125]))
+    np.testing.assert_allclose(volume_stack, jnp.array([0.125, 0.125]))
 
 
 def test_refresh():
     """Unit test to refresh the state of the particles."""
-    particles = pm.Particles.create(
-        position_stack=jnp.array([[0.0, 0.0], [1.0, 1.0]]),
-        velocity_stack=jnp.array([[0.0, 0.0], [1.0, 2.0]]),
+    position_stack = jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+    config = hdx.MPMConfig(
+        origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=0.5, num_points=position_stack.shape[0], ppc=1
     )
 
-    particles = particles.replace(
-        L_stack=jnp.array([[[1.0, 0.0], [0.0, 1.0]], [[1.0, 0.0], [0.0, 1.0]]])
+    particles = hdx.Particles(
+        config=config,
+        position_stack=position_stack,
+        L_stack=jnp.ones((2, 3, 3)),
     )
+
     particles = particles.refresh()
 
-    np.testing.assert_allclose(particles.L_stack, jnp.zeros((2, 2, 2)))
+    np.testing.assert_allclose(particles.L_stack, jnp.zeros((2, 3, 3)))

@@ -3,136 +3,112 @@ import os
 import jax
 import jax.numpy as jnp
 import numpy as np
+import hydraxmpm as hdx
+from functools import partial
+from inspect import signature
 
-import pymudokon as pm
+fname = "/dambreak.gif"
+
+_MPMConfig = partial(
+    hdx.MPMConfig,
+    origin=np.array([0.0, 0.0]),
+    end=np.array([6.0, 6.0]),
+    ppc=4,
+    cell_size=6 / 69,
+    shapefunction=hdx.SHAPEFUNCTION.cubic,
+    num_steps=20000,
+    store_every=500,
+)
 
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
+_discretize = partial(hdx.discretize, density_ref=997.5)
 
-fname = "/dambreak_output.gif"
+_water = partial(hdx.NewtonFluid, K=2.0 * 10**6, viscosity=0.002)
 
 
-# dam
+# time step depends on the cell_size, bulk modulus and initial density
+dt = (
+    0.1
+    * hdx.get_sv(_MPMConfig, "cell_size")
+    / np.sqrt(hdx.get_sv(_water, "K") / hdx.get_sv(_discretize, "density_ref"))
+)
+
+# separation of particles depend on the cell size and particles per cell
+sep = hdx.get_sv(_MPMConfig, "cell_size") / hdx.get_sv(_MPMConfig, "ppc")
+
+# create dam
 dam_height = 2.0
 dam_length = 4.0
 
-# material parameters
-rho = 997.5
-bulk_modulus = 2.0 * 10**6
-visc = 0.002
+x = np.arange(0, dam_length + sep, sep) + 5.5 * sep
+y = np.arange(0, dam_height + sep, sep) + 5.5 * sep
 
-
-# gravity
-g = -9.81
-
-
-# background grid
-origin, end = jnp.array([0.0, 0.0]), jnp.array([6.0, 6.0])
-
-
-cell_size = 6 / 69
-
-# timestep
-c = np.sqrt(bulk_modulus / rho)
-dt = 0.1 * cell_size / c
-
-
-is_apic = True
-
-
-particles_per_cell = 4
-
-nodes = pm.Nodes.create(origin=origin, end=end, node_spacing=cell_size)
-
-sep = cell_size / particles_per_cell
-x = np.arange(0, dam_length + sep, sep) + 3.5 * sep
-y = np.arange(0, dam_height + sep, sep) + 3.5 * sep
 xv, yv = np.meshgrid(x, y)
+
 pnts_stack = np.array(list(zip(xv.flatten(), yv.flatten()))).astype(np.float64)
-particles = pm.Particles.create(position_stack=jnp.array(pnts_stack))
 
-nodes = pm.Nodes.create(
-    origin=origin, end=end, node_spacing=cell_size, small_mass_cutoff=1e-12
-)
+# config depends on num points and timestep
+config = _MPMConfig(num_points=len(pnts_stack), dt=dt)
 
-shapefunctions = pm.CubicShapeFunction.create(len(pnts_stack), 2)
+config.print_summary()
 
-particles, nodes, shapefunctions = pm.discretize(
-    particles, nodes, shapefunctions, ppc=particles_per_cell, density_ref=rho
-)
+material = _water(config=config)
 
-water = pm.NewtonFluid.create(K=bulk_modulus, viscosity=visc)
+particles = hdx.Particles(config=config, position_stack=jnp.array(pnts_stack))
 
-gravity = pm.Gravity.create(gravity=jnp.array([0.0, g]))
-# Fix this
-# box = pm.DirichletBox.create(nodes, boundary_types=jnp.array([[3, 2], [3, 2]]))
-box = pm.DirichletBox.create(
-    nodes,
-    boundary_types=(
-        ("slip_negative_normal", "slip_positive_normal"),
-        ("stick", "stick"),
-    ),
-)
+nodes = hdx.Nodes(config)
+
+particles, nodes = _discretize(config=config, particles=particles, nodes=nodes)
+
+gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, -9.81]))
+
+box = hdx.NodeLevelSet(config=config, mu=0.4)
+
+solver = hdx.USL_APIC(config=config)
 
 
-if is_apic:
-    solver = pm.USL_APIC.create(cell_size, dim=2, num_particles=len(pnts_stack), dt=dt)
-else:
-    solver = pm.USL.create(alpha=0.99, dt=dt)
+print("Running and compiling")
 
-
-carry, accumulate = pm.run_solver(
+carry, accumulate = hdx.run_solver(
+    config=config,
     solver=solver,
     particles=particles,
     nodes=nodes,
-    shapefunctions=shapefunctions,
-    material_stack=[water],
+    material_stack=[material],
     forces_stack=[gravity, box],
-    num_steps=20000,
-    store_every=500,
-    particles_output=("stress_stack","position_stack", "velocity_stack", "mass_stack"),
+    particles_output=("stress_stack", "position_stack", "velocity_stack", "mass_stack"),
 )
 
 print("Simulation done.. plotting might take a while")
 
+
 stress_stack, position_stack, velocity_stack, mass_stack = accumulate
 
-stress_reg_stack = jax.vmap(pm.post_processes_stress_stack,in_axes=(0,0,0, None,None)) (
-    stress_stack,
-    mass_stack,
-    position_stack,
-    nodes,
-    shapefunctions
+
+p_stack = jax.vmap(hdx.get_pressure_stack, in_axes=(0, None))(stress_stack, 2)
+
+pvplot_cmap_q = hdx.PvPointHelper(
+    config=config,
+    position_stack=position_stack,
+    scalar_stack=p_stack,
+    scalar_name="p [Pa]",
+    subplot=(0, 0),
+    timeseries_options={
+        "clim": [0, 50000],
+        "point_size": 25,
+        "render_points_as_spheres": True,
+        "scalar_bar_args": {
+            "vertical": True,
+            "height": 0.8,
+            "title_font_size": 35,
+            "label_font_size": 30,
+            "font_family": "arial",
+        },
+    },
 )
-
-q_reg_stack = jax.vmap(pm.get_q_vm_stack,in_axes=(0,None, None,None))(
-    stress_reg_stack,None,None,2)
-
-pvplot_cmap_q = pm.PvPointHelper.create(
-   position_stack,
-   scalar_stack = q_reg_stack,
-  scalar_name="q [Pa]",
-   origin=nodes.origin,
-   end=nodes.end,
-   subplot = (0,0),
-   timeseries_options={
-    "clim":[0,50000],
-    "point_size":25,
-    "render_points_as_spheres":True,
-    "scalar_bar_args":{
-           "vertical":True,
-           "height":0.8,
-            "title_font_size":35,
-            "label_font_size":30,
-            "font_family":"arial",
-
-           }
-   }
-)
-plotter = pm.make_pvplots(
+plotter = hdx.make_pvplots(
+    config,
     [pvplot_cmap_q],
-    plotter_options={"shape":(1,1),"window_size":([2048, 2048]) },
-    dim=2,
-    file=dir_path + fname,
+    plotter_options={"shape": (1, 1), "window_size": ([2048, 2048])},
+    file=config.dir_path + fname,
 )
-

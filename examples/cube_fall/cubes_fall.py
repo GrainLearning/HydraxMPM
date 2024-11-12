@@ -1,19 +1,13 @@
 """Two cubes falling featuring rough domain walls, gravity and cubic shape functions"""
 
-
-import os
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-import pymudokon as pm
+import hydraxmpm as hdx
 
-
-dir_path = os.path.dirname(os.path.realpath(__file__))
 
 fname = "/cubes_fall.gif"
-
 
 domain_size = 10
 
@@ -44,96 +38,76 @@ block4 = create_block((5, 3.8), 2, particle_spacing)
 # Stack all the positions together
 position_stack = np.vstack([block1, block2, block3, block4])
 
-particles = pm.Particles.create(position_stack=position_stack)
-
-
-nodes = pm.Nodes.create(
-    origin=jnp.array([0.0, 0.0]),
-    end=jnp.array([domain_size, domain_size]),
-    node_spacing=cell_size,
+config = hdx.MPMConfig(
+    origin=[0.0, 0.0],
+    end=[domain_size, domain_size],
+    cell_size=cell_size,
+    num_points=len(position_stack),
+    shapefunction=hdx.SHAPEFUNCTION.cubic,
+    ppc=particles_per_cell,
+    num_steps=120000,
+    store_every=1000,
+    dt=0.003,
 )
 
+config.print_summary()
 
-#  original_density=1000
-print(
-    "number of particles {} number of nodes {}".format(
-        len(position_stack), len(nodes.moment_stack)
-    )
-)
+particles = hdx.Particles(config=config, position_stack=position_stack)
 
-shapefunctions = pm.CubicShapeFunction.create(len(position_stack), 2)
+nodes = hdx.Nodes(config)
 
-particles, nodes, shapefunctions = pm.discretize(
-    particles, nodes, shapefunctions, density_ref=1000
-)
+particles, nodes = hdx.discretize(config, particles, nodes, density_ref=1000)
 
-material = pm.LinearIsotropicElastic.create(E=10000.0, nu=0.1)
+material = hdx.LinearIsotropicElastic(E=10000.0, nu=0.1, config=config)
 
-gravity = pm.Gravity.create(gravity=jnp.array([0.00, -0.0098]))
+gravity = hdx.Gravity(config=config, gravity=jnp.array([0.00, -0.0098]))
 
-box = pm.DirichletBox.create(
-    nodes,
-    boundary_types=(
-        ("slip_negative_normal", "slip_positive_normal"),
-        ("stick", "stick"),
-    ),
-)
+box = hdx.NodeLevelSet(config, mu=0.2)
 
-solver = pm.USL.create(alpha=0.99, dt=0.003)
+solver = hdx.USL(config, alpha=0.99)
 
 
-carry, accumulate = pm.run_solver(
+print("Running and compiling")
+
+carry, accumulate = hdx.run_solver(
+    config=config,
     solver=solver,
     particles=particles,
     nodes=nodes,
-    shapefunctions=shapefunctions,
     material_stack=[material],
-    forces_stack=[gravity, box],
-    num_steps=120000,
-    store_every=1000,
-    particles_output=("stress_stack","position_stack", "velocity_stack", "mass_stack"),
+    forces_stack=[gravity,box],
+    particles_output=("stress_stack", "position_stack", "velocity_stack", "mass_stack"),
 )
 
 print("Simulation done.. plotting might take a while")
 
+
 stress_stack, position_stack, velocity_stack, mass_stack = accumulate
 
-stress_reg_stack = jax.vmap(pm.post_processes_stress_stack,in_axes=(0,0,0, None,None)) (
-    stress_stack,
-    mass_stack,
-    position_stack,
-    nodes,
-    shapefunctions
+p_stack = jax.vmap(hdx.get_pressure_stack, in_axes=(0, None))(stress_stack, 2)
+
+pvplot_cmap_q = hdx.PvPointHelper(
+    config=config,
+    position_stack=position_stack,
+    scalar_stack=p_stack,
+    scalar_name="p [Pa]",
+    subplot=(0, 0),
+    timeseries_options={
+        "clim": [0, 50000],
+        "point_size": 25,
+        "render_points_as_spheres": True,
+        "scalar_bar_args": {
+            "vertical": True,
+            "height": 0.8,
+            "title_font_size": 35,
+            "label_font_size": 30,
+            "font_family": "arial",
+        },
+    },
 )
-
-p_reg_stack = jax.vmap(pm.get_pressure_stack,in_axes=(0,None))(
-    stress_reg_stack,2)
-
-
-pvplot_cmap_q = pm.PvPointHelper.create(
-   position_stack,
-   scalar_stack = p_reg_stack,
-  scalar_name="p [Pa]",
-   origin=nodes.origin,
-   end=nodes.end,
-   subplot = (0,0),
-   timeseries_options={
-    "clim":[0,50000],
-    "point_size":25,
-    "render_points_as_spheres":True,
-    "scalar_bar_args":{
-           "vertical":True,
-           "height":0.8,
-            "title_font_size":35,
-            "label_font_size":30,
-            "font_family":"arial",
-
-           }
-   }
-)
-plotter = pm.make_pvplots(
+plotter = hdx.make_pvplots(
+    config,
     [pvplot_cmap_q],
-    plotter_options={"shape":(1,1),"window_size":([2048, 2048]) },
-    dim=2,
-    file=dir_path + fname,
+    plotter_options={"shape": (1, 1), "window_size": ([2048, 2048])},
+    file=config.dir_path + fname,
 )
