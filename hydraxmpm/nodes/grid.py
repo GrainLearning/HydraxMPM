@@ -12,7 +12,6 @@ import equinox as eqx
 
 from ..shapefunctions.linear import vmap_linear_shapefunction
 from ..shapefunctions.cubic import vmap_linear_cubicfunction
-from ..shapefunctions.shapefunctions import SHAPEFUNCTION
 
 
 def get_hash(pos, grid, dim):
@@ -56,10 +55,12 @@ class Grid(eqx.Module):
             (config.num_points * config.window_size, 3)
         )
 
-        if config.shapefunction == SHAPEFUNCTION.linear:
+        if config.shapefunction == "linear":
             self.shapefunction_call = vmap_linear_shapefunction
-        elif config.shapefunction == SHAPEFUNCTION.cubic:
+        elif config.shapefunction == "cubic":
             self.shapefunction_call = vmap_linear_cubicfunction
+
+            
 
     def get_interactions(self, position_stack: chex.Array) -> Self:
         def vmap_intr(intr_id: chex.ArrayBatched) -> Tuple[chex.Array, chex.Array]:

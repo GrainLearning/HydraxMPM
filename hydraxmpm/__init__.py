@@ -11,7 +11,7 @@ from .particles.particles import Particles
 from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
 from .solvers.usl_asflip import USL_ASFLIP
-from .shapefunctions.shapefunctions import SHAPEFUNCTION
+
 from .utils.mpm_domain_helpers import (
     discretize,
     generate_mesh,

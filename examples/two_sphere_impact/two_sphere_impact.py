@@ -63,7 +63,7 @@ config = hdx.MPMConfig(
     end=[1.0, 1.0],
     cell_size=cell_size,
     num_points=len(pos),
-    shapefunction=hdx.SHAPEFUNCTION.linear,
+    shapefunction="linear",
     ppc=mps_per_cell,
     num_steps=3000,
     store_every=100,
@@ -122,6 +122,7 @@ pvplot_cmap_ke = hdx.PvPointHelper(
 )
 
 plotter = hdx.make_pvplots(
+    config,
     [pvplot_cmap_ke],
     plotter_options={"shape": (1, 1), "window_size": ([2048, 2048])},
     file=config.dir_path + fname,

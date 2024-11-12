@@ -1,4 +1,4 @@
-
+<!-- 
 # Lets get going...
 
 
@@ -90,4 +90,4 @@ There are several MPM solvers available. All solvers are explicit time integrati
 # Termonology
 
 ## stacks
- The vectorized versions of the functions are suffixed with `_stack`.
+ The vectorized versions of the functions are suffixed with `_stack`. -->

@@ -56,7 +56,7 @@ class Gravity(Forces):
         moment_gravity = nodes.mass_stack.reshape(-1, 1) * gravity * self.config.dt
 
         new_moment_nt_stack = nodes.moment_nt_stack + moment_gravity
-
+        
         new_nodes = eqx.tree_at(
             lambda state: state.moment_nt_stack,
             nodes,

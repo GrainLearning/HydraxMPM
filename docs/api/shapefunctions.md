@@ -1,4 +1,4 @@
-<!-- TODO see literature on shapefunctions to add more details -->
+<!-- TODO see literature on shapefunctions to add more details
 
 # Shape functions
 !!! abstract ""
@@ -30,7 +30,7 @@
     ```
 <!-- !!! reference function to generate material point -->
     
-::: shapefunctions.cubic
+<!-- ::: shapefunctions.cubic -->
 
 
 # Linear
@@ -45,18 +45,16 @@
         import hydraxmpm as hdx
         
         config = hdx.MPMConfig(
-            shapefunction_type="linear"
+            shapefunction="linear"
         )
-
-        hdx.LinearShapeFunction(config=config)
 
     ```
 
 <!-- Add reference -->
-::: shapefunctions.linear
+<!-- ::: shapefunctions.linear -->
 
 
 ------------
 **References:**
 
-[^1]: De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.'
+[^1]: De Vaucorbeil, Alban, et al. 'Material point method after 25 years: theory, implementation, and applications.' -->

@@ -1,4 +1,4 @@
-
+<!-- 
 # Particles
 !!! abstract "" 
     This module gives access to the material point method lagrangian markers (called particles).
@@ -26,4 +26,4 @@
     stress_stack = hdx.get_pressure_stack(particles.stress_stack)
     ```
 
-::: particles.particles
+::: particles.particles -->

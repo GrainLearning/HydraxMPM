@@ -12,7 +12,7 @@ from typing_extensions import Self, Union
 import chex
 import jax
 import jax.numpy as jnp
-import optax
+
 import optimistix as optx
 
 from ..config.mpm_config import MPMConfig

@@ -37,19 +37,17 @@ _MPMConfig = partial(
     end=np.array([1.0, 0.6]),
     ppc=4,
     dim=2,
-    default_gpu_id=6,
+    default_gpu_id=0,
     cell_size=0.0125,  # [m]
-    shapefunction=hdx.SHAPEFUNCTION.cubic,
+    shapefunction="cubic",
     num_steps=40000,
     store_every=200,
     project="druckerprager",
     dt=3 * 10**-5,  # [s] time step
 )
 
-
 def get_sv(func, val):
     return signature(func).parameters[val].default
-
 
 sep = get_sv(_MPMConfig, "cell_size") / get_sv(_MPMConfig, "ppc")
 
@@ -92,7 +90,7 @@ material = hdx.DruckerPragerEP(
     E=100_000,
     nu=0.3,
     mu_1=0.6,
-    mu_2=0.6,
+    mu_2=0.0,
     c0=0.0,
     H=0.0,
     mu_1_hat=0.0,

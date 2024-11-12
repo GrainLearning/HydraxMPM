@@ -1,4 +1,4 @@
-# Math utils
+<!-- # Math utils
 
 Helper functions are provided for basic mathematical operations. These functions can be called from `utils.math_helpers` or the base `pymudokon` package.
 
@@ -23,4 +23,4 @@ pressure_stack = pm.get_pressure_stack(stress_stack) # [1000,1000] [Pa] and shap
 
 ```
 
-::: utils.math_helpers
+::: utils.math_helpers -->

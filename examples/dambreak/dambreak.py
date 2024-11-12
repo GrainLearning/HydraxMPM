@@ -11,20 +11,21 @@ fname = "/dambreak.gif"
 
 _MPMConfig = partial(
     hdx.MPMConfig,
+    project="dambreak",
     origin=np.array([0.0, 0.0]),
     end=np.array([6.0, 6.0]),
     ppc=4,
     cell_size=6 / 69,
-    shapefunction=hdx.SHAPEFUNCTION.cubic,
+    shapefunction="cubic",
     num_steps=20000,
     store_every=500,
+    file=__file__
 )
 
 
 _discretize = partial(hdx.discretize, density_ref=997.5)
 
 _water = partial(hdx.NewtonFluid, K=2.0 * 10**6, viscosity=0.002)
-
 
 # time step depends on the cell_size, bulk modulus and initial density
 dt = (
@@ -47,7 +48,6 @@ xv, yv = np.meshgrid(x, y)
 
 pnts_stack = np.array(list(zip(xv.flatten(), yv.flatten()))).astype(np.float64)
 
-# config depends on num points and timestep
 config = _MPMConfig(num_points=len(pnts_stack), dt=dt)
 
 config.print_summary()

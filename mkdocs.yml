@@ -1,13 +1,13 @@
 site_name: HydraxMPM
 nav:
-  - Home: index.md
+  - Introduction: index.md
   - Installation: installing.md
   # - Usage: usage/index.md
-  - Basic API:
-    - Particles: api/particles.md
-    - Shapefunctions: api/shapefunctions.md
-  - Examples: 
-    - Two sphere impact: examples/two_sphere_impact.md
+  # - Basic API:
+    # - Particles: api/particles.md
+    # - Shapefunctions: api/shapefunctions.md
+  # - Examples: 
+    # - Two sphere impact: examples/two_sphere_impact.md
     # - Solvers: api/solvers.md
     # - Shape functions: api/shapefunctions.md
   #   - Materials: api/materials.md
