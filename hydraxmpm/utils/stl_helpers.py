@@ -1,8 +1,9 @@
 import numpy as np
-import vtk
+
 
 
 def sample_points_on_surface(mesh_path, distance=0.001, plot=False):
+    import vtk
     import pyvista as pv
 
     reader = pv.get_reader(mesh_path)
@@ -25,6 +26,7 @@ def sample_points_on_surface(mesh_path, distance=0.001, plot=False):
 
 
 def get_stl_bounds(mesh_path):
+    import vtk
     reader = vtk.vtkSTLReader()
     reader.SetFileName(mesh_path)
     reader.Update()

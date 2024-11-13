@@ -11,6 +11,7 @@ from .mpm_plot_helpers import point_to_3D
 def io_vtk_callback(
     config: MPMConfig, particle_output=None, rigid_stack_index=None, output_box=True
 ):
+    import pyvista as pv
     if particle_output is None:
         particle_output = ()
 
