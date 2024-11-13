@@ -188,7 +188,7 @@ class ModifiedCamClay(Material):
         stress_prev_stack: chex.Array,
         F_stack: chex.Array,
         L_stack: chex.Array,
-        phi_stack: chex.Array
+        phi_stack: chex.Array,
     ) -> Tuple[chex.Array, Self]:
         new_stress_stack, new_eps_e_stack, new_p_c_stack = self.vmap_update_ip(
             L_stack,
@@ -197,7 +197,7 @@ class ModifiedCamClay(Material):
             self.eps_e_stack,
             self.p_c_stack,
         )
- 
+
         new_self = eqx.tree_at(
             lambda state: (state.eps_e_stack, state.p_c_stack),
             self,

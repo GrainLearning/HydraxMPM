@@ -188,7 +188,7 @@ class DirichletBox:
         particles: Particles = None,
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
-        step: jnp.int32 = 0
+        step: jnp.int32 = 0,
     ) -> Tuple[Nodes, Self]:
         """Apply the boundary conditions on the nodes moments."""
         nodes, _ = self.wall_x0.apply_on_nodes_moments(nodes)

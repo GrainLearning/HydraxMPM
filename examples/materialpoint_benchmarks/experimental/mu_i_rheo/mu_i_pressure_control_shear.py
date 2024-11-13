@@ -48,7 +48,7 @@ benchmark = pm.MPBenchmark.create_pressure_control_shear(
     total_time=2,
     dt=dt,
     x_range=(dgamma_dt_ref, dgamma_dt_ref),
-    y_range=(p_ref, p_ref*100),
+    y_range=(p_ref, p_ref * 100),
     stress_ref=stress_ref,
     phi_ref=phi_ref,
     store_every=store_every,
@@ -57,30 +57,14 @@ benchmark = pm.MPBenchmark.create_pressure_control_shear(
 
 benchmark = benchmark.run()
 
-(
-    stress_stack,
-    F_stack,
-    L_stack,
-    phi_stack
-) = benchmark.accumulated
+(stress_stack, F_stack, L_stack, phi_stack) = benchmark.accumulated
 print("--- %s seconds ---" % (time.time() - start_time))
 
 
-fig_ax_set1 = pm.plot_set1(
-    stress_stack,
-    phi_stack,
-    L_stack)
-fig_ax_set2 = pm.plot_set2(
-    stress_stack,
-    L_stack,
-    F_stack
-)
+fig_ax_set1 = pm.plot_set1(stress_stack, phi_stack, L_stack)
+fig_ax_set2 = pm.plot_set2(stress_stack, L_stack, F_stack)
 fig_ax_set3 = pm.plot_set3(
-    stress_stack,
-    phi_stack,
-    L_stack,
-    F_stack,
-    benchmark.get_time_stack()
+    stress_stack, phi_stack, L_stack, F_stack, benchmark.get_time_stack()
 )
 
 plt.show()

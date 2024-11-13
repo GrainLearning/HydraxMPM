@@ -1,9 +1,9 @@
 raise NotImplementedError("This module is not implemented yet.")
 
 
-# Create debug routine to check if all arrays are similar particle shapes, 
+# Create debug routine to check if all arrays are similar particle shapes,
 # interactions and num particle same
-# 
+#
 # # def debug_particles(
 #         step: jnp.int32,
 #         particles: pm.Particles,

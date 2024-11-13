@@ -39,29 +39,13 @@ benchmark = pm.MPBenchmark.create_volume_control_shear(
 )
 benchmark = benchmark.run()
 
-(
-    stress_stack,
-    F_stack,
-    L_stack,
-    phi_stack
-) = benchmark.accumulated
+(stress_stack, F_stack, L_stack, phi_stack) = benchmark.accumulated
 print("--- %s seconds ---" % (time.time() - start_time))
 
-fig_ax_set1 = pm.plot_set1(
-    stress_stack,
-    phi_stack,
-    L_stack)
-fig_ax_set2 = pm.plot_set2(
-    stress_stack,
-    L_stack,
-    F_stack
-)
+fig_ax_set1 = pm.plot_set1(stress_stack, phi_stack, L_stack)
+fig_ax_set2 = pm.plot_set2(stress_stack, L_stack, F_stack)
 fig_ax_set3 = pm.plot_set3(
-    stress_stack,
-    phi_stack,
-    L_stack,
-    F_stack,
-    benchmark.get_time_stack()
+    stress_stack, phi_stack, L_stack, F_stack, benchmark.get_time_stack()
 )
 
 plt.show()

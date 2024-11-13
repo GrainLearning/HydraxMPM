@@ -1,6 +1,6 @@
 """
 Implementation of the Unified Hardening (UH) Model for normally consolidated clays [1,2]. This model is implemented in double natural log specific volume and pressure space ($\ln v$ - $\ln p$) space instead of void ratio and natural log pressure space
-$e$-$\ln p$ space as the original. benefits are given by ref [2]. 
+$e$-$\ln p$ space as the original. benefits are given by ref [2].
 
 **Current and reference yield surface**
 
@@ -10,11 +10,11 @@ The model links two yield surfaces, named the current yield surface and a refere
 F=\ln\\left(\\frac{p}{p_{x0}}\\right)
 +\\ln\\left(1+\\frac{q^{2}}{M^{2}p^{2}}\\right)-\\frac{H}{c_{p}},
 \\end{align}
-where $q$ is the von-Mises shear stress, $p$ is the pressure, 
+where $q$ is the von-Mises shear stress, $p$ is the pressure,
 $p_{x0}$ is the initial reference pressure, i.e., initial intersection of the
 current yield surface with the hydrostatic axis; $M$ is the slope of the critical
 state line; The constant $c_{p}=\\lambda - \\kappa$
-composes of the slope of the normal compression line (NCL) $\\lambda$ and unloading line $\\kappa$. 
+composes of the slope of the normal compression line (NCL) $\\lambda$ and unloading line $\\kappa$.
 
 The hardening parameter $H$, controls the size of the yield surface and is defined as:
 \\begin{align}
@@ -39,7 +39,7 @@ R = \\exp\\left(- \\frac{ \\xi }{\\lambda - \\kappa} \\right),
 \\end{align}
 
 The reference yield surface takes a similar form to the current yield surface with the
-exceptions: that it is defined at stress points $\overline p, \overline q$; and 
+exceptions: that it is defined at stress points $\overline p, \overline q$; and
 the hardening parameter is replaced with the plastic volumetric strain $\\varepsilon_{p}^{v}$.
 
 **Plastic potential function**
@@ -54,7 +54,7 @@ where $p_{x}$ is the intersection of the current yield surface with the hydrosta
 p_x = p_{x0} \\exp\\left(-\\frac{H}{c_{p}}\\right).
 \\end{align}
 
-The flow rules and elastic law are taken the same as in the ,modified Cam-Clay model. 
+The flow rules and elastic law are taken the same as in the ,modified Cam-Clay model.
 
 
 1. Yao, Y-P., Wei Hou, and A-N. Zhou. "UH model: three-dimensional unified hardening

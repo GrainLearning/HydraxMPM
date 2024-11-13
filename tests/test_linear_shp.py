@@ -6,6 +6,7 @@ import numpy as np
 
 import hydraxmpm as hdx
 
+
 def test_calc_shp_2d():
     """Test the linear shape function for top level container input."""
     position_stack = jnp.array([[0.45, 0.21], [0.8, 0.4]])

@@ -43,8 +43,10 @@ _MPMConfig = partial(
     dt=3 * 10**-5,  # [s] time step
 )
 
+
 def get_sv(func, val):
     return signature(func).parameters[val].default
+
 
 sep = get_sv(_MPMConfig, "cell_size") / get_sv(_MPMConfig, "ppc")
 

@@ -63,8 +63,6 @@ def test_p2g_2d():
     expected_node_moment_stack = jnp.array(
         [[0.27, 0.27], [0.09, 0.09], [0.03, 0.03], [0.01, 0.01]]
     )
-    
-    
 
     np.testing.assert_allclose(
         nodes.moment_stack, expected_node_moment_stack, rtol=1e-3
@@ -108,9 +106,9 @@ def test_p2g_3d():
     #     [0.189, 0.081, 0.063, 0.027, 0.02100001, 0.009, 0.007, 0.003]
     # )
     expected_mass_stack = jnp.array(
-        [0.189, 0.081,0.021,  0.009, 0.063, 0.027,  0.007, 0.003]
+        [0.189, 0.081, 0.021, 0.009, 0.063, 0.027, 0.007, 0.003]
     )
-    
+
     np.testing.assert_allclose(nodes.mass_stack, expected_mass_stack, rtol=1e-3)
 
     expected_node_moment_stack = jnp.array(
@@ -172,4 +170,3 @@ def test_g2p_2d():
 
     expected_velocities = jnp.array([[1.0, 1.0], [1.0, 1.0]])
     np.testing.assert_allclose(particles.velocity_stack, expected_velocities, rtol=1e-3)
-

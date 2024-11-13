@@ -1,4 +1,3 @@
-
 import jax
 import jax.numpy as jnp
 
@@ -60,9 +59,6 @@ def mp_benchmark_volume_control_shear(
     if return_carry:
         return accumulated_next, carry
     return accumulated_next
-
-
-
 
 
 #     return self.replace(

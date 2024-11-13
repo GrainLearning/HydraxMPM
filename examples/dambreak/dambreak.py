@@ -1,4 +1,3 @@
-
 from functools import partial
 
 import jax
@@ -19,7 +18,7 @@ _MPMConfig = partial(
     shapefunction="cubic",
     num_steps=20000,
     store_every=500,
-    file=__file__
+    file=__file__,
 )
 
 

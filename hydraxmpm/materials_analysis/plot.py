@@ -134,7 +134,7 @@ def create_plot_3d(plot, axis):
         alpha=plot.alpha,
         edgecolor=plot.edgecolor,
         markevery=plot.markevery,
-        lw=plot.lw
+        lw=plot.lw,
     )
     if plot.start_end_markers:
         axis.plot(plot.x[0], plot.y[0], plot.z[0], ".", color=line.get_color())
@@ -161,7 +161,6 @@ def make_plots_3d(
     subplots_options: Dict = None,
     savefig_options: Dict = None,
 ):
-
     if subplots_options is None:
         subplots_options = {}
 

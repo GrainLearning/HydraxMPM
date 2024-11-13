@@ -51,7 +51,11 @@ def test_refresh():
     """Unit test to refresh the state of the particles."""
     position_stack = jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
     config = hdx.MPMConfig(
-        origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=0.5, num_points=position_stack.shape[0], ppc=1
+        origin=[0.0, 0.0, 0.0],
+        end=[1.0, 1.0, 1.0],
+        cell_size=0.5,
+        num_points=position_stack.shape[0],
+        ppc=1,
     )
 
     particles = hdx.Particles(

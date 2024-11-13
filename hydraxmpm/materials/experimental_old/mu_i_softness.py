@@ -89,22 +89,35 @@ class MuISoft(Material):
         dt: jnp.float32,
     ) -> Tuple[chex.Array, Self]:
         # jax.debug.print("volume_fraction {}", volume_fraction)
-        stress_next = self.vmap_viscoplastic(strain_rate, volume_fraction, self.stress_ref)
+        stress_next = self.vmap_viscoplastic(
+            strain_rate, volume_fraction, self.stress_ref
+        )
         return self, stress_next
 
     @partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(0))
     def vmap_viscoplastic(
-        self, strain_rate: chex.Array, volume_fraction: chex.Array, stress_ref: chex.Array
+        self,
+        strain_rate: chex.Array,
+        volume_fraction: chex.Array,
+        stress_ref: chex.Array,
     ):
-        volumetric_strain_rate = -jnp.trace(strain_rate)  # compressive strain rate is positive
+        volumetric_strain_rate = -jnp.trace(
+            strain_rate
+        )  # compressive strain rate is positive
 
-        deviatoric_strain_rate = strain_rate + (1 / 3.0) * volumetric_strain_rate * jnp.eye(3)
+        deviatoric_strain_rate = strain_rate + (
+            1 / 3.0
+        ) * volumetric_strain_rate * jnp.eye(3)
 
-        dgamma_dt = jnp.sqrt(0.5 * (deviatoric_strain_rate @ deviatoric_strain_rate.T).trace())
+        dgamma_dt = jnp.sqrt(
+            0.5 * (deviatoric_strain_rate @ deviatoric_strain_rate.T).trace()
+        )
 
         def dil(p, args):
             p_star = p * (self.d / self.k)
-            term1 = p_star / self.p_phi + self.I_phi * jnp.log(self.phi_c / volume_fraction)
+            term1 = p_star / self.p_phi + self.I_phi * jnp.log(
+                self.phi_c / volume_fraction
+            )
             term2 = (dgamma_dt * self.d) / jnp.sqrt(p / self.rho_p)
             sol = term1 - term2
             return sol

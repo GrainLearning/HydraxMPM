@@ -8,12 +8,13 @@ from .math_helpers import get_KE_stack, get_pressure_stack
 from .mpm_plot_helpers import point_to_3D
 
 
-def io_vtk_callback(config: MPMConfig, particle_output=None, rigid_stack_index=None, output_box=True):
+def io_vtk_callback(
+    config: MPMConfig, particle_output=None, rigid_stack_index=None, output_box=True
+):
     if particle_output is None:
         particle_output = ()
-        
+
     if output_box:
-        
         bbox = pv.Box(
             bounds=np.array(
                 list(
@@ -27,7 +28,6 @@ def io_vtk_callback(config: MPMConfig, particle_output=None, rigid_stack_index=N
 
         bbox.save(f"{config.dir_path }/output/{config.project}/box.vtk")
 
-
     def io_vtk(carry, step):
         (
             solver,
@@ -37,7 +37,7 @@ def io_vtk_callback(config: MPMConfig, particle_output=None, rigid_stack_index=N
             forces_stack,
         ) = carry
         position_stack = particles.position_stack
-        
+
         stress_stack = particles.stress_stack
 
         position_3D_stack = jnp.pad(
@@ -88,8 +88,8 @@ def io_vtk_callback(config: MPMConfig, particle_output=None, rigid_stack_index=N
             rigid_cloud.save(
                 f"{config.dir_path }/output/{config.project}/rigid_particles_{step}.vtk"
             )
-            
-    def callback(carry,step):
+
+    def callback(carry, step):
         return jax.debug.callback(io_vtk, carry, step)
 
     return callback

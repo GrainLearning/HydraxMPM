@@ -24,6 +24,7 @@ def test_init():
 
     assert isinstance(box, hdx.NodeLevelSet)
 
+
 def test_call_2d():
     config = hdx.MPMConfig(
         origin=[0.0, 0.0],
@@ -44,16 +45,7 @@ def test_call_2d():
     position_stack = jnp.array([[0.05, 0.2]])
 
     particles = hdx.Particles(
-        config=config,
-        position_stack=position_stack,
-        mass_stack = jnp.ones(1)
-        )
-    
-
-    nodes, box = box.apply_on_nodes(
-        particles =particles,
-        nodes = nodes
+        config=config, position_stack=position_stack, mass_stack=jnp.ones(1)
     )
-    
 
-
+    nodes, box = box.apply_on_nodes(particles=particles, nodes=nodes)

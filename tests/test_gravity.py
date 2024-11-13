@@ -13,7 +13,7 @@ def test_create():
         end=[1.0, 1.0],
         cell_size=0.5,
         num_points=2,
-        shapefunction="linear"
+        shapefunction="linear",
     )
 
     box = hdx.Gravity(config, gravity=jnp.array([0.0, 0.0]))
@@ -44,7 +44,6 @@ def test_call_2d():
             jnp.ones((config.num_cells, config.dim)) * 1.0,
         ),
     )
-  
 
     new_nodes, new_grav = grav.apply_on_nodes(nodes=new_nodes)
 

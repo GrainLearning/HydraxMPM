@@ -26,9 +26,7 @@ def get_pressure(stress: chex.Array, dim: jnp.int32 = 3) -> jnp.float32:
     return -(1 / dim) * jnp.trace(stress)
 
 
-def get_pressure_stack(
-    stress_stack: chex.Array, dim: jnp.int32 = 3
-) -> chex.Array:
+def get_pressure_stack(stress_stack: chex.Array, dim: jnp.int32 = 3) -> chex.Array:
     """Vectorized version of [get_pressure][utils.math_helpers.get_pressure]
     for a stack of stress tensors.
 
@@ -39,7 +37,6 @@ def get_pressure_stack(
     Returns:
         chex.Array: stack of pressures
     """
-
 
     vmap_get_pressure = jax.vmap(get_pressure, in_axes=(0, None))
     return vmap_get_pressure(stress_stack, dim)
@@ -140,7 +137,9 @@ def get_q_vm_stack(
     return vmap_get_q_vm(stress_stack, dev_stress_stack, pressure_stack, dim)
 
 
-def get_J2(stress: jax.Array=None, dev_stress=None, pressure=None, dim=3) -> jnp.float32:
+def get_J2(
+    stress: jax.Array = None, dev_stress=None, pressure=None, dim=3
+) -> jnp.float32:
     """Get the second invariant of the deviatoric stress tensor."""
     if dev_stress is None:
         dev_stress = get_dev_stress(stress, pressure, dim)

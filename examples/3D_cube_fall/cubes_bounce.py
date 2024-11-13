@@ -8,7 +8,9 @@ import jax.numpy as jnp
 import numpy as np
 import pymudokon as pm
 
-warnings.warn("Warning........... Currently visualizing 3D plots with pyvista does not work. But you are welcome to output as vtk files. Will fix this soon - R")
+warnings.warn(
+    "Warning........... Currently visualizing 3D plots with pyvista does not work. But you are welcome to output as vtk files. Will fix this soon - R"
+)
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -88,49 +90,41 @@ carry, accumulate = pm.run_solver(
     forces_stack=[gravity, box],
     num_steps=400000,
     store_every=4000,
-    particles_output=("stress_stack","position_stack", "velocity_stack", "mass_stack"),
+    particles_output=("stress_stack", "position_stack", "velocity_stack", "mass_stack"),
 )
 
 stress_stack, position_stack, velocity_stack, mass_stack = accumulate
 
-stress_reg_stack = jax.vmap(pm.post_processes_stress_stack,in_axes=(0,0,0, None,None)) (
-    stress_stack,
-    mass_stack,
-    position_stack,
-    nodes,
-    shapefunctions
-)
+stress_reg_stack = jax.vmap(
+    pm.post_processes_stress_stack, in_axes=(0, 0, 0, None, None)
+)(stress_stack, mass_stack, position_stack, nodes, shapefunctions)
 
-p_reg_stack = jax.vmap(pm.get_pressure_stack,in_axes=(0,None))(
-    stress_reg_stack,2)
+p_reg_stack = jax.vmap(pm.get_pressure_stack, in_axes=(0, None))(stress_reg_stack, 2)
 
 
 pvplot_cmap_q = pm.PvPointHelper.create(
-   position_stack,
-   scalar_stack = p_reg_stack,
-  scalar_name="p [Pa]",
-   origin=nodes.origin,
-   end=nodes.end,
-   subplot = (0,0),
-   timeseries_options={
-    "clim":[0,50000],
-    "point_size":25,
-    "render_points_as_spheres":True,
-    "scalar_bar_args":{
-           "vertical":True,
-           "height":0.8,
-            "title_font_size":35,
-            "label_font_size":30,
-            "font_family":"arial",
-
-           }
-   }
+    position_stack,
+    scalar_stack=p_reg_stack,
+    scalar_name="p [Pa]",
+    origin=nodes.origin,
+    end=nodes.end,
+    subplot=(0, 0),
+    timeseries_options={
+        "clim": [0, 50000],
+        "point_size": 25,
+        "render_points_as_spheres": True,
+        "scalar_bar_args": {
+            "vertical": True,
+            "height": 0.8,
+            "title_font_size": 35,
+            "label_font_size": 30,
+            "font_family": "arial",
+        },
+    },
 )
 plotter = pm.make_pvplots(
     [pvplot_cmap_q],
-    plotter_options={"shape":(1,1),"window_size":([2048, 2048]) },
+    plotter_options={"shape": (1, 1), "window_size": ([2048, 2048])},
     dim=3,
     file=dir_path + fname,
 )
-
-

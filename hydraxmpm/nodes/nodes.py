@@ -12,7 +12,7 @@ class Nodes(Grid):
     moment_stack: chex.Array
     moment_nt_stack: chex.Array
     normal_stack: chex.Array
-    
+
     small_mass_cutoff: int = eqx.field(static=True, converter=lambda x: float(x))
 
     def __init__(
@@ -20,15 +20,12 @@ class Nodes(Grid):
         config: MPMConfig = None,
         small_mass_cutoff: float = 1e-12,
     ) -> Self:
-
-
         self.mass_stack = jnp.zeros((config.num_cells))
         self.moment_stack = jnp.zeros((config.num_cells, config.dim))
         self.moment_nt_stack = jnp.zeros((config.num_cells, config.dim))
-        self.normal_stack = jnp.zeros((config.num_cells,config.dim))
+        self.normal_stack = jnp.zeros((config.num_cells, config.dim))
         self.small_mass_cutoff = small_mass_cutoff
         super().__init__(config)
-
 
     def refresh(self: Self) -> Self:
         """Reset background MPM node states.

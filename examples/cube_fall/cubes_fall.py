@@ -74,7 +74,7 @@ carry, accumulate = hdx.run_solver(
     particles=particles,
     nodes=nodes,
     material_stack=[material],
-    forces_stack=[gravity,box],
+    forces_stack=[gravity, box],
     particles_output=("stress_stack", "position_stack", "velocity_stack", "mass_stack"),
 )
 

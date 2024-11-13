@@ -1,6 +1,5 @@
 """Run two-sphere impact simulation."""
 
-
 import jax.numpy as jnp
 import numpy as np
 
@@ -74,9 +73,7 @@ particles = hdx.Particles(
 
 nodes = hdx.Nodes(config)
 
-particles, nodes = hdx.discretize(
-    config, particles, nodes, density_ref=1000
-)
+particles, nodes = hdx.discretize(config, particles, nodes, density_ref=1000)
 material = hdx.LinearIsotropicElastic(config=config, E=1000.0, nu=0.3)
 
 solver = hdx.USL(config=config, alpha=0.98)

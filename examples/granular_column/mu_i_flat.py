@@ -95,7 +95,7 @@ particles = eqx.tree_at(
 
 gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, g]))
 
-box = hdx.NodeLevelSet(config,mu=0.4)
+box = hdx.NodeLevelSet(config, mu=0.4)
 
 solver = hdx.USL_APIC(config=config)
 

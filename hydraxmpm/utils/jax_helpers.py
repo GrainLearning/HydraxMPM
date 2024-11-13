@@ -28,6 +28,7 @@ def simple_warning(condition: jnp.bool_, place: str, message: str):
 def set_default_gpu(gpu_id=0):
     jax.config.update("jax_default_device", jax.devices("gpu")[gpu_id])
 
+
 def dump_restart_files(
     config,
     solver=None,

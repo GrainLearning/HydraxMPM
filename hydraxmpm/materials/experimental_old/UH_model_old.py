@@ -282,7 +282,9 @@ class UHModel(Material):
             p_next, s_next, H_next = aux
             stress_next = s_next - p_next * jnp.eye(3)
 
-            eps_e_next = eps_e_tr - get_symmetric_tensor_from_flattened_triu(deps_p_flat)
+            eps_e_next = eps_e_tr - get_symmetric_tensor_from_flattened_triu(
+                deps_p_flat
+            )
 
             return stress_next, eps_e_next, H_next
 

@@ -59,7 +59,9 @@ for num_particles in [10000]:
         particles, nodes, shapefunctions = create_system(num_particles, cell_size)
         runner.bench_func(
             f"p2g_batch/{num_particles}/{cell_size}",
-            lambda: jax.block_until_ready(run_p2g_batch_jitted(particles, nodes, shapefunctions)),
+            lambda: jax.block_until_ready(
+                run_p2g_batch_jitted(particles, nodes, shapefunctions)
+            ),
         )
 
 
@@ -68,7 +70,9 @@ for num_particles in [10000]:
         particles, nodes, shapefunctions = create_system(num_particles, cell_size)
         runner.bench_func(
             f"p2g/{num_particles}/{cell_size}",
-            lambda: jax.block_until_ready(run_p2g_jitted(particles, nodes, shapefunctions)),
+            lambda: jax.block_until_ready(
+                run_p2g_jitted(particles, nodes, shapefunctions)
+            ),
         )
 
 # runner = pyperf.Runner()

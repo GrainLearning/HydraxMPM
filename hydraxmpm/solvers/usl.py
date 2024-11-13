@@ -70,7 +70,6 @@ class USL(Solver):
         )
 
     def p2g(self, particles, nodes):
-   
         def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = particles.mass_stack.at[point_id].get()
             intr_volumes = particles.volume_stack.at[point_id].get()
@@ -89,7 +88,7 @@ class USL(Solver):
 
             return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
-        # note the interactions and shapefunctions are calculated on the first 
+        # note the interactions and shapefunctions are calculated on the first
         # p2g to reduce computational overhead.
         (
             new_nodes,
@@ -101,7 +100,6 @@ class USL(Solver):
             ),
         ) = nodes.vmap_interactions_and_scatter(vmap_intr_p2g, particles.position_stack)
 
- 
         # Sum all interaction quantities.
         new_mass_stack = (
             jnp.zeros_like(new_nodes.mass_stack)

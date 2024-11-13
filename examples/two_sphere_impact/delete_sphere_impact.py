@@ -1,6 +1,5 @@
 """Run two-sphere impact simulation."""
 
-
 import jax.numpy as jnp
 import numpy as np
 
@@ -73,10 +72,8 @@ particles = hdx.Particles(
 )
 
 
-
-
 # interactions invalid
-    
+
 # nodes = hdx.Nodes(config)
 
 # particles, nodes = hdx.discretize(

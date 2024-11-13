@@ -185,8 +185,8 @@ def run_solver_io(
 
     def scan_fn(carry, step):
         step_next = step + config.store_every
-        solver, particles, nodes, material_stack, forces_stack = (
-            jax.lax.fori_loop(step, step_next, main_loop, carry)
+        solver, particles, nodes, material_stack, forces_stack = jax.lax.fori_loop(
+            step, step_next, main_loop, carry
         )
 
         carry = (

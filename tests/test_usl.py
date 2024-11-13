@@ -102,7 +102,7 @@ def test_p2g_3d():
 
     # note these values have not been verified analytically
     expected_mass_stack = jnp.array(
-        [0.189, 0.081,0.021,  0.009, 0.063, 0.027,  0.007, 0.003]
+        [0.189, 0.081, 0.021, 0.009, 0.063, 0.027, 0.007, 0.003]
     )
 
     np.testing.assert_allclose(nodes.mass_stack, expected_mass_stack, rtol=1e-3)
@@ -123,7 +123,9 @@ def test_p2g_3d():
         nodes.moment_stack, expected_node_moment_stack, rtol=1e-3
     )
 
+
 test_p2g_3d()
+
 
 def test_g2p_2d():
     config = hdx.MPMConfig(

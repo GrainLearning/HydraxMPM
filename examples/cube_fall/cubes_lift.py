@@ -80,38 +80,35 @@ gravity = hdx.Gravity(config=config, gravity=jnp.array([0.00, -0.0098]))
 
 box = hdx.NodeLevelSet(config, mu=0.2)
 
-A = 1 # amplitude deviation of peak
-omega = 0.2 # rate of change [rad/s]
+A = 1  # amplitude deviation of peak
+omega = 0.2  # rate of change [rad/s]
 
 
 def update_rigid_particles(step, position_stack, velocity_stack, config):
-    
-    new_position_stack = position_stack + velocity_stack*config.dt
-    
-    t = step*config.dt
-    
+    new_position_stack = position_stack + velocity_stack * config.dt
+
+    t = step * config.dt
+
     def vmap_sinusoid(pos):
-        y = A*jnp.sin(omega*t)
+        y = A * jnp.sin(omega * t)
         return pos.at[1].set(y) + jnp.zeros(2).at[1].set(y0)
-        
+
         # return pos.at[1].set(pos.at[1].get() +0.05)
-        
-    
+
     next_position_stack = jax.vmap(vmap_sinusoid, in_axes=0)(new_position_stack)
     # next_position_stack = new_position_stack
-    new_velocity_stack = (next_position_stack-new_position_stack)/config.dt
-    
-    # # predicted_pos = 
-    return new_position_stack,new_velocity_stack
-    
-    
+    new_velocity_stack = (next_position_stack - new_position_stack) / config.dt
+
+    # # predicted_pos =
+    return new_position_stack, new_velocity_stack
+
 
 rigid_particle_wall = hdx.RigidParticles(
-    config=config, 
+    config=config,
     position_stack=rigid_pos_stack,
     mu=0.5,
     # velocity_stack=rigid_velocity_sack,
-    update_rigid_particles=update_rigid_particles
+    update_rigid_particles=update_rigid_particles,
 )
 
 solver = hdx.USL(config, alpha=0.99)
@@ -163,7 +160,10 @@ pvplot_rigid = hdx.PvPointHelper(
     position_stack=rigid_positions_stack,
     subplot=(0, 0),
     timeseries_options={
-        "color":"red","point_size": 25, "render_points_as_spheres": True},
+        "color": "red",
+        "point_size": 25,
+        "render_points_as_spheres": True,
+    },
 )
 
 plotter = hdx.make_pvplots(

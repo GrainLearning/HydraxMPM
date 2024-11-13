@@ -76,8 +76,8 @@ def yield_function(p, p_c, q, M):
 
 def plastic_potential(stress, p_c, M, dim=3):
     """Unified Hardening plastic potential function."""
-    p = get_pressure(stress,dim=dim)
-    q = get_q_vm(stress=stress,dim=dim)
+    p = get_pressure(stress, dim=dim)
+    q = get_q_vm(stress=stress, dim=dim)
     return yield_function(p, p_c, q, M)
 
 
@@ -95,7 +95,6 @@ def get_flattened_triu(A):
     return A.at[jnp.triu_indices(A.shape[0])].get()
 
 
-
 def get_K(kap, p, ps):
     return (1.0 / kap) * (p + ps)
 
@@ -106,7 +105,6 @@ def get_G(nu, K):
 
 @chex.dataclass
 class ModifiedCamClayReg(Material):
-
     nu: jnp.float32
     M: jnp.float32
     R: jnp.float32
@@ -148,7 +146,7 @@ class ModifiedCamClayReg(Material):
         p_c_stack = p_ref_stack * R
 
         ps = jnp.exp(ln_N / ln_v_c) * jnp.exp(1.0 / lam)
-   
+
         return cls(
             stress_ref_stack=stress_ref_stack,
             eps_p_stack=eps_p_stack,
@@ -193,16 +191,12 @@ class ModifiedCamClayReg(Material):
         phi_stack: chex.Array,
         dt: jnp.float32,
     ) -> Tuple[chex.Array, Self]:
-
         # eps_stack, *_ = get_hencky_strain_stack(F_stack)
 
         # jax.debug.print("{}", eps_stack)
         # deps_stack = get_sym_tensor_stack(L_stack) * dt
         stress_next_stack, eps_p_next_stack = self.vmap_update_stress(
-            F_stack,
-            self.eps_p_stack,
-            self.stress_ref_stack,
-            self.p_c_stack
+            F_stack, self.eps_p_stack, self.stress_ref_stack, self.p_c_stack
         )
 
         return (
@@ -219,10 +213,9 @@ class ModifiedCamClayReg(Material):
 
         # Reference pressure and deviatoric stress
         p_ref = get_pressure(stress_ref, self.dim)
-        
 
         s_ref = get_dev_stress(stress_ref, p_ref, self.dim)
-        
+
         # elastic trail step
         eps_e_tr = eps - eps_p_prev
 
@@ -233,13 +226,12 @@ class ModifiedCamClayReg(Material):
         p_tr = get_elas_non_linear_pressure(p_ref, self.ps, self.kap, eps_e_v_tr)
 
         K_tr = get_K(self.kap, p_tr, self.ps)
-        
+
         G_tr = get_G(self.nu, K_tr)
 
         s_tr = get_elas_dev_stress(eps_e_d_tr, s_ref, G_tr)
 
-        q_tr = get_q_vm(dev_stress=s_tr, dim= self.dim)
-
+        q_tr = get_q_vm(dev_stress=s_tr, dim=self.dim)
 
         eps_p_v_prev = get_volumetric_strain(eps_p_prev)
 
@@ -250,11 +242,10 @@ class ModifiedCamClayReg(Material):
         yf = yield_function(p_tr, p_c_tr, q_tr, self.M)
 
         def elastic_update():
-
             stress_next = s_tr - p_tr * jnp.eye(3)
 
             return stress_next, eps_p_prev
-        
+
         def pull_to_ys():
             def residuals(sol, args):
                 pmulti_curr, *deps_p_flat = sol
@@ -271,7 +262,6 @@ class ModifiedCamClayReg(Material):
 
                 eps_e_d_next = get_dev_strain(eps_e_next, eps_e_v_next)
 
-                
                 p_next = get_elas_non_linear_pressure(
                     p_ref, self.ps, self.kap, eps_e_v_next
                 )
@@ -280,12 +270,11 @@ class ModifiedCamClayReg(Material):
                     p_c_ref, self.ps, self.kap, self.lam, eps_p_v_next
                 )
 
-
                 K_next = get_K(self.kap, p_next, self.ps)
-        
+
                 G_next = get_G(self.nu, K_next)
 
-                s_next =  get_elas_dev_stress(eps_e_d_next, s_ref, G_next)
+                s_next = get_elas_dev_stress(eps_e_d_next, s_ref, G_next)
 
                 q_next = get_q_vm(dev_stress=s_next, dim=self.dim)
 
@@ -303,7 +292,7 @@ class ModifiedCamClayReg(Material):
 
                 R = jnp.array([yf_next, *deps_p_fr_flat])
 
-                R = R.at[0].set(R[0] / (K_tr * self.kap) )
+                R = R.at[0].set(R[0] / (K_tr * self.kap))
 
                 aux = (p_next, s_next, eps_p_next)
 
@@ -318,8 +307,7 @@ class ModifiedCamClayReg(Material):
 
                 solver = optx.Newton(rtol=1e-8, atol=1e-8)
                 sol = optx.root_find(
-                    residuals, solver, init_val, throw=False, has_aux=True, 
-                    max_steps=20
+                    residuals, solver, init_val, throw=False, has_aux=True, max_steps=20
                 )
                 return sol.value
 
@@ -334,7 +322,6 @@ class ModifiedCamClayReg(Material):
             return stress_next, eps_p_next
 
         return jax.lax.cond(yf > 0, pull_to_ys, elastic_update)
-
 
         # return jax.lax.cond(is_ep, pull_to_ys, elastic_update)
 

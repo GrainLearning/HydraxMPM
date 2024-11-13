@@ -6,6 +6,7 @@ import numpy as np
 
 import hydraxmpm as hdx
 
+
 def test_create():
     """Unit test to initialize the rigid particles class."""
     config = hdx.MPMConfig(
@@ -37,17 +38,14 @@ def test_call_2d():
     particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.2, 0.7]]),
-        mass_stack=jnp.array([1.0,1.0]),
+        mass_stack=jnp.array([1.0, 1.0]),
     )
 
     nodes = hdx.Nodes(config)
-    
+
     usl = hdx.USL(config)
-    
-    nodes = usl.p2g(
-        particles,
-        nodes
-    )
+
+    nodes = usl.p2g(particles, nodes)
 
     rigid_particles = hdx.RigidParticles(
         config=config,
@@ -104,4 +102,3 @@ def test_call_2d():
         ]
     )
     np.testing.assert_allclose(nodes.moment_nt_stack, expected_moment_nt_stack)
-

@@ -86,7 +86,6 @@ class NodeLevelSet(Forces):
         nodes: Nodes,
         step: int = 0,
     ):
-        
         @partial(jax.vmap, in_axes=(0, 0))
         def vmap_selected_nodes(n_id, levelset_vel):
             normal = nodes.normal_stack.at[n_id].get()

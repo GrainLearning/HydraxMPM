@@ -22,10 +22,12 @@ from ..material import Material
 def get_mu_I(I, mu_s, mu_d, I0):
     return mu_s + (mu_d - mu_s) * (1 / (1 + I0 / I))
 
-def get_mu_I_regularized_exp(I, mu_s, mu_d, I0,pen,dgamma_dt):
+
+def get_mu_I_regularized_exp(I, mu_s, mu_d, I0, pen, dgamma_dt):
     # s = (1.0-jnp.exp(-dgamma_dt/pen))
-    s = 1./jnp.sqrt(dgamma_dt**2 +pen**2)
-    return mu_s*s + (mu_d - mu_s) * (1.0 / (1.0 + I0 / I))
+    s = 1.0 / jnp.sqrt(dgamma_dt**2 + pen**2)
+    return mu_s * s + (mu_d - mu_s) * (1.0 / (1.0 + I0 / I))
+
 
 def get_I_phi(phi, phi_c, I_phi):
     return -I_phi * jnp.log(phi / phi_c)
@@ -61,10 +63,9 @@ class MRMSteady(Material):
         k_p: jnp.float32,
         lam: jnp.float32,
         absolute_density: jnp.float32 = 0.0,
-        dim: jnp.int32 =3
+        dim: jnp.int32 = 3,
     ) -> Self:
-        
-        jax.debug.print("{}",K)
+        jax.debug.print("{}", K)
         return cls(
             mu_s=mu_s,
             mu_d=mu_d,
@@ -73,10 +74,10 @@ class MRMSteady(Material):
             rho_p=rho_p,
             I_phi=I_phi,
             phi_c=phi_c,
-            k_p = k_p,
-            lam = lam,
+            k_p=k_p,
+            lam=lam,
             absolute_density=absolute_density,
-            dim = dim
+            dim=dim,
         )
 
     def update_from_particles(
@@ -100,122 +101,114 @@ class MRMSteady(Material):
         phi_stack: chex.Array,
         dt: jnp.float32,
     ) -> Tuple[chex.Array, Self]:
-
         deps_dt_stack = get_sym_tensor_stack(L_stack)
 
-        stress_next_stack = self.vmap_viscoplastic(deps_dt_stack, phi_stack,stress_prev_stack)
-        
+        stress_next_stack = self.vmap_viscoplastic(
+            deps_dt_stack, phi_stack, stress_prev_stack
+        )
+
         # Debug
         # jax.debug.print("{}",stress_next_stack)
         # I_stack_debug = jax.vmap(get_I_phi, in_axes=(0,None,None))(phi_stack, self.phi_c,self.I_phi)
         # jax.debug.print("I mean {} min {} max {}",I_stack_debug.mean(),I_stack_debug.min(), I_stack_debug.max())
-                # get_dev_strain = get_dev_strain_stack(deps_dt_stack,dim=self.dim)
+        # get_dev_strain = get_dev_strain_stack(deps_dt_stack,dim=self.dim)
         # jax.debug.print("{}",get_dev_strain)
         # jax.debug.print("phi_stack{}",phi_stack)
         return stress_next_stack, self
 
+    @partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(0))
+    def vmap_viscoplastic(
+        self, strain_rate: chex.Array, phi: chex.Array, stress_prev: chex.Array
+    ):
+        deps_dev_dt = get_dev_strain(strain_rate, dim=self.dim)
 
-    @partial(jax.vmap, in_axes=(None, 0, 0,0), out_axes=(0))
-    def vmap_viscoplastic(self, strain_rate: chex.Array, phi: chex.Array,stress_prev:chex.Array):
-        
-                
-        deps_dev_dt = get_dev_strain(strain_rate,dim =self.dim)
-        
-        dgamma_dt = get_scalar_shear_strain(strain_rate,dim = self.dim)
-        
-        d_k = self.d/self.k_p
-        
-        def retief_rheology(p,args):
+        dgamma_dt = get_scalar_shear_strain(strain_rate, dim=self.dim)
 
-            I = get_inertial_number(p,dgamma_dt,self.d,self.rho_p)
+        d_k = self.d / self.k_p
+
+        def retief_rheology(p, args):
+            I = get_inertial_number(p, dgamma_dt, self.d, self.rho_p)
             # I = jnp.maximum(I,1e-12)
-            
-            rhs = jnp.log(phi/self.phi_c)
-            lhs_f = - I/self.I_phi
-            
-            p_star = p*d_k
-            lhs_s = self.lam* jnp.log(1 + p_star)
 
-            
-            return rhs - lhs_f -lhs_s
-    
+            rhs = jnp.log(phi / self.phi_c)
+            lhs_f = -I / self.I_phi
+
+            p_star = p * d_k
+            lhs_s = self.lam * jnp.log(1 + p_star)
+
+            return rhs - lhs_f - lhs_s
 
         def find_root():
             solver = optx.Newton(rtol=1e-12, atol=1e-12)
-            I = get_I_phi(phi,self.phi_c,self.I_phi)
+            I = get_I_phi(phi, self.phi_c, self.I_phi)
             # I = jnp.maximum(I,1e-12)
-            
+
             p_guess = jax.lax.cond(
-                phi> self.phi_c,
-                lambda: ((phi/self.phi_c)**(1.0/self.lam)-1.0)*(1./d_k),
-                lambda: get_pressure(dgamma_dt, I, self.d, self.rho_p)
+                phi > self.phi_c,
+                lambda: ((phi / self.phi_c) ** (1.0 / self.lam) - 1.0) * (1.0 / d_k),
+                lambda: get_pressure(dgamma_dt, I, self.d, self.rho_p),
             )
             sol = optx.minimise(
-                retief_rheology, solver, p_guess, throw=False,max_steps=20
+                retief_rheology, solver, p_guess, throw=False, max_steps=20
             )
-            return jnp.nan_to_num(sol.value, nan=1.0, posinf=0.0,neginf=0.0)
-        
+            return jnp.nan_to_num(sol.value, nan=1.0, posinf=0.0, neginf=0.0)
+
         p = find_root()
 
-        I = get_inertial_number(p,dgamma_dt,self.d, self.rho_p)
+        I = get_inertial_number(p, dgamma_dt, self.d, self.rho_p)
         # I = jnp.maximum(I,1e-12)
 
         alpha = 0.000001
         # eta_E_s = p*self.mu_s/jnp.sqrt(dgamma_dt*dgamma_dt + alpha*alpha)
-        
-        eta_E_s = p*self.mu_s/dgamma_dt
-        
-        mu_I_delta = (self.mu_d - self.mu_s)/(1.0 + self.I_0 / I)
-        
-        eta_delta = p*mu_I_delta/dgamma_dt
 
-        
-        eta = eta_E_s+eta_delta
-        
+        eta_E_s = p * self.mu_s / dgamma_dt
+
+        mu_I_delta = (self.mu_d - self.mu_s) / (1.0 + self.I_0 / I)
+
+        eta_delta = p * mu_I_delta / dgamma_dt
+
+        eta = eta_E_s + eta_delta
+
         stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
         return stress_next
-
 
     def get_p_ref(self, phi, dgamma_dt):
         I = get_I_phi(phi, self.phi_c, self.I_phi)
 
-        d_k = self.d/self.k_p
-        
-        def retief_rheology(p,args):
+        d_k = self.d / self.k_p
 
-            I = get_inertial_number(p,dgamma_dt,self.d,self.rho_p)
+        def retief_rheology(p, args):
+            I = get_inertial_number(p, dgamma_dt, self.d, self.rho_p)
             # I = jnp.maximum(I,1e-12)
-            
-            rhs = jnp.log(phi/self.phi_c)
-            lhs_f = - I/self.I_phi
-            
-            p_star = p*d_k
-            lhs_s = self.lam* jnp.log(1 + p_star)
 
-            
-            return rhs - lhs_f -lhs_s
-    
+            rhs = jnp.log(phi / self.phi_c)
+            lhs_f = -I / self.I_phi
+
+            p_star = p * d_k
+            lhs_s = self.lam * jnp.log(1 + p_star)
+
+            return rhs - lhs_f - lhs_s
 
         def find_root():
             solver = optx.Newton(rtol=1e-12, atol=1e-12)
-            I = get_I_phi(phi,self.phi_c,self.I_phi)
+            I = get_I_phi(phi, self.phi_c, self.I_phi)
             # I = jnp.maximum(I,1e-12)
-            
+
             p_guess = jax.lax.cond(
-                phi> self.phi_c,
-                lambda: ((phi/self.phi_c)**(1.0/self.lam)-1.0)*(1./d_k),
-                lambda: get_pressure(dgamma_dt, I, self.d, self.rho_p)
+                phi > self.phi_c,
+                lambda: ((phi / self.phi_c) ** (1.0 / self.lam) - 1.0) * (1.0 / d_k),
+                lambda: get_pressure(dgamma_dt, I, self.d, self.rho_p),
             )
             sol = optx.minimise(
-                retief_rheology, solver, p_guess, throw=False,max_steps=40
+                retief_rheology, solver, p_guess, throw=False, max_steps=40
             )
-            return jnp.nan_to_num(sol.value, nan=1.0, posinf=0.0,neginf=0.0)
-        
+            return jnp.nan_to_num(sol.value, nan=1.0, posinf=0.0, neginf=0.0)
+
         p = find_root()
 
-
         return p
-    
+
+
 # # left = phi / self.phi_c
 # # lam = 1.0/0.33
 # # right = (1.0 + p*(self.d/1e8))**lam *jnp.exp(-I/self.I_phi)

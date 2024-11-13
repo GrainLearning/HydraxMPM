@@ -39,22 +39,22 @@ def test_update_stress_2d():
     particles = hdx.Particles(
         config=config,
         position_stack=jnp.array([[0.1, 0.1]]),
-        
     )
-    
+
     particles = eqx.tree_at(
-            lambda state: (
-                state.volume_stack,
-                state.volume0_stack,
-                state.stress_stack,
-                state.L_stack
-            ),
-            particles,
-            (jnp.array([0.019]),
-             jnp.array([0.2]), 
-             jnp.eye(3).reshape(-1,3,3),
-             jnp.stack([jnp.eye(3) * 0.1])
-             ),
+        lambda state: (
+            state.volume_stack,
+            state.volume0_stack,
+            state.stress_stack,
+            state.L_stack,
+        ),
+        particles,
+        (
+            jnp.array([0.019]),
+            jnp.array([0.2]),
+            jnp.eye(3).reshape(-1, 3, 3),
+            jnp.stack([jnp.eye(3) * 0.1]),
+        ),
     )
 
     material = hdx.NewtonFluid(
