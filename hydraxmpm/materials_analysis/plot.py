@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Dict, List, Tuple
 
-import matplotlib.pyplot as plt
+
 import numpy as np
 
 
@@ -68,6 +68,7 @@ def make_plots(
     savefig_options: Dict = None,
     transpose_axes=False,
 ):
+    import matplotlib.pyplot as plt
     # import scienceplots
 
     # plt.style.use(["science", "no-latex"])
