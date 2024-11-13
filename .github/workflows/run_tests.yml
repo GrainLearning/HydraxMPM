@@ -1,5 +1,13 @@
 name: Run Tests
 
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+
 jobs:
   build:
     name: python
@@ -19,6 +27,6 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
       - name: Sync UV
-        run: uv sync --group dev plot
+        run: uv sync --all-extras
       - name: Run Pytest
         run: uv run pytest
