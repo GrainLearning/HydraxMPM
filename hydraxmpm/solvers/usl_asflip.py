@@ -1,15 +1,15 @@
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from .solver import Solver
-import equinox as eqx
 
 
 class USL_ASFLIP(Solver):

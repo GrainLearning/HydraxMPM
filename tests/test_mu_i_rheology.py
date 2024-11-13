@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-import numpy as np
 
 import hydraxmpm as hdx
 
@@ -54,6 +53,6 @@ def test_update_stress_3d():
     
     stress_prev = p_ref*jnp.eye(3)
     
-    new_stress = material.update_ip(
+    _ = material.update_ip(
         stress_prev=stress_prev, F=jnp.eye(3), L=jnp.eye(3) * 0.1, phi=phi_0
-    )
+    ) 

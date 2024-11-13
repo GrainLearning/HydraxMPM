@@ -1,12 +1,10 @@
 """Math helper functions for the pymudokon package."""
 
-from typing import Tuple, Optional
+from typing import Tuple
 
 import chex
 import jax
 import jax.numpy as jnp
-
-from ..particles.particles import Particles
 
 """Compression positive pressure from stress tensor."""
 

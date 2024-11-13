@@ -3,9 +3,7 @@ import time
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-
 import pymudokon as pm
-
 
 jax.config.update("jax_platform_name", "cpu")
 jax.config.update("jax_enable_x64", True)

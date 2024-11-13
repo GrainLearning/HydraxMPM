@@ -6,9 +6,7 @@ import warnings
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 import pymudokon as pm
-
 
 warnings.warn("Warning........... Currently visualizing 3D plots with pyvista does not work. But you are welcome to output as vtk files. Will fix this soon - R")
 

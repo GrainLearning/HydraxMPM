@@ -1,11 +1,11 @@
 """Module for the imposing zero/non-zero boundaries at the edges of the domain."""
 
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles

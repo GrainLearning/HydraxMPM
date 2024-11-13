@@ -2,20 +2,18 @@
 
 from functools import partial
 from typing import Callable, Tuple
-from typing_extensions import Self
 
-import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array
+from typing_extensions import Self
 
+from ..config.mpm_config import MPMConfig
+from ..forces.forces import Forces
+from ..nodes.grid import Grid
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..forces.forces import Forces
-from ..config.mpm_config import MPMConfig
-
-from ..nodes.grid import Grid
-import equinox as eqx
 
 
 class RigidParticles(Forces):

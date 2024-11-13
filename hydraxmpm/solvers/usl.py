@@ -7,19 +7,16 @@ References:
 
 from functools import partial
 from typing import List, Tuple
-from pyvista import Grid
-from typing_extensions import Self
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
+from ..config.mpm_config import MPMConfig
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..config.mpm_config import MPMConfig
-import equinox as eqx
-
-
 from .solver import Solver
 
 

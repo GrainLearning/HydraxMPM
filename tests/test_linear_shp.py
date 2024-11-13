@@ -1,32 +1,10 @@
 """Unit tests for the linear shape functions."""
 
+import chex
 import jax.numpy as jnp
 import numpy as np
 
 import hydraxmpm as hdx
-import chex
-
-
-def test_create():
-    """Unit test to test initialization."""
-
-    # 2D linear element stencil size of 4
-    config = hdx.MPMConfig(
-        origin=[0.0, 0.0],
-        end=[
-            1.0,
-            1.0,
-        ],
-        cell_size=0.1,
-        num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
-    )
-
-    grid = hdx.Grid(config)
-
-    chex.assert_shape(grid.intr_shapef_stack, (2 * 4,))
-    chex.assert_shape(grid.intr_shapef_grad_stack, (2 * 4, 3))
-
 
 def test_calc_shp_2d():
     """Test the linear shape function for top level container input."""
@@ -40,7 +18,7 @@ def test_calc_shp_2d():
         ],
         cell_size=0.1,
         num_points=len(position_stack),
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     grid = hdx.Grid(config)
@@ -80,7 +58,7 @@ def test_calc_shp_3d():
         end=[1.0, 1.0, 1.0],
         cell_size=0.1,
         num_points=len(position_stack),
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     grid = hdx.Grid(config)

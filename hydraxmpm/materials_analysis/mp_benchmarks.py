@@ -1,15 +1,8 @@
-from typing import Tuple, Self
 
-import chex
 import jax
 import jax.numpy as jnp
 
-from ..materials.material import Material
 from .mix_control import mix_control
-
-import equinox as eqx
-
-from ..config.ip_config import IPConfig
 
 
 def mp_benchmark_volume_control_shear(

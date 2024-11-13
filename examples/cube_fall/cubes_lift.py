@@ -3,8 +3,8 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import hydraxmpm as hdx
 
+import hydraxmpm as hdx
 
 fname = "/cubes_lift.gif"
 

@@ -1,29 +1,25 @@
 from functools import partial
 from typing import Tuple, Union
-from typing_extensions import Self
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self
 
+from ...config.ip_config import IPConfig
+from ...config.mpm_config import MPMConfig
 from ...particles.particles import Particles
 from ...utils.math_helpers import (
     get_dev_strain,
-    get_dev_stress,
-    get_pressure,
-    get_pressure_stack,
-    get_q_vm,
-    get_sym_tensor_stack,
-    get_volumetric_strain,
     # get_hencky_strain_stack,
     get_hencky_strain,
+    get_pressure,
+    get_q_vm,
+    get_volumetric_strain,
 )
-from ..common import get_timestep
 from ..material import Material
-from ...config.mpm_config import MPMConfig
-from ...config.ip_config import IPConfig
-import equinox as eqx
 
 
 def plot_yield_surface(

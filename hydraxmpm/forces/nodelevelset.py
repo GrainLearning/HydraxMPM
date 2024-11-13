@@ -1,20 +1,17 @@
 """Module for imposing zero/non-zero boundaries via rigid particles."""
 
 from functools import partial
-from typing import Tuple
-from typing_extensions import Self
-import jax
-import chex
 
+import chex
+import equinox as eqx
+import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..config.mpm_config import MPMConfig
-
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from .forces import Forces
-
-import equinox as eqx
 
 
 class NodeLevelSet(Forces):

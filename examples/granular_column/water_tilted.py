@@ -6,10 +6,8 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pyvista as pv
-
 import pymudokon as pm
-
+import pyvista as pv
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -106,7 +104,7 @@ start_time = time.time()
 
 
 bbox = pv.Box(bounds=np.array(list(zip(jnp.pad(origin,[0,1]), jnp.pad(end,[0,1])))).flatten())
-bbox.save(dir_path + f"/output/water_tilted/bbox.vtk")
+bbox.save(dir_path + "/output/water_tilted/bbox.vtk")
 
 # save restart file
 def io_vtk(carry,step):

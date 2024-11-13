@@ -6,7 +6,6 @@ import numpy as np
 
 import hydraxmpm as hdx
 
-
 fname = "/cubes_fall.gif"
 
 domain_size = 10

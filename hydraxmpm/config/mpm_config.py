@@ -1,26 +1,20 @@
-from typing_extensions import Self, Generic
+import os
+import sys
 
 import equinox as eqx
-import jax
 import numpy as np
-import os
-import jax.numpy as jnp
+from typing_extensions import Generic, Self
 
 from ..utils.jax_helpers import set_default_gpu
 
-import sys
 
-
-# _numpy_tuple = lambda arr: tuple([row for row in arr])
 def _numpy_tuple(x: np.ndarray) -> tuple:
-    # assert x.ndim == 1
-    # return tuple([sub_x.item() for sub_x in x])
-    return x
+    assert x.ndim == 1
+    return tuple([sub_x.item() for sub_x in x])
 
 
 def _numpy_tuple_deep(x: np.ndarray) -> tuple:
-    # return tuple(map(_numpy_tuple, x))
-    return x
+    return tuple(map(_numpy_tuple, x))
 
 
 class MPMConfig(eqx.Module):
@@ -132,4 +126,6 @@ class MPMConfig(eqx.Module):
         print(f"[MPMConfig] num_interactions = {self.num_points*self.window_size}")
         print(f"[MPMConfig] domain origin = {self.origin}")
         print(f"[MPMConfig] domain end = {self.end}")
+        print(f"[MPMConfig] dt = {self.dt}")
+        print(f"[MPMConfig] total time = {self.dt*self.num_steps}")
         print("=" * 50)

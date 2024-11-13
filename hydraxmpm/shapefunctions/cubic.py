@@ -1,11 +1,9 @@
 from functools import partial
 from typing import Tuple
 
-
 import chex
 import jax
 import jax.numpy as jnp
-
 
 from ..config.mpm_config import MPMConfig
 

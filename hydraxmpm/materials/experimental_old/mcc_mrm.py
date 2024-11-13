@@ -2,12 +2,12 @@
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self
 
 from ...particles.particles import Particles
 from ...utils.math_helpers import (
@@ -22,7 +22,6 @@ from ...utils.math_helpers import (
     get_volumetric_strain,
 )
 from ..material import Material
-
 
 # def plot_yield_surface(
 #     ax, p_range: Tuple, M: jnp.float32, p_c: jnp.float32, color="black", linestyle="--"

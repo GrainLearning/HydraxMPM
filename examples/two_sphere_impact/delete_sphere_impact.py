@@ -1,12 +1,10 @@
 """Run two-sphere impact simulation."""
 
-import os
 
 import jax.numpy as jnp
 import numpy as np
 
 import hydraxmpm as hdx
-import jax
 
 fname = "/delete_spheres_output.gif"
 

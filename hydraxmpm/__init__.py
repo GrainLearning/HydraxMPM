@@ -3,112 +3,71 @@
 Built with JAX.
 """
 
-from .config.mpm_config import MPMConfig
 from .config.ip_config import IPConfig
-from .nodes.grid import Grid
-from .nodes.nodes import Nodes
-from .particles.particles import Particles
-from .solvers.usl import USL
-from .solvers.usl_apic import USL_APIC
-from .solvers.usl_asflip import USL_ASFLIP
-
-from .utils.mpm_domain_helpers import (
-    discretize,
-    generate_mesh,
-    fill_domain_with_particles,
-)
+from .config.mpm_config import MPMConfig
+from .forces.gravity import Gravity
+from .forces.nodelevelset import NodeLevelSet
+from .forces.rigidparticles import RigidParticles
 
 # from .materials.druckerprager import DruckerPrager
 from .materials.druckerprager_ep import DruckerPragerEP as DruckerPragerEP
-from .materials.linearelastic import LinearIsotropicElastic
-from .materials.mu_i_rheology_incompressible import MuI_incompressible
-from .solvers.run_solver import run_solver, run_solver_io
-from .forces.rigidparticles import RigidParticles
-from .materials.newtonfluid import NewtonFluid
-from .materials.modifiedcamclay import ModifiedCamClay
-from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
 from .materials.experimental.csuh import CSUH
-
+from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
+from .materials.linearelastic import LinearIsotropicElastic
+from .materials.modifiedcamclay import ModifiedCamClay
+from .materials.mu_i_rheology_incompressible import MuI_incompressible
+from .materials.newtonfluid import NewtonFluid
+from .materials_analysis.mp_benchmarks import mp_benchmark_volume_control_shear
 from .materials_analysis.plot import (
+    PlotHelper,
     add_plot,
     add_plot_3d,
     make_plots,
     make_plots_3d,
-    PlotHelper,
 )
-from .utils.mpm_plot_helpers import (
-    make_pvplots,
-    points_to_3D,
-    point_to_3D,
-    PvPointHelper,
-)
-from .forces.gravity import Gravity
-from .forces.nodelevelset import NodeLevelSet
+from .nodes.grid import Grid
+from .nodes.nodes import Nodes
+from .particles.particles import Particles
+from .solvers.run_solver import run_solver, run_solver_io
+from .solvers.usl import USL
+from .solvers.usl_apic import USL_APIC
+from .solvers.usl_asflip import USL_ASFLIP
+from .utils.jax_helpers import dump_restart_files, get_dirpath, get_sv, set_default_gpu
 
-from .utils.jax_helpers import get_sv, get_dirpath, set_default_gpu, dump_restart_files
-
-from .utils.stl_helpers import (
-    get_stl_bounds,
-    sample_points_in_volume,
-    sample_points_on_surface,
-)
-
-from .materials_analysis.mp_benchmarks import mp_benchmark_volume_control_shear
-
-from .utils.mpm_callback_helpers import io_vtk_callback
 # save_object,
-
 # # from .materials.mu_i_softness import MuISoft
 # # from .materials.UH_model import UHModel
-
-#
-
-
 #
 #
-
-
+#
 # # run_solver_io
-
-
 # # from .utils.jax_helpers import create_shapefunction
 # # from .utils.jax_helpers import create_grid_partition
-
 # # from .forces.dirichletbox import DirichletBox
 # # from .forces.forces import Forces
-
 # # from .forces.nodewall import NodeWall
-
 # #
 # # from .materials.experimental.mcc_mrm import MCC_MRM
-
 # # from .materials.experimental.mrm_steadystate import MRMSteady
 # # from .materials.experimental.uh_model import UHModel
 # # from .materials.experimental.mcc_mrm_reg import MCC_MRM_Reg
-
 # # from .materials.material import Material
 # # from .materials.modifiedcamclay import ModifiedCamClay
 # # from .materials.newtonfluid import NewtonFluid
 # # from .materials_analysis.mix_control import mix_control
 # #
-
 # # from .materials_analysis.plot_sets import plot_set1, plot_set2, plot_set3
 # # from .nodes.nodes import Nodes
-
 # # from .nodes.nodes_grid import NodesGrid
-
-
 # # from .shapefunctions.cubic import CubicShapeFunction
 # # from .shapefunctions.cubic_old import CubicShapeFunction2
 # # # from .shapefunctions.linear import LinearShapeFunction
 # # from .shapefunctions.linear_grid import LinearShapeFunction
 # # from .shapefunctions.shapefunctions import ShapeFunction
-
 # # from .solvers.usl_grid import USLGrid
 # # from .partition.grid_partition import GridPartition
 # # from .solvers.usl_apic import USL_APIC
 # # from .solvers.usl_asflip import USL_ASFLIP
-
 from .utils.math_helpers import (
     e_to_phi,
     e_to_phi_stack,
@@ -150,6 +109,23 @@ from .utils.math_helpers import (
     get_volumetric_strain_stack,
     phi_to_e,
     phi_to_e_stack,
+)
+from .utils.mpm_callback_helpers import io_vtk_callback
+from .utils.mpm_domain_helpers import (
+    discretize,
+    fill_domain_with_particles,
+    generate_mesh,
+)
+from .utils.mpm_plot_helpers import (
+    PvPointHelper,
+    make_pvplots,
+    point_to_3D,
+    points_to_3D,
+)
+from .utils.stl_helpers import (
+    get_stl_bounds,
+    sample_points_in_volume,
+    sample_points_on_surface,
 )
 
 

@@ -16,26 +16,23 @@ Modified Cam Clay regularized
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self
 
-from ...particles.particles import Particles
 from ...utils.math_helpers import (
     get_dev_strain,
     get_dev_stress,
+    # get_hencky_strain_stack,
+    get_hencky_strain,
     get_pressure,
     get_pressure_stack,
     get_q_vm,
-    get_sym_tensor_stack,
     get_volumetric_strain,
-    # get_hencky_strain_stack,
-    get_hencky_strain,
 )
-from ..common import get_timestep
 from ..material import Material
 
 

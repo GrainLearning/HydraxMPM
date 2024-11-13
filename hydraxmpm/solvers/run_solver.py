@@ -8,6 +8,7 @@ import jax
 import jax.experimental
 import jax.numpy as jnp
 
+from ..config.mpm_config import MPMConfig
 from ..forces.forces import Forces
 from ..materials.material import Material
 from ..nodes.nodes import Nodes
@@ -15,8 +16,6 @@ from ..particles.particles import Particles
 from ..utils.jax_helpers import scan_kth
 from .solver import Solver
 from .usl import USL
-
-from ..config.mpm_config import MPMConfig
 
 
 @partial(

@@ -13,7 +13,7 @@ def test_init():
         end=[1.0, 1.0],
         cell_size=0.1,
         num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     id_stack = jnp.arange(config.num_cells).reshape(config.grid_size)
@@ -30,7 +30,7 @@ def test_call_2d():
         end=[1.0, 1.0],
         cell_size=0.1,
         num_points=1,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     id_stack = jnp.arange(config.num_cells).reshape(config.grid_size)

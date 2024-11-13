@@ -1,21 +1,16 @@
 """Module for the gravity force. Impose gravity on the nodes."""
 
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
-import jax
+import equinox as eqx
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..config.mpm_config import MPMConfig
-
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-
 from .forces import Forces
-
-import equinox as eqx
-from functools import partial
 
 
 class Gravity(Forces):

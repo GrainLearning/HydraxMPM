@@ -1,8 +1,7 @@
 import jax
 import jax.numpy as jnp
-import pyperf
-
 import pymudokon as pm
+import pyperf
 
 
 def run_p2g_batch(particles, nodes, shapefunctions):

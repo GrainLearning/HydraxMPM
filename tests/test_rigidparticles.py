@@ -1,13 +1,12 @@
 """Unit tests for rigid particles."""
 
+import equinox as eqx
 import jax.numpy as jnp
+import numpy as np
 
 import hydraxmpm as hdx
 
-import equinox as eqx
-import numpy as np
 
-def test_init():
     """Unit test to initialize the DirichletBox class."""
 
     config = hdx.MPMConfig(
@@ -15,7 +14,7 @@ def test_init():
         end=[1.0, 1.0],
         cell_size=0.1,
         num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     box = hdx.RigidParticles(
@@ -33,7 +32,7 @@ def test_call_2d():
         end=[1.0, 1.0],
         cell_size=0.5,
         num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     particles = hdx.Particles(
@@ -50,8 +49,6 @@ def test_call_2d():
         particles,
         nodes
     )
-    
-    # print(nodes.normal_stack)
 
     rigid_particles = hdx.RigidParticles(
         config=config,

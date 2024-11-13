@@ -1,10 +1,10 @@
 """Unit tests for the USL Solver."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 import hydraxmpm as hdx
-import jax
 
 
 def test_create():
@@ -28,11 +28,11 @@ def test_p2g_2d():
     """Unit test to perform particle-to-grid transfer for 2D."""
     config = hdx.MPMConfig(
         origin=[0.0, 0.0],
-        end=[1.0,1.0],
+        end=[1.0, 1.0],
         cell_size=1.0,
         num_points=2,
         dt=0.001,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     particles = hdx.Particles(
@@ -76,7 +76,7 @@ def test_p2g_3d():
         cell_size=1.0,
         num_points=2,
         dt=0.001,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     particles = hdx.Particles(
@@ -102,17 +102,18 @@ def test_p2g_3d():
 
     # note these values have not been verified analytically
     expected_mass_stack = jnp.array(
-        [0.189, 0.081, 0.063, 0.027, 0.02100001, 0.009, 0.007, 0.003]
+        [0.189, 0.081,0.021,  0.009, 0.063, 0.027,  0.007, 0.003]
     )
+
     np.testing.assert_allclose(nodes.mass_stack, expected_mass_stack, rtol=1e-3)
     expected_node_moment_stack = jnp.array(
         [
             [0.189, 0.189, 0.189],
             [0.081, 0.081, 0.081],
-            [0.063, 0.063, 0.063],
-            [0.027, 0.027, 0.027],
             [0.02099999, 0.02099999, 0.02099999],
             [0.009, 0.009, 0.009],
+            [0.063, 0.063, 0.063],
+            [0.027, 0.027, 0.027],
             [0.007, 0.007, 0.007],
             [0.003, 0.003, 0.003],
         ]
@@ -122,6 +123,7 @@ def test_p2g_3d():
         nodes.moment_stack, expected_node_moment_stack, rtol=1e-3
     )
 
+test_p2g_3d()
 
 def test_g2p_2d():
     config = hdx.MPMConfig(

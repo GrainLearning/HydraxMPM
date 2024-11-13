@@ -1,16 +1,11 @@
+import chex
+import equinox as eqx
+import jax.numpy as jnp
 from typing_extensions import Self
 
-import chex
-
-import jax.numpy as jnp
-
-import equinox as eqx
-
-
 from ..config.mpm_config import MPMConfig
-
-    
 from .grid import Grid
+
 
 class Nodes(Grid):
     mass_stack: chex.Array

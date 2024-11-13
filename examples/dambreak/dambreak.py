@@ -1,11 +1,11 @@
-import os
+
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 import hydraxmpm as hdx
-from functools import partial
-from inspect import signature
 
 fname = "/dambreak.gif"
 

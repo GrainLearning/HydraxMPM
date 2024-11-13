@@ -1,13 +1,13 @@
 """Implementation, state and functions for isotropic linear elastic material."""
 
 from functools import partial
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 import optimistix as optx
 from jax import Array
+from typing_extensions import Self
 
 from ..utils.math_helpers import (
     get_dev_strain,

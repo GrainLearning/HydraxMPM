@@ -1,17 +1,12 @@
-from ast import Call
-from typing_extensions import Self, Tuple, Callable
-
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from functools import partial
+from typing_extensions import Callable, Self, Tuple
 
 from ..config.mpm_config import MPMConfig
-
-import equinox as eqx
-
-from ..shapefunctions.linear import vmap_linear_shapefunction
 from ..shapefunctions.cubic import vmap_linear_cubicfunction
+from ..shapefunctions.linear import vmap_linear_shapefunction
 
 
 def get_hash(pos, grid, dim):

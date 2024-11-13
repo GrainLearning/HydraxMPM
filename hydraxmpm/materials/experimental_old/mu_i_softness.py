@@ -2,12 +2,12 @@
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self
 
 from .material import Material
 

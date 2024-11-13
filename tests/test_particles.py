@@ -1,9 +1,8 @@
 # """Unit tests for the Particles dataclass."""
 
+import chex
 import jax.numpy as jnp
 import numpy as np
-import pytest
-import chex
 
 import hydraxmpm as hdx
 

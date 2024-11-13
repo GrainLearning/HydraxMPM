@@ -1,26 +1,16 @@
 """Module for imposing zero/non-zero boundaries via rigid particles."""
 
-from functools import partial
-from typing import Tuple
-from typing_extensions import Self
-
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax import Array
-
-from jax.sharding import Sharding
-
 from pymudokon.config.mpm_config import MPMConfig
+from pymudokon.shapefunctions import shapefunctions
+from typing_extensions import Self
 
-from ..partition.grid_stencil_map import GridStencilMap
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..shapefunctions.shapefunctions import ShapeFunction
-
-import equinox as eqx
-
-from pymudokon.shapefunctions import shapefunctions
+from ..partition.grid_stencil_map import GridStencilMap
 
 
 class NodeLevelSet(eqx.Module):

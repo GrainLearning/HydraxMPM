@@ -13,7 +13,7 @@ from ..utils.math_helpers import (
     get_volumetric_strain_stack,
     phi_to_e_stack,
 )
-from .plot import make_plots, PlotHelper
+from .plot import PlotHelper, make_plots
 
 
 def plot_set1(

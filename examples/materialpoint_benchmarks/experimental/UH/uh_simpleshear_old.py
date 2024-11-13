@@ -3,9 +3,7 @@ import time
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-
 import pymudokon as pm
-
 
 raise NotImplementedError("This example is not working yet")
 

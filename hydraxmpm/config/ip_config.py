@@ -1,13 +1,9 @@
-from typing_extensions import Self
+import os
+import sys
 
 import equinox as eqx
 import jax
-import numpy as np
-import os
-
-from ..utils.jax_helpers import set_default_gpu
-
-import sys
+from typing_extensions import Self
 
 
 class IPConfig(eqx.Module):

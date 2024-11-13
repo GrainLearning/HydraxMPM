@@ -1,16 +1,17 @@
 """Constitutive model for a nearly incompressible Newtonian fluid."""
 
-from typing import Tuple, Optional
-from typing_extensions import Self
+from typing import Tuple
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
+from ..config.mpm_config import MPMConfig
 from ..particles.particles import Particles
 from .material import Material
-from ..config.mpm_config import MPMConfig
-import equinox as eqx
+
 
 class NewtonFluid(Material):
     """Constitutive model for a nearly incompressible Newtonian fluid.

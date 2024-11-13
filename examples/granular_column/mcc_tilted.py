@@ -6,10 +6,8 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pyvista as pv
-
 import pymudokon as pm
-
+import pyvista as pv
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -114,7 +112,7 @@ solver = pm.USL_APIC.create(cell_size, dim=2, num_particles=len(pnt_stack), dt=d
 start_time = time.time()
 
 bbox = pv.Box(bounds=np.array(list(zip(origin, end))).flatten())
-bbox.save(dir_path + f"/output/mu_i_inclined_collapse/bbox.vtk")
+bbox.save(dir_path + "/output/mu_i_inclined_collapse/bbox.vtk")
 # save restart file
 def io_vtk(carry,step):
 

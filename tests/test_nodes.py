@@ -1,11 +1,10 @@
 """Unit tests for the Nodes dataclass."""
 
+import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 import hydraxmpm as hdx
-import equinox as eqx
 
 
 def test_create():

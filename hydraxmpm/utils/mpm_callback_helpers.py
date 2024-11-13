@@ -1,11 +1,12 @@
-import pyvista as pv
-
-from ..particles.particles import MPMConfig
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pyvista as pv
+
+from ..particles.particles import MPMConfig
 from .math_helpers import get_KE_stack, get_pressure_stack
 from .mpm_plot_helpers import point_to_3D
+
 
 def io_vtk_callback(config: MPMConfig, particle_output=None, rigid_stack_index=None, output_box=True):
     if particle_output is None:
@@ -87,7 +88,8 @@ def io_vtk_callback(config: MPMConfig, particle_output=None, rigid_stack_index=N
             rigid_cloud.save(
                 f"{config.dir_path }/output/{config.project}/rigid_particles_{step}.vtk"
             )
-
-    callback = lambda carry, step: jax.debug.callback(io_vtk, carry, step)
+            
+    def callback(carry,step):
+        return jax.debug.callback(io_vtk, carry, step)
 
     return callback
