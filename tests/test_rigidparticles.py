@@ -6,9 +6,8 @@ import numpy as np
 
 import hydraxmpm as hdx
 
-
-    """Unit test to initialize the DirichletBox class."""
-
+def test_create():
+    """Unit test to initialize the rigid particles class."""
     config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[1.0, 1.0],

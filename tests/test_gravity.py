@@ -13,7 +13,7 @@ def test_create():
         end=[1.0, 1.0],
         cell_size=0.5,
         num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear
+        shapefunction="linear"
     )
 
     box = hdx.Gravity(config, gravity=jnp.array([0.0, 0.0]))
@@ -29,7 +29,7 @@ def test_call_2d():
         end=[1.0, 1.0],
         cell_size=0.5,
         num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
         dt=0.01,
     )
     nodes = hdx.Nodes(config)
