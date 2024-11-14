@@ -7,26 +7,22 @@ plasticity.
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self, Union
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-
 import optimistix as optx
+from typing_extensions import Self, Union
 
-from ..config.mpm_config import MPMConfig
 from ..config.ip_config import IPConfig
-
+from ..config.mpm_config import MPMConfig
 from ..particles.particles import Particles
 from ..utils.math_helpers import (
     get_dev_strain,
-    get_dev_stress,
-    get_pressure,
-    get_q_vm,
+    get_J2,
     get_sym_tensor_stack,
     get_volumetric_strain,
-    get_J2,
 )
 from .common import (
     get_bulk_modulus,
@@ -35,8 +31,6 @@ from .common import (
     get_shear_modulus,
 )
 from .material import Material
-
-import equinox as eqx
 
 
 def yield_function(
@@ -104,7 +98,7 @@ class DruckerPragerEP(Material):
 
     eps_p_acc_stack: chex.Array
     H: jnp.float32
-    
+
     rho_p: jnp.float32
 
     def __init__(
@@ -118,7 +112,7 @@ class DruckerPragerEP(Material):
         p_ref_stack: chex.Array = 1.0,
         mu_1_hat: jnp.float32 = 0.0,
         H: jnp.float32 = 0.0,
-        rho_p: jnp.float32 = 0.0
+        rho_p: jnp.float32 = 0.0,
     ) -> Self:
         """Create a non-associated Drucker-Prager material model."""
 
@@ -140,7 +134,7 @@ class DruckerPragerEP(Material):
         self.H = H
 
         self.mu_1_hat = mu_1_hat
-        
+
         self.rho_p = rho_p
         self.config = config
 
@@ -286,7 +280,6 @@ class DruckerPragerEP(Material):
             alpha = self.mu_2 / self.mu_1
 
             beta = jnp.nan_to_num(self.mu_2 / self.mu_1_hat, posinf=0.0, neginf=0.0)
-
 
             def residuals_apex(sol, args):
                 """Reduced system for non-associated flow rule."""

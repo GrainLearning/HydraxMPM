@@ -54,6 +54,7 @@ dev = [
     "mkdocstrings>=0.27.0",
     "mkdocstrings-python>=1.12.2",
     "pytest>=8.3.3",
+    "ruff>=0.7.3",
 ]
 plot = [
     "imageio>=2.36.0",
@@ -63,3 +64,17 @@ plot = [
 
 
 
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I001",  # isort
+]
+ignore = [
+    "C901",  # too complex
+    "W191",  # indentation contains tabs
+    "E741",  # ambiguous variable name
+    "N806", # argument name should be lowercase
+    "N803", # argument name should be lowercase
+]
+fixable = ["I001", "F401"]

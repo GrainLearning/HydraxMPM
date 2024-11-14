@@ -16,55 +16,50 @@ Modified Cam Clay regularized
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self
 
-from ...particles.particles import Particles
 from ...utils.math_helpers import (
     get_dev_strain,
     get_dev_stress,
+    # get_hencky_strain_stack,
+    get_hencky_strain,
+    get_inertial_number,
     get_pressure,
     get_pressure_stack,
     get_q_vm,
-    get_sym_tensor_stack,
-    get_volumetric_strain,
-    # get_hencky_strain_stack,
-    get_hencky_strain,
     get_scalar_shear_strain,
-    get_inertial_number,
+    get_volumetric_strain,
 )
-from ..common import get_timestep
 from ..material import Material
 
-def get_csl(
-    p_range, I, ln_v_c, ln_N, lam, I_phi
-    ):
+
+def get_csl(p_range, I, ln_v_c, ln_N, lam, I_phi):
     p_stack = jnp.arange(p_range[0], p_range[1], p_range[2])
-    
+
     v_c = jnp.exp(ln_v_c)
-    phi_c = 1/v_c
+    phi_c = 1 / v_c
     ps = jnp.exp(ln_N / ln_v_c) * jnp.exp(1.0 / lam)
-    
+
     def get_v(p):
-
-
         lhs_f = -I / I_phi
 
-        lhs_s = lam * jnp.log(1 + p /ps)
-        
+        lhs_s = lam * jnp.log(1 + p / ps)
+
         ln_phi = lhs_s + lhs_f + jnp.log(phi_c)
-        
+
         phi = jnp.exp(ln_phi)
-        v = 1./phi
+        v = 1.0 / phi
         return v
-    
+
     v_stack = jax.vmap(get_v)(p_stack)
-    
+
     return v_stack, p_stack
+
 
 def plot_yield_surface(
     ax, p_range: Tuple, M: jnp.float32, p_c: jnp.float32, color="black", linestyle="--"
@@ -155,7 +150,7 @@ class MCC_MRM_Reg(Material):
     eps_p_stack: chex.Array
     stress_ref_stack: chex.Array
     isReference: bool
-    
+
     @classmethod
     def create(
         cls: Self,
@@ -171,7 +166,7 @@ class MCC_MRM_Reg(Material):
         I_phi: jnp.float32,
         I_0: jnp.float32,
         M_d: jnp.float32,
-        isReference = False,
+        isReference=False,
         stress_ref_stack: chex.Array = None,
         absolute_density: jnp.float32 = 1.0,
         dim: jnp.int16 = 3,
@@ -213,7 +208,7 @@ class MCC_MRM_Reg(Material):
             M_d=M_d,
             I_0=I_0,
             rho_p=rho_p,
-            isReference=isReference
+            isReference=isReference,
         )
 
     def get_phi_ref(self, stress_ref: chex.Array, dim=3):
@@ -255,18 +250,18 @@ class MCC_MRM_Reg(Material):
         stress_fluid_stack, I_stack = self.vmap_viscoplastic(
             deps_p_dt_next_stack, phi_stack, p_qs_stack
         )
-        
+
         stress_next_stack = jax.lax.cond(
             self.isReference,
             lambda x: x,
             lambda x: x + stress_fluid_stack,
-            stress_qs_stack
+            stress_qs_stack,
         )
         jax.debug.print("{} {}", stress_fluid_stack, I_stack)
         # if self.isReference:
-        #     stress_next_stack = stress_qs_stack 
+        #     stress_next_stack = stress_qs_stack
         # else:
-        #     stress_next_stack =  stress_fluid_stack + stress_qs_stack 
+        #     stress_next_stack =  stress_fluid_stack + stress_qs_stack
 
         return (
             stress_next_stack,

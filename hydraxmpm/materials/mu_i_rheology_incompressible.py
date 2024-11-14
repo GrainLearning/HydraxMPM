@@ -1,15 +1,14 @@
 """Implementation, state and functions for isotropic linear elastic material."""
 
-from functools import partial
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..config.mpm_config import MPMConfig
-
 from ..particles.particles import Particles
 from ..utils.math_helpers import (
     get_dev_strain,
@@ -18,7 +17,6 @@ from ..utils.math_helpers import (
     get_sym_tensor,
 )
 from .material import Material
-import equinox as eqx
 
 
 def get_mu_I(I, mu_s, mu_d, I0):

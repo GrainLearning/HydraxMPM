@@ -1,13 +1,9 @@
-from typing_extensions import Self
+import os
+import sys
 
 import equinox as eqx
 import jax
-import numpy as np
-import os
-
-from ..utils.jax_helpers import set_default_gpu
-
-import sys
+from typing_extensions import Self
 
 
 class IPConfig(eqx.Module):
@@ -26,7 +22,7 @@ class IPConfig(eqx.Module):
         store_every=0,
         num_points: int = 1,
         dim: int = 3,
-        cpu: bool = True
+        cpu: bool = True,
     ):
         jax.debug.print(
             "Ignore the UserWarning from, the behavior is intended and expected."
@@ -39,12 +35,12 @@ class IPConfig(eqx.Module):
         self.dt = dt
 
         self.num_points = num_points
-        
-        self.total_time = dt*num_steps
+
+        self.total_time = dt * num_steps
 
         file = sys.argv[0]
         self.dir_path = os.path.dirname(file) + "/"
-        
+
         if cpu:
             jax.config.update("jax_platform_name", "cpu")
             jax.config.update("jax_enable_x64", True)

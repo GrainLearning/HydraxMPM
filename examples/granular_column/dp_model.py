@@ -1,18 +1,15 @@
 """Column collapse with small uniform pressure and solid volume fraction"""
 
 import time
-
-import jax
-import jax.numpy as jnp
-import numpy as np
-import pyvista as pv
-
-import hydraxmpm as hdx
-
 from functools import partial
 from inspect import signature
 
 import equinox as eqx
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+import hydraxmpm as hdx
 
 aspect = 2.0
 column_width = 0.2  # [m]
@@ -47,8 +44,10 @@ _MPMConfig = partial(
     file=__file__
 )
 
+
 def get_sv(func, val):
     return signature(func).parameters[val].default
+
 
 sep = get_sv(_MPMConfig, "cell_size") / get_sv(_MPMConfig, "ppc")
 

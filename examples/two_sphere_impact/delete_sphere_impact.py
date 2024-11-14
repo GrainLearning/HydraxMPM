@@ -1,12 +1,9 @@
 """Run two-sphere impact simulation."""
 
-import os
-
 import jax.numpy as jnp
 import numpy as np
 
 import hydraxmpm as hdx
-import jax
 
 fname = "/delete_spheres_output.gif"
 
@@ -75,10 +72,8 @@ particles = hdx.Particles(
 )
 
 
-
-
 # interactions invalid
-    
+
 # nodes = hdx.Nodes(config)
 
 # particles, nodes = hdx.discretize(

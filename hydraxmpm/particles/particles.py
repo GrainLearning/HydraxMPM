@@ -1,12 +1,7 @@
-from typing_extensions import Self, Optional
-
 import chex
-import jax.numpy as jnp
-
-from jax.sharding import Sharding
-import jax
-
 import equinox as eqx
+import jax.numpy as jnp
+from typing_extensions import Optional, Self
 
 from ..config.mpm_config import MPMConfig
 

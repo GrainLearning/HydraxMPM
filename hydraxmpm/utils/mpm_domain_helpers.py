@@ -2,15 +2,13 @@
 
 from typing import Tuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from ..config.mpm_config import MPMConfig
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..nodes.nodes import Nodes
-from ..config.mpm_config import MPMConfig
-
-import equinox as eqx
 
 
 def discretize(

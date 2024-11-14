@@ -1,26 +1,16 @@
 """Module for imposing zero/non-zero boundaries via rigid particles."""
 
-from functools import partial
-from typing import Tuple
-from typing_extensions import Self
-
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax import Array
-
-from jax.sharding import Sharding
-
 from pymudokon.config.mpm_config import MPMConfig
+from pymudokon.shapefunctions import shapefunctions
+from typing_extensions import Self
 
-from ..partition.grid_stencil_map import GridStencilMap
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..shapefunctions.shapefunctions import ShapeFunction
-
-import equinox as eqx
-
-from pymudokon.shapefunctions import shapefunctions
+from ..partition.grid_stencil_map import GridStencilMap
 
 
 class NodeLevelSet(eqx.Module):
@@ -50,7 +40,7 @@ class NodeLevelSet(eqx.Module):
             dim = id_stack.shape[1]
 
         self.id_stack = id_stack
-        
+
         self.dt = dt
         self.dim = dim
         self.num_selected_cells = self.id_stack.shape[0]
@@ -59,7 +49,7 @@ class NodeLevelSet(eqx.Module):
             velocity_stack = jnp.zeros((self.num_selected_cells, self.dim))
 
         self.velocity_stack = velocity_stack
-        
+
         self.mu = mu
 
     def __call__(
@@ -70,14 +60,13 @@ class NodeLevelSet(eqx.Module):
         shapefunctions: shapefunctions,
         step: int = 0,
     ):
-        
         def vmap_p2g_grid_normals(p_id, c_id, w_id, carry):
             normal_prev = carry
-            
+
             mass = particles.mass_stack.at[p_id].get()
-            
-            shapef_grad = shapefunctions.shapef_grad_stack.at[p_id,w_id].get()
-            normal = (shapef_grad*mass).at[:self.dim].get()
+
+            shapef_grad = shapefunctions.shapef_grad_stack.at[p_id, w_id].get()
+            normal = (shapef_grad * mass).at[: self.dim].get()
             # jax.debug.print("normal {}",normal)
 
             return normal_prev + normal
@@ -85,9 +74,9 @@ class NodeLevelSet(eqx.Module):
         normal_stack = grid.vmap_grid_gather_fori(
             vmap_p2g_grid_normals, jnp.zeros(self.dim)
         )
-        
-        jax.debug.print("{}",normal_stack)
-        
+
+        jax.debug.print("{}", normal_stack)
+
         return nodes, self
 
 

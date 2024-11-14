@@ -1,18 +1,16 @@
 """Column collapse with small uniform pressure and solid volume fraction"""
 
 import time
+from functools import partial
+from inspect import signature
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pyvista as pv
 
 import hydraxmpm as hdx
-
-from functools import partial
-from inspect import signature
-
-import equinox as eqx
 
 aspect = 2.0
 column_width = 0.2  # [m]
@@ -97,7 +95,7 @@ particles = eqx.tree_at(
 
 gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, g]))
 
-box = hdx.NodeLevelSet(config,mu=0.4)
+box = hdx.NodeLevelSet(config, mu=0.4)
 
 solver = hdx.USL_APIC(config=config)
 
@@ -116,7 +114,7 @@ bbox = pv.Box(
     ).flatten()
 )
 
-bbox.save(config.dir_path + f"/output/mu_i_flat/bbox.vtk")
+bbox.save(config.dir_path + "/output/mu_i_flat/bbox.vtk")
 
 
 # # save restart file

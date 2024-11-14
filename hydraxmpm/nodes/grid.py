@@ -1,17 +1,12 @@
-from ast import Call
-from typing_extensions import Self, Tuple, Callable
-
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from functools import partial
+from typing_extensions import Callable, Self, Tuple
 
 from ..config.mpm_config import MPMConfig
-
-import equinox as eqx
-
-from ..shapefunctions.linear import vmap_linear_shapefunction
 from ..shapefunctions.cubic import vmap_linear_cubicfunction
+from ..shapefunctions.linear import vmap_linear_shapefunction
 
 
 def get_hash(pos, grid, dim):
@@ -59,8 +54,6 @@ class Grid(eqx.Module):
             self.shapefunction_call = vmap_linear_shapefunction
         elif config.shapefunction == "cubic":
             self.shapefunction_call = vmap_linear_cubicfunction
-
-            
 
     def get_interactions(self, position_stack: chex.Array) -> Self:
         def vmap_intr(intr_id: chex.ArrayBatched) -> Tuple[chex.Array, chex.Array]:
@@ -158,11 +151,10 @@ class Grid(eqx.Module):
                 intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
             )
 
-
             intr_dist = rel_pos - intr_grid_pos
 
             shapef, shapef_grad_padded = self.shapefunction_call(intr_dist, self.config)
-            
+
             shapef = jax.lax.cond(
                 ((intr_hash < 0) | (intr_hash >= self.config.num_cells)),
                 lambda x: 0.0,

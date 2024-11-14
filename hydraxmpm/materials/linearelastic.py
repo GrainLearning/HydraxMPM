@@ -1,19 +1,16 @@
 from typing import Tuple
-from typing_extensions import Self, Optional
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from typing_extensions import Optional, Self
 
+from ..config.mpm_config import MPMConfig
 from ..particles.particles import Particles
 from ..utils.math_helpers import get_sym_tensor
 from .common import get_bulk_modulus, get_lame_modulus, get_shear_modulus
 from .material import Material
-from functools import partial
-
-import equinox as eqx
-
-from ..config.mpm_config import MPMConfig
 
 
 class LinearIsotropicElastic(Material):

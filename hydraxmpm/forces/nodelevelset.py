@@ -1,20 +1,17 @@
 """Module for imposing zero/non-zero boundaries via rigid particles."""
 
 from functools import partial
-from typing import Tuple
-from typing_extensions import Self
-import jax
-import chex
 
+import chex
+import equinox as eqx
+import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..config.mpm_config import MPMConfig
-
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
 from .forces import Forces
-
-import equinox as eqx
 
 
 class NodeLevelSet(Forces):
@@ -89,7 +86,6 @@ class NodeLevelSet(Forces):
         nodes: Nodes,
         step: int = 0,
     ):
-        
         @partial(jax.vmap, in_axes=(0, 0))
         def vmap_selected_nodes(n_id, levelset_vel):
             normal = nodes.normal_stack.at[n_id].get()

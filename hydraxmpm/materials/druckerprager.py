@@ -7,22 +7,19 @@ plasticity.
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self, Union
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import optax
 import optimistix as optx
+from typing_extensions import Self, Union
 
-from ..config.mpm_config import MPMConfig
 from ..config.ip_config import IPConfig
-
+from ..config.mpm_config import MPMConfig
 from ..particles.particles import Particles
 from ..utils.math_helpers import (
     get_dev_strain,
-    get_dev_stress,
-    get_pressure,
     get_q_vm,
     get_sym_tensor_stack,
     get_volumetric_strain,
@@ -34,8 +31,6 @@ from .common import (
     get_shear_modulus,
 )
 from .material import Material
-
-import equinox as eqx
 
 
 def yield_function(

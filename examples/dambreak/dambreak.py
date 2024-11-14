@@ -1,11 +1,10 @@
-import os
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 import hydraxmpm as hdx
-from functools import partial
-from inspect import signature
 
 fname = "/dambreak.gif"
 
@@ -19,7 +18,7 @@ _MPMConfig = partial(
     shapefunction="cubic",
     num_steps=20000,
     store_every=500,
-    file=__file__
+    file=__file__,
 )
 
 

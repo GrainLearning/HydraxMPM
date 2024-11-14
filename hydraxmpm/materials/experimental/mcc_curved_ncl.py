@@ -1,29 +1,23 @@
 from functools import partial
-from typing import Tuple, Union
-from typing_extensions import Self
+from typing import Tuple
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self
 
-from ...particles.particles import Particles
+from ...config.mpm_config import MPMConfig
 from ...utils.math_helpers import (
     get_dev_strain,
-    get_dev_stress,
-    get_pressure,
-    get_pressure_stack,
-    get_q_vm,
-    get_sym_tensor_stack,
-    get_volumetric_strain,
     # get_hencky_strain_stack,
     get_hencky_strain,
+    get_pressure,
+    get_q_vm,
+    get_volumetric_strain,
 )
-from ..common import get_timestep
 from ..material import Material
-from ...config.mpm_config import MPMConfig
-from ...config.ip_config import IPConfig
-import equinox as eqx
 
 
 def plot_yield_surface(
@@ -106,7 +100,7 @@ class MCC_Curved_NCL(Material):
     p_c_stack: chex.Array
     p_ref_stack: chex.Array
     phi_ref_stack: chex.Array
-    ln_Z : jnp.float32
+    ln_Z: jnp.float32
 
     def __init__(
         self: Self,
@@ -117,8 +111,8 @@ class MCC_Curved_NCL(Material):
         lam: jnp.float32,
         kap: jnp.float32,
         ln_N: jnp.float32,
-        ln_v_c: jnp.float32=None,
-        ln_Z:jnp.float32 = None,
+        ln_v_c: jnp.float32 = None,
+        ln_Z: jnp.float32 = None,
         p_ref_stack: chex.Array = None,
         phi_ref_stack: chex.Array = None,
     ) -> Self:
@@ -137,18 +131,18 @@ class MCC_Curved_NCL(Material):
         self.p_c_stack = p_ref_stack * R
 
         if ln_v_c is None:
-            self.ps = jnp.exp((ln_N - ln_Z)/lam) -1.0
+            self.ps = jnp.exp((ln_N - ln_Z) / lam) - 1.0
             self.ln_v_c = ln_Z + self.lam * jnp.log((1 + self.ps) / self.ps)
             self.ln_Z = ln_Z
-        elif ln_Z is None:  
+        elif ln_Z is None:
             self.ps = jnp.exp(ln_N / ln_v_c) * jnp.exp(1.0 / lam)
             self.ln_Z = ln_v_c - self.lam * jnp.log((1 + self.ps) / self.ps)
             self.ln_v_c = ln_v_c
         else:
             raise ValueError
-        
+
         self.ln_N = ln_N
-        
+
         # self.ln_v_c = ln_v_c
 
         if phi_ref_stack is None:

@@ -3,9 +3,7 @@ import time
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-
 import pymudokon as pm
-
 
 jax.config.update("jax_platform_name", "cpu")
 
@@ -36,7 +34,7 @@ fig_ax_set1 = pm.make_plots()
 fig_ax_set2 = pm.make_plots()
 fig_ax_set3 = pm.make_plots()
 
-dgamma_dt_ref_list = [1.0, 0.1,0.001  ]
+dgamma_dt_ref_list = [1.0, 0.1, 0.001]
 for dgamma_dt_ref in dgamma_dt_ref_list:
     p_ref = pm.materials.mu_i_rheology.get_pressure(
         dgamma_dt_ref,
@@ -63,33 +61,18 @@ for dgamma_dt_ref in dgamma_dt_ref_list:
     )
     benchmark = benchmark.run()
 
-    (
-        stress_stack,
-        F_stack,
-        L_stack,
-        phi_stack
-    ) = benchmark.accumulated
+    (stress_stack, F_stack, L_stack, phi_stack) = benchmark.accumulated
     print("--- %s seconds ---" % (time.time() - start_time))
 
-    fig_ax_set1 = pm.plot_set1(
-        stress_stack,
-        phi_stack,
-        L_stack,
-        fig_ax= fig_ax_set1
-        )
-    fig_ax_set2 = pm.plot_set2(
-        stress_stack,
-        L_stack,
-        F_stack,
-        fig_ax= fig_ax_set2
-    )
+    fig_ax_set1 = pm.plot_set1(stress_stack, phi_stack, L_stack, fig_ax=fig_ax_set1)
+    fig_ax_set2 = pm.plot_set2(stress_stack, L_stack, F_stack, fig_ax=fig_ax_set2)
     fig_ax_set3 = pm.plot_set3(
         stress_stack,
         phi_stack,
         L_stack,
         F_stack,
         benchmark.get_time_stack(),
-        fig_ax= fig_ax_set3
+        fig_ax=fig_ax_set3,
     )
 
 

@@ -1,8 +1,8 @@
 import operator
-import jax.numpy as jnp
-import jax
-
 from inspect import signature
+
+import jax
+import jax.numpy as jnp
 
 
 def get_sv(func, val):
@@ -10,8 +10,8 @@ def get_sv(func, val):
 
 
 def get_dirpath():
-    import sys
     import os
+    import sys
 
     file = sys.argv[0]
     return os.path.dirname(file) + "/"
@@ -27,16 +27,6 @@ def simple_warning(condition: jnp.bool_, place: str, message: str):
 
 def set_default_gpu(gpu_id=0):
     jax.config.update("jax_default_device", jax.devices("gpu")[gpu_id])
-
-
-def filter_object(obj, l):
-    obj_dict = vars(obj)
-    return dict(((key, obj_dict[key]) for key in l))
-
-
-def save_object(obj, l, file_path):
-    obj_out = filter_object(particles, l)
-    jnp.savez(file_path, **obj_out)
 
 
 def dump_restart_files(

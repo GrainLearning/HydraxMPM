@@ -1,12 +1,9 @@
 """Run two-sphere impact simulation."""
 
-import os
-
 import jax.numpy as jnp
 import numpy as np
 
 import hydraxmpm as hdx
-
 
 fname = "/two_spheres_output.gif"
 
@@ -76,9 +73,7 @@ particles = hdx.Particles(
 
 nodes = hdx.Nodes(config)
 
-particles, nodes = hdx.discretize(
-    config, particles, nodes, density_ref=1000
-)
+particles, nodes = hdx.discretize(config, particles, nodes, density_ref=1000)
 material = hdx.LinearIsotropicElastic(config=config, E=1000.0, nu=0.3)
 
 solver = hdx.USL(config=config, alpha=0.98)

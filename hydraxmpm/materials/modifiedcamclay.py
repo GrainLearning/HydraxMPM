@@ -2,34 +2,26 @@
 
 from functools import partial
 from typing import Tuple
-from typing_extensions import Self, Union
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+from typing_extensions import Self, Union
 
-from ..config.mpm_config import MPMConfig
 from ..config.ip_config import IPConfig
-
-import equinox as eqx
-
+from ..config.mpm_config import MPMConfig
 from ..particles.particles import Particles
 from ..utils.math_helpers import (
     get_dev_strain,
-    get_dev_stress,
     get_pressure,
-    get_pressure_stack,
     get_q_vm,
-    get_sym_tensor_stack,
     get_sym_tensor,
     get_volumetric_strain,
 )
 from .common import get_timestep
 from .material import Material
-
-from jax.sharding import Sharding
-import jax
 
 
 def plot_yield_surface(
@@ -196,7 +188,7 @@ class ModifiedCamClay(Material):
         stress_prev_stack: chex.Array,
         F_stack: chex.Array,
         L_stack: chex.Array,
-        phi_stack: chex.Array
+        phi_stack: chex.Array,
     ) -> Tuple[chex.Array, Self]:
         new_stress_stack, new_eps_e_stack, new_p_c_stack = self.vmap_update_ip(
             L_stack,
@@ -205,7 +197,7 @@ class ModifiedCamClay(Material):
             self.eps_e_stack,
             self.p_c_stack,
         )
- 
+
         new_self = eqx.tree_at(
             lambda state: (state.eps_e_stack, state.p_c_stack),
             self,

@@ -2,11 +2,11 @@
 # TODO add friction
 
 from typing import Tuple
-from typing_extensions import Self
 
 import chex
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -48,7 +48,7 @@ class NodeWall:
         particles: Particles = None,
         shapefunctions: ShapeFunction = None,
         dt: jnp.float32 = 0.0,
-        step: jnp.int32 = 0
+        step: jnp.int32 = 0,
     ) -> Tuple[Nodes, Self]:
         """Apply the boundary conditions on the nodes moments."""
 

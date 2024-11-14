@@ -13,7 +13,7 @@ def test_init():
         end=[1.0, 1.0],
         cell_size=0.1,
         num_points=2,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     id_stack = jnp.arange(config.num_cells).reshape(config.grid_size)
@@ -24,13 +24,14 @@ def test_init():
 
     assert isinstance(box, hdx.NodeLevelSet)
 
+
 def test_call_2d():
     config = hdx.MPMConfig(
         origin=[0.0, 0.0],
         end=[1.0, 1.0],
         cell_size=0.1,
         num_points=1,
-        shapefunction=hdx.SHAPEFUNCTION.linear,
+        shapefunction="linear",
     )
 
     id_stack = jnp.arange(config.num_cells).reshape(config.grid_size)
@@ -44,16 +45,7 @@ def test_call_2d():
     position_stack = jnp.array([[0.05, 0.2]])
 
     particles = hdx.Particles(
-        config=config,
-        position_stack=position_stack,
-        mass_stack = jnp.ones(1)
-        )
-    
-
-    nodes, box = box.apply_on_nodes(
-        particles =particles,
-        nodes = nodes
+        config=config, position_stack=position_stack, mass_stack=jnp.ones(1)
     )
-    
 
-
+    nodes, box = box.apply_on_nodes(particles=particles, nodes=nodes)

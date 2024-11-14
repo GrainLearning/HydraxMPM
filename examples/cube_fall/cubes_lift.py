@@ -3,8 +3,8 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import hydraxmpm as hdx
 
+import hydraxmpm as hdx
 
 fname = "/cubes_lift.gif"
 
@@ -86,6 +86,7 @@ A = 1  # amplitude deviation of peak
 omega = 0.2  # rate of change [rad/s]
 
 
+<<<<<<< HEAD
 # step,
 # self.position_stack,
 # self.velocity_stack,
@@ -94,6 +95,9 @@ omega = 0.2  # rate of change [rad/s]
 
 
 def update_rigid_particles(step, position_stack, velocity_stack, com, config):
+=======
+def update_rigid_particles(step, position_stack, velocity_stack, config):
+>>>>>>> c8d2d7eef8ac942f53805770ce0ed5f6113a9e15
     new_position_stack = position_stack + velocity_stack * config.dt
 
     t = step * config.dt
@@ -107,18 +111,30 @@ def update_rigid_particles(step, position_stack, velocity_stack, com, config):
     next_position_stack = jax.vmap(vmap_sinusoid, in_axes=0)(new_position_stack)
     # next_position_stack = new_position_stack
     new_velocity_stack = (next_position_stack - new_position_stack) / config.dt
+<<<<<<< HEAD
 
     # # predicted_pos =
     return new_position_stack, new_velocity_stack, None
 
 
 rigid_particle_wall = hdx.RigidParticlesModified(
+=======
+
+    # # predicted_pos =
+    return new_position_stack, new_velocity_stack
+
+
+rigid_particle_wall = hdx.RigidParticles(
+>>>>>>> c8d2d7eef8ac942f53805770ce0ed5f6113a9e15
     config=config,
     position_stack=rigid_pos_stack,
     mu=0.5,
     # velocity_stack=rigid_velocity_sack,
+<<<<<<< HEAD
     alpha  = 0.8,
     beta = 2.0,
+=======
+>>>>>>> c8d2d7eef8ac942f53805770ce0ed5f6113a9e15
     update_rigid_particles=update_rigid_particles,
 )
 

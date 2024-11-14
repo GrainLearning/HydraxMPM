@@ -1,16 +1,17 @@
 """Constitutive model for a nearly incompressible Newtonian fluid."""
 
-from typing import Tuple, Optional
-from typing_extensions import Self
+from typing import Tuple
 
 import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from typing_extensions import Self
 
+from ..config.mpm_config import MPMConfig
 from ..particles.particles import Particles
 from .material import Material
-from ..config.mpm_config import MPMConfig
-import equinox as eqx
+
 
 class NewtonFluid(Material):
     """Constitutive model for a nearly incompressible Newtonian fluid.
@@ -28,7 +29,6 @@ class NewtonFluid(Material):
     viscosity: jnp.float32
     gamma: jnp.float32
 
-
     def __init__(
         self: Self,
         config: MPMConfig,
@@ -44,20 +44,20 @@ class NewtonFluid(Material):
         self.K = K
         self.viscosity = viscosity
         self.gamma = gamma
-        
+
         super().__init__(config)
 
-
-
-    def update_from_particles(self: Self, particles: Particles) -> Tuple[Particles, Self]:
+    def update_from_particles(
+        self: Self, particles: Particles
+    ) -> Tuple[Particles, Self]:
         """Update the material state and particle stresses for MPM solver."""
-        
+
         # uses reference density to calculate the pressure
         # Todo check if rho_p / rho_ref == phi/phi_ref...
         phi_stack = particles.volume0_stack / particles.volume_stack
 
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0, 0, 0))
-        
+
         new_stress_stack = vmap_update_ip(
             particles.stress_stack,
             particles.F_stack,
@@ -77,11 +77,10 @@ class NewtonFluid(Material):
         stress_prev: chex.Array,
         F: chex.Array,
         L: chex.Array,
-        phi: chex.Array
+        phi: chex.Array,
     ) -> Tuple[chex.Array, Self]:
-        
         pressure = self.K * (phi**self.gamma - 1.0)
-                
+
         deps_dt = 0.5 * (L + L.T)
 
         if self.config.dim == 2:
@@ -92,4 +91,3 @@ class NewtonFluid(Material):
         deps_dev_dt = deps_dt - (deps_v_dt / 3) * jnp.eye(3)
 
         return -pressure * jnp.eye(3) + self.viscosity * deps_dev_dt
-

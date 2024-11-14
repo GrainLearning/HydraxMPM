@@ -2,10 +2,8 @@
 
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 import hydraxmpm as hdx
-import equinox as eqx
 
 
 def test_create():
@@ -40,30 +38,26 @@ def test_get_interactions():
         num_points=position_stack.shape[0],
     )
     grid = hdx.Grid(config)
-    import jax
-  
-    @jax.jit
-    def get_interactions_from_grid(grid):
-        return grid.get_interactions(position_stack)  
 
-    # exp = jax.make_jaxpr(get_interactions_from_grid)(grid)
-    grid = get_interactions_from_grid(grid)
+    grid = grid.get_interactions(position_stack)
+
+    print(grid.intr_dist_stack)
     np.testing.assert_allclose(
-        grid.intr_dist_stack,
+        grid.intr_dist_stack,  # normalized at grid
         jnp.array(
             [
-                [0.5, 0.5, 0.0],
-                [0.5, -0.5, 0.0],
-                [-0.5, 0.5, 0.0],
-                [-0.5, -0.5, 0.0],
-                [0.5, 0.5, 0.0],
-                [0.5, -0.5, 0.0],
-                [-0.5, 0.5, 0.0],
-                [-0.5, -0.5, 0.0],
-                [0.6, 0.8, 0.0],
-                [0.6, -0.2, 0.0],
-                [-0.4, 0.8, 0.0],
-                [-0.4, -0.2, 0.0],
+                [-0.25, -0.25, -0.0],
+                [-0.25, 0.25, -0.0],
+                [0.25, -0.25, -0.0],
+                [0.25, 0.25, -0.0],
+                [-0.25, -0.25, -0.0],
+                [-0.25, 0.25, -0.0],
+                [0.25, -0.25, -0.0],
+                [0.25, 0.25, -0.0],
+                [-0.3, -0.4, -0.0],
+                [-0.3, 0.1, -0.0],
+                [0.2, -0.4, -0.0],
+                [0.2, 0.1, -0.0],
             ]
         ),
     )
@@ -72,4 +66,3 @@ def test_get_interactions():
     np.testing.assert_allclose(
         grid.intr_hash_stack, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 3, 4, 6, 7])
     )
-    print(grid.intr_shapef_stack)

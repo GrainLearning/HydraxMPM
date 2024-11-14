@@ -8,12 +8,12 @@ import jax
 import jax.numpy as jnp
 import optimistix as optx
 
+from ..config.ip_config import IPConfig
 from ..materials.material import Material
 from ..utils.math_helpers import (
     get_phi_from_L,
 )
-from ..config.ip_config import IPConfig
-import equinox as eqx 
+
 
 @partial(jax.jit, static_argnames=("config", "output"))
 def mix_control(
