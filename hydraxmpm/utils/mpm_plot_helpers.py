@@ -2,7 +2,7 @@ import dataclasses
 from typing import Dict, List, Tuple
 
 import numpy as np
-
+import pyvista as pv
 
 from hydraxmpm.config.mpm_config import MPMConfig
 
