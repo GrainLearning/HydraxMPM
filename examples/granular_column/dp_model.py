@@ -44,6 +44,7 @@ _MPMConfig = partial(
     store_every=200,
     project="druckerprager",
     dt=3 * 10**-5,  # [s] time step
+    file=__file__
 )
 
 def get_sv(func, val):
@@ -99,7 +100,7 @@ material = hdx.DruckerPragerEP(
 
 gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, g]))
 
-box = hdx.NodeLevelSet(config, mu=1.0)
+box = hdx.NodeLevelSet(config, mu=0.7)
 
 solver = hdx.USL_ASFLIP(config=config)
 

@@ -24,6 +24,7 @@ from .materials.linearelastic import LinearIsotropicElastic
 from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .solvers.run_solver import run_solver, run_solver_io
 from .forces.rigidparticles import RigidParticles
+from .forces.rigidparticles_modified import RigidParticlesModified
 from .materials.newtonfluid import NewtonFluid
 from .materials.modifiedcamclay import ModifiedCamClay
 from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
