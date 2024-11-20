@@ -101,6 +101,8 @@ class DruckerPragerEP(Material):
 
     rho_p: jnp.float32
 
+    rho_c: jnp.float32
+
     def __init__(
         self: Self,
         config: Union[MPMConfig, IPConfig],
@@ -112,7 +114,8 @@ class DruckerPragerEP(Material):
         p_ref_stack: chex.Array = 1.0,
         mu_1_hat: jnp.float32 = 0.0,
         H: jnp.float32 = 0.0,
-        rho_p: jnp.float32 = 0.0,
+        rho_p: jnp.float32 = 1000,
+        phi_c: jnp.float32 = 1200,
     ) -> Self:
         """Create a non-associated Drucker-Prager material model."""
 
@@ -121,11 +124,13 @@ class DruckerPragerEP(Material):
         self.E = E
         self.nu = nu
 
-        self.eps_e_stack = jnp.zeros((config.num_points, 3, 3))
+        self.rho_c = rho_p * phi_c
 
-        self.eps_p_acc_stack = jnp.zeros(config.num_points)
+        self.eps_e_stack = jnp.zeros((config.num_points, 3, 3), device=config.device)
 
-        self.p_ref_stack = p_ref_stack
+        self.eps_p_acc_stack = jnp.zeros(config.num_points, device=config.device)
+
+        self.p_ref_stack = jax.device_put(p_ref_stack, device=config.device)
         self.c0 = c0
         self.config = config
 
@@ -136,6 +141,8 @@ class DruckerPragerEP(Material):
         self.mu_1_hat = mu_1_hat
 
         self.rho_p = rho_p
+        self.rho_c = rho_p * phi_c
+
         self.config = config
 
     def update_from_particles(
@@ -145,9 +152,15 @@ class DruckerPragerEP(Material):
 
         deps_stack = get_sym_tensor_stack(particles.L_stack) * self.config.dt
 
+        density_stack = particles.mass_stack / particles.volume_stack
+
         new_stress_stack, new_eps_e_stack, new_eps_p_acc_stack = (
             self.vmap_update_stress(
-                deps_stack, self.p_ref_stack, self.eps_e_stack, self.eps_p_acc_stack
+                deps_stack,
+                self.p_ref_stack,
+                self.eps_e_stack,
+                self.eps_p_acc_stack,
+                density_stack,
             )
         )
 
@@ -175,9 +188,16 @@ class DruckerPragerEP(Material):
 
         deps_stack = get_sym_tensor_stack(L_stack) * self.config.dt
 
+        raise NotImplementedError(
+            "This function is not working as intended. We have to add density release criteria "
+        )
+
         new_stress_stack, new_eps_e_stack, new_eps_p_acc_stack = (
             self.vmap_update_stress(
-                deps_stack, self.p_ref_stack, self.eps_e_stack, self.eps_p_acc_stack
+                deps_stack,
+                self.p_ref_stack,
+                self.eps_e_stack,
+                self.eps_p_acc_stack,
             )
         )
 
@@ -189,8 +209,8 @@ class DruckerPragerEP(Material):
 
         return (new_stress_stack, new_self)
 
-    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0), out_axes=(0, 0, 0))
-    def vmap_update_stress(self, deps_next, p_ref, eps_e_prev, eps_p_acc_prev):
+    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0), out_axes=(0, 0, 0))
+    def vmap_update_stress(self, deps_next, p_ref, eps_e_prev, eps_p_acc_prev, density):
         eps_e_tr = eps_e_prev + deps_next
 
         eps_e_v_tr = get_volumetric_strain(eps_e_tr)
@@ -334,7 +354,13 @@ class DruckerPragerEP(Material):
             return stress_next, eps_e_next, eps_p_acc_next
 
         stress_next, eps_e_next, eps_p_acc_next = jax.lax.cond(
-            is_ep, pull_to_ys, elastic_update
+            density > self.rho_c,
+            lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
+            lambda: (jnp.zeros((3, 3)), jnp.zeros((3, 3)), 0.0),
         )
+
+        # stress_next, eps_e_next, eps_p_acc_next = jax.lax.cond(
+        #     is_ep, pull_to_ys, elastic_update
+        # )
 
         return stress_next, eps_e_next, eps_p_acc_next

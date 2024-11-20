@@ -20,6 +20,8 @@ phi_c = 0.648  # [-] rigid limit
 phi_0 = 0.65  # [-] initial solid volume fraction
 rho_p = 1200  # [kg/m^3] particle (skeletan density)
 rho = rho_p * phi_0  # [kg/m^3] bulk density
+rho_c = rho_p*phi_c
+
 # rho = 1500
 # rho = 2000
 # rho = 1

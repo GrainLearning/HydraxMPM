@@ -37,7 +37,7 @@ class USL_APIC(Solver):
 
         self.Dp_inv = jnp.linalg.inv(self.Dp)
 
-        self.Bp_stack = jnp.zeros((config.num_points, 3, 3))
+        self.Bp_stack = jnp.zeros((config.num_points, 3, 3), device=config.device)
         super().__init__(config)
 
     def update(self, particles, nodes, material_stack, forces_stack, step):

@@ -21,12 +21,12 @@ import equinox as eqx
 class RigidParticlesModified(Forces):
     """Shapes are discretized into rigid particles to impose boundary conditions.
 
-    
+
     Correction to Bardenhagen's contact algorithm presented by
-    
+
     L. Gao, et. al, 2022, MPM modeling of pile installation in sand - Computers and geotechniques
-    
-        
+
+
     The rigid particles are used to impose boundary conditions on the grid.
 
     """
@@ -40,7 +40,9 @@ class RigidParticlesModified(Forces):
     beta: float
 
     grid: Grid
-
+    thickness: tuple = eqx.field(static=True)
+    truncate_outbound: bool = eqx.field(static=True)
+    
     update_rigid_particles: Callable = eqx.field(static=True)
 
     def __init__(
@@ -53,15 +55,17 @@ class RigidParticlesModified(Forces):
         alpha: jnp.float32 = 0.8,
         beta: jnp.float32 = 2.0,
         update_rigid_particles: Callable = None,
+        thickness = 0,
+        truncate_outbound = True
     ) -> Self:
         """Initialize the rigid particles."""
         num_rigid = position_stack.shape[0]
 
         if velocity_stack is None:
-            velocity_stack = jnp.zeros((num_rigid, config.dim))
+            velocity_stack = jnp.zeros((num_rigid, config.dim), device=config.device)
 
-        self.position_stack = position_stack
-        self.velocity_stack = velocity_stack
+        self.position_stack = jax.device_put(position_stack, device=config.device)
+        self.velocity_stack = jax.device_put(velocity_stack, device=config.device)
 
         self.grid = Grid(config)
         self.mu = mu
@@ -72,7 +76,8 @@ class RigidParticlesModified(Forces):
         self.alpha = alpha
 
         self.beta = beta
-
+        self.thickness = config.cell_size * thickness * jnp.ones(config.dim)
+        self.truncate_outbound = truncate_outbound
         super().__init__(config)
 
     def apply_on_nodes(
@@ -89,8 +94,16 @@ class RigidParticlesModified(Forces):
                 rigid particles.
             - Get contacting nodes and apply the velocities on the grid.
         """
+        
+        def check_in_domain(pos):
+            ls_valid = pos > jnp.array(self.config.origin) + jnp.array(self.thickness)
+            gt_valid = pos < jnp.array(self.config.end) - jnp.array(self.thickness)
+            return jnp.all(ls_valid * gt_valid)
 
-        def vmap_velocities_p2g_non_rigid(
+        is_valid_stack = jax.vmap(check_in_domain)(self.position_stack)
+
+
+        def vmap_velocities_p2g_rigid(
             point_id, intr_shapef, intr_shapef_grad, intr_dist
         ):
             intr_velocities = self.velocity_stack.at[point_id].get()
@@ -98,18 +111,31 @@ class RigidParticlesModified(Forces):
             return r_scaled_velocity
 
         new_grid, r_scaled_velocity_stack = self.grid.vmap_interactions_and_scatter(
-            vmap_velocities_p2g_non_rigid, self.position_stack
+            vmap_velocities_p2g_rigid, self.position_stack
         )
+        
+        
+        def null_outbound_interactions(intr_hash, is_valid):
+            return jax.lax.cond(is_valid,lambda: intr_hash, lambda:-1*jnp.ones(self.config.window_size).astype(jnp.int32))
+        
+        
+        new_intr_hash_stack = jax.vmap(
+            null_outbound_interactions
+        )(
+            new_grid.intr_hash_stack.reshape((self.config.num_points,self.config.window_size)),
+            is_valid_stack
+            ).reshape(-1)
+        
 
         r_nodes_vel_stack = (
             jnp.zeros_like(nodes.moment_nt_stack)
-            .at[new_grid.intr_hash_stack]
+            .at[new_intr_hash_stack]
             .add(r_scaled_velocity_stack)
         )
 
         r_nodes_contact_mask_stack = (
             jnp.zeros_like(nodes.mass_stack, dtype=jnp.bool_)
-            .at[new_grid.intr_hash_stack]
+            .at[new_intr_hash_stack]
             .set(True)
         )
 
@@ -119,7 +145,7 @@ class RigidParticlesModified(Forces):
 
         r_nodes_min_dist_stack = (
             jnp.zeros_like(nodes.mass_stack)
-            .at[new_grid.intr_hash_stack]
+            .at[new_intr_hash_stack]
             .min(intr_vec_dist_stack)
         )
 

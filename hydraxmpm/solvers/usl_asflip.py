@@ -29,7 +29,7 @@ class USL_ASFLIP(Solver):
 
         self.Dp_inv = jnp.linalg.inv(self.Dp)
 
-        self.Bp_stack = jnp.zeros((config.num_points, 3, 3))
+        self.Bp_stack = jnp.zeros((config.num_points, 3, 3), device=config.device)
 
         self.alpha = alpha
 
@@ -58,6 +58,15 @@ class USL_ASFLIP(Solver):
 
         particles, self = self.g2p(particles=particles, nodes=nodes)
 
+        new_forces2_stack = []
+        for forces in new_forces_stack:
+            particles, new_forces2 = forces.apply_on_particles(
+                particles=particles,
+                nodes=nodes,
+                step=step,
+            )
+            new_forces2_stack.append(new_forces2)
+
         new_material_stack = []
         for material in material_stack:
             particles, new_material = material.update_from_particles(
@@ -70,7 +79,7 @@ class USL_ASFLIP(Solver):
             particles,
             nodes,
             new_material_stack,
-            new_forces_stack,
+            new_forces2_stack,
         )
 
     def p2g(self: Self, particles: Particles, nodes: Nodes) -> Nodes:

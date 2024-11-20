@@ -20,10 +20,16 @@ class Nodes(Grid):
         config: MPMConfig = None,
         small_mass_cutoff: float = 1e-12,
     ) -> Self:
-        self.mass_stack = jnp.zeros((config.num_cells))
-        self.moment_stack = jnp.zeros((config.num_cells, config.dim))
-        self.moment_nt_stack = jnp.zeros((config.num_cells, config.dim))
-        self.normal_stack = jnp.zeros((config.num_cells, config.dim))
+        self.mass_stack = jnp.zeros((config.num_cells), device=config.device)
+        self.moment_stack = jnp.zeros(
+            (config.num_cells, config.dim), device=config.device
+        )
+        self.moment_nt_stack = jnp.zeros(
+            (config.num_cells, config.dim), device=config.device
+        )
+        self.normal_stack = jnp.zeros(
+            (config.num_cells, config.dim), device=config.device
+        )
         self.small_mass_cutoff = small_mass_cutoff
         super().__init__(config)
 

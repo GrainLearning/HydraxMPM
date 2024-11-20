@@ -33,21 +33,23 @@ class Grid(eqx.Module):
     ) -> Self:
         self.config = config
 
-        self.intr_id_stack = jnp.arange(config.num_points * config.window_size).astype(
-            jnp.uint32
-        )
+        self.intr_id_stack = jnp.arange(
+            config.num_points * config.window_size, device=self.config.device
+        ).astype(jnp.uint32)
 
-        self.intr_hash_stack = jnp.zeros(config.num_points * config.window_size).astype(
-            jnp.int32
-        )
+        self.intr_hash_stack = jnp.zeros(
+            config.num_points * config.window_size, device=self.config.device
+        ).astype(jnp.int32)
 
         self.intr_dist_stack = jnp.zeros(
-            (config.num_points * config.window_size, 3)
+            (config.num_points * config.window_size, 3), device=self.config.device
         )  # 3D needed for APIC / AFLIP
 
-        self.intr_shapef_stack = jnp.zeros((config.num_points * config.window_size))
+        self.intr_shapef_stack = jnp.zeros(
+            (config.num_points * config.window_size), device=self.config.device
+        )
         self.intr_shapef_grad_stack = jnp.zeros(
-            (config.num_points * config.window_size, 3)
+            (config.num_points * config.window_size, 3), device=self.config.device
         )
 
         if config.shapefunction == "linear":

@@ -5,6 +5,8 @@ import equinox as eqx
 import numpy as np
 from typing_extensions import Generic, Self
 
+import jax
+
 from ..utils.jax_helpers import set_default_gpu
 
 
@@ -15,6 +17,8 @@ def _numpy_tuple(x: np.ndarray) -> tuple:
 
 def _numpy_tuple_deep(x: np.ndarray) -> tuple:
     return tuple(map(_numpy_tuple, x))
+
+
 
 
 class MPMConfig(eqx.Module):
@@ -47,6 +51,8 @@ class MPMConfig(eqx.Module):
     dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
 
     project: str = eqx.field(static=True, converter=lambda x: str(x))
+    
+    device: jax.Device  = eqx.field(static=True)
 
     def __init__(
         self: Self,
@@ -62,6 +68,7 @@ class MPMConfig(eqx.Module):
         unroll_grid_kernels=True,
         default_gpu_id: int = None,
         project: str = "",
+        device = None,
         **kwargs: Generic,
     ):
         self.inv_cell_size = 1.0 / cell_size
@@ -112,6 +119,9 @@ class MPMConfig(eqx.Module):
         self.dir_path = os.path.dirname(file) + "/"
 
         self.project = project
+        
+        self.device = device
+        
         if default_gpu_id:
             set_default_gpu(default_gpu_id)
 
@@ -129,3 +139,10 @@ class MPMConfig(eqx.Module):
         print(f"[MPMConfig] dt = {self.dt}")
         print(f"[MPMConfig] total time = {self.dt*self.num_steps}")
         print("=" * 50)
+        
+        # TODO print sharding
+
+        # print(f"Number of logical devices: {len(devices)}")
+        # print(f"Shape of device array    : {devices.shape}")
+        # print(f"\nMesh     : {mesh}")
+        # print(f"Sharding : {sharding}\n\n")

@@ -8,7 +8,7 @@ from .config.mpm_config import MPMConfig
 from .forces.gravity import Gravity
 from .forces.nodelevelset import NodeLevelSet
 from .forces.rigidparticles import RigidParticles
-
+from .forces.outscope import OutScope
 # from .materials.druckerprager import DruckerPrager
 from .materials.druckerprager_ep import DruckerPragerEP as DruckerPragerEP
 from .materials.linearelastic import LinearIsotropicElastic

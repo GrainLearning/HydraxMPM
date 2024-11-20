@@ -57,7 +57,7 @@ def generate_mesh(config: MPMConfig):
         return jnp.array([X, Y]).T
 
 
-def fill_domain_with_particles(config: MPMConfig, thickness=3):
+def fill_domain_with_particles(config: MPMConfig, thickness=3, ppc =4):
     """Fill the background grid with 2x2 (or 2x2x2 in 3D) particles.
     Args:
         nodes (Nodes): Nodes class
@@ -92,7 +92,11 @@ def fill_domain_with_particles(config: MPMConfig, thickness=3):
                 [0.7887, 0.7887, 0.7887],
             ]
         )
+        if ppc ==1:
+            pnt_opt = jnp.array([[0.5, 0.5, 0.5]])
 
+        
+        
     node_coords_stack = node_mesh.reshape(-1, config.dim)
 
     def get_opt(node_coords, pnt_opt):
