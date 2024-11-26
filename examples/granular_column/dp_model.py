@@ -97,6 +97,8 @@ material = hdx.DruckerPragerEP(
     H=0.0,
     mu_1_hat=0.0,
     p_ref_stack=p_ref * jnp.ones(config.num_points),
+    rho_p = rho_p,
+    phi_c = phi_c
 )
 
 gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, g]))

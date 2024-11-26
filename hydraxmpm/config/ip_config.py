@@ -3,7 +3,7 @@ import sys
 
 import equinox as eqx
 import jax
-from typing_extensions import Self
+from typing_extensions import Generic, Self
 
 
 class IPConfig(eqx.Module):
@@ -14,6 +14,7 @@ class IPConfig(eqx.Module):
     dim: int = eqx.field(static=True, converter=lambda x: int(x))
     total_time: int = eqx.field(static=True, converter=lambda x: int(x))
     dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
+    project: str = eqx.field(static=True, converter=lambda x: str(x))
 
     def __init__(
         self: Self,
@@ -23,6 +24,8 @@ class IPConfig(eqx.Module):
         num_points: int = 1,
         dim: int = 3,
         cpu: bool = True,
+        project: str = "",
+        **kwargs: Generic,
     ):
         jax.debug.print(
             "Ignore the UserWarning from, the behavior is intended and expected."
@@ -38,8 +41,14 @@ class IPConfig(eqx.Module):
 
         self.total_time = dt * num_steps
 
-        file = sys.argv[0]
+        if "file" in kwargs:
+            file = kwargs.get("file")
+        else:
+            file = sys.argv[0]
+
         self.dir_path = os.path.dirname(file) + "/"
+
+        self.project = project
 
         if cpu:
             jax.config.update("jax_platform_name", "cpu")

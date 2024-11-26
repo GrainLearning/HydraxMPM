@@ -11,13 +11,13 @@ class Forces(eqx.Module):
 
     config: MPMConfig = eqx.field(static=True)
 
-    def apply_on_nodes(
-        self: Self,
-        particles: Particles = None,
-        nodes: Nodes = None,
-        step: int = 0,
-    ) -> Tuple[Nodes, Self]:
-        return nodes, self
+    # def apply_on_nodes(
+    #     self: Self,
+    #     particles: Particles = None,
+    #     nodes: Nodes = None,
+    #     step: int = 0,
+    # ) -> Tuple[Nodes, Self]:
+    #     return nodes, self
 
     def apply_on_particles(
         self: Self,

@@ -158,7 +158,7 @@ def run_solver(
 
 @partial(
     jax.jit,
-    static_argnames=("config", "callback"),
+    static_argnames=("config", "callbacks"),
 )
 def run_solver_io(
     config: MPMConfig,
@@ -167,7 +167,7 @@ def run_solver_io(
     nodes: Nodes,
     material_stack: List[Material],
     forces_stack: List[Forces] = None,
-    callback: Callable = None,
+    callbacks: Tuple[Callable] = None,
 ) -> Tuple[
     Tuple[Particles, Nodes, List[Material], List[Forces]],
     Tuple[Solver, chex.Array],
@@ -196,8 +196,10 @@ def run_solver_io(
             material_stack,
             forces_stack,
         )
-
-        callback(carry, step_next)
+        
+ 
+        for callback in callbacks:
+            callback(carry, step_next)
 
         return carry, []
 

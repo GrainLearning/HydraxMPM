@@ -38,7 +38,7 @@ def mp_benchmark_volume_control_shear(
         return L
 
     L_control_stack = jax.vmap(get_L)(x_stack, y_stack)
-    print(stress_ref)
+
     carry, accumulated = mix_control(
         config=config,
         material=material,

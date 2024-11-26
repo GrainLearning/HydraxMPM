@@ -42,7 +42,7 @@ class USL_ASFLIP(Solver):
         nodes = nodes.refresh()
         particles = particles.refresh()
 
-        nodes = nodes.get_interactions(particles.position_stack)
+        # nodes = nodes.get_interactions(particles.position_stack)
 
         nodes = self.p2g(particles=particles, nodes=nodes)
 
@@ -58,14 +58,14 @@ class USL_ASFLIP(Solver):
 
         particles, self = self.g2p(particles=particles, nodes=nodes)
 
-        new_forces2_stack = []
-        for forces in new_forces_stack:
-            particles, new_forces2 = forces.apply_on_particles(
-                particles=particles,
-                nodes=nodes,
-                step=step,
-            )
-            new_forces2_stack.append(new_forces2)
+        # new_forces2_stack = []
+        # for forces in new_forces_stack:
+        #     particles, new_forces2 = forces.apply_on_particles(
+        #         particles=particles,
+        #         nodes=nodes,
+        #         step=step,
+        #     )
+        #     new_forces2_stack.append(new_forces2)
 
         new_material_stack = []
         for material in material_stack:
@@ -79,7 +79,8 @@ class USL_ASFLIP(Solver):
             particles,
             nodes,
             new_material_stack,
-            new_forces2_stack,
+            # new_forces2_stack,
+            new_forces_stack
         )
 
     def p2g(self: Self, particles: Particles, nodes: Nodes) -> Nodes:

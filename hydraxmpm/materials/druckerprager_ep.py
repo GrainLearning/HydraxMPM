@@ -356,6 +356,7 @@ class DruckerPragerEP(Material):
         stress_next, eps_e_next, eps_p_acc_next = jax.lax.cond(
             density > self.rho_c,
             lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
+            # lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
             lambda: (jnp.zeros((3, 3)), jnp.zeros((3, 3)), 0.0),
         )
 
