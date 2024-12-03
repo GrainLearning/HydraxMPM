@@ -132,9 +132,9 @@ class Particles(eqx.Module):
     def refresh(self) -> Self:
         """Zero velocity gradient"""
         return eqx.tree_at(
-            lambda state: (state.L_stack),
+            lambda state: (state.L_stack,state.force_stack),
             self,
-            (self.L_stack.at[:].set(0.0)),
+            (self.L_stack.at[:].set(0.0),self.force_stack.at[:].set(0.0)),
         )
 
     def calculate_volume(self: Self):

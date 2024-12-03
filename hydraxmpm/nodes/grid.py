@@ -74,12 +74,13 @@ class Grid(eqx.Module):
 
             intr_grid_pos = jnp.floor(rel_pos) + stencil_pos
 
-            # intr_hash = jnp.ravel_multi_index(
-            #     intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
-            # )
-            intr_hash = get_hash(
-                intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
+            intr_hash = jnp.ravel_multi_index(
+                intr_grid_pos.astype(jnp.int32), self.config.grid_size, mode="wrap"
             )
+
+            # intr_hash = get_hash(
+            #     intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
+            # )
 
             intr_dist = rel_pos - intr_grid_pos
 
@@ -146,12 +147,12 @@ class Grid(eqx.Module):
 
             intr_grid_pos = jnp.floor(rel_pos) + stencil_pos
 
-            # intr_hash = jnp.ravel_multi_index(
-            #     intr_grid_pos.astype(jnp.uint32), self.config.grid_size, mode="wrap"
-            # )
-            intr_hash = get_hash(
-                intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
+            intr_hash = jnp.ravel_multi_index(
+                intr_grid_pos.astype(jnp.int32), self.config.grid_size, mode="wrap"
             )
+            # intr_hash = get_hash(
+            #     intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
+            # )
 
             intr_dist = rel_pos - intr_grid_pos
 

@@ -121,6 +121,7 @@ class DruckerPragerEP(Material):
 
         self.K = get_bulk_modulus(E, nu)
         self.G = get_shear_modulus(E, nu)
+        print(self.G)
         self.E = E
         self.nu = nu
 

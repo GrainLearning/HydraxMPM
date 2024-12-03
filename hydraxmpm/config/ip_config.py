@@ -27,9 +27,7 @@ class IPConfig(eqx.Module):
         project: str = "",
         **kwargs: Generic,
     ):
-        jax.debug.print(
-            "Ignore the UserWarning from, the behavior is intended and expected."
-        )
+
         # total_time: jnp.float32
         self.dim = dim
 

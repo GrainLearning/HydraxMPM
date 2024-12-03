@@ -108,7 +108,7 @@ def io_vtk_callback(
             material_stack,
             forces_stack,
         ) = carry
-
+        jax.debug.print("{}",step)
         if step < start_output:
             return
         position_stack = particles.position_stack

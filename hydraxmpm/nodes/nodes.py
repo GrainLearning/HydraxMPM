@@ -18,7 +18,7 @@ class Nodes(Grid):
     def __init__(
         self: Self,
         config: MPMConfig = None,
-        small_mass_cutoff: float = 1e-12,
+        small_mass_cutoff: float = 1e-10,
     ) -> Self:
         self.mass_stack = jnp.zeros((config.num_cells), device=config.device)
         self.moment_stack = jnp.zeros(

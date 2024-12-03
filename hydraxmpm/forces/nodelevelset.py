@@ -6,6 +6,7 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from matplotlib.pyplot import sca
 from typing_extensions import Self
 
 from ..config.mpm_config import MPMConfig
@@ -27,7 +28,7 @@ class NodeLevelSet(Forces):
         id_stack: chex.Array = None,
         velocity_stack: chex.Array = None,
         mu: float = 0.0,
-        thickness=2,
+        thickness=4,
     ):
         """Initialize the rigid particles."""
 
@@ -91,113 +92,128 @@ class NodeLevelSet(Forces):
         nodes: Nodes,
         step: int = 0,
     ):
-        @partial(jax.vmap, in_axes=(0, 0))
-        def vmap_selected_nodes(n_id, levelset_vel):
-            normal = nodes.normal_stack.at[n_id].get()
-            moment_nt = nodes.moment_nt_stack.at[n_id].get()
-            mass = nodes.mass_stack.at[n_id].get()
+        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0,0), out_axes=(0, 0))
+        def vmap_selected_nodes(n_id, levelset_vel, moment_nt, moment, mass,normal):
+            # normal = nodes.normal_stack.at[n_id].get()
+            # scalar_norm = jnp.linalg.vector_norm(normal)
 
-            scalar_norm = jnp.linalg.vector_norm(normal)
+            def calculate_velocity(mom):
+                # check if the velocity direction of the normal and apply contact
+                # dot product is 0 when the vectors are orthogonal
+                # and 1 when they are parallel
+                # if othogonal no contact is happening
+                # if parallel the contact is happening
 
-            small_node_cut_off = mass > nodes.small_mass_cutoff
+                # vel = mom / mass
 
-            # def give_moment(normal):
-                # skip the nodes with small mass, due to numerical instability
-                # vel_nt = moment_nt / mass
-                # normal =  normal/ scalar_norm
+                vel = jax.lax.cond(
+                    mass > nodes.small_mass_cutoff,
+                    lambda x: x / mass,
+                    lambda x: jnp.zeros_like(x),
+                    mom,
+                )
 
-            vel_nt = jax.lax.cond(
-                mass > nodes.small_mass_cutoff,
-                lambda x: x / mass,
-                lambda x: jnp.zeros_like(x),
-                moment_nt,
-            )
+                normal_hat = jax.lax.cond(
+                    mass > nodes.small_mass_cutoff,
+                    lambda x: x / jnp.linalg.vector_norm(x),
+                    lambda x: jnp.zeros_like(x),
+                    normal,
+                )
+                normal_hat = jnp.nan_to_num(normal_hat)
 
-            # normalize the normals
-            normal = jax.lax.cond(
-                mass > nodes.small_mass_cutoff,
-                lambda x: x / jnp.linalg.vector_norm(x),
-                lambda x: jnp.zeros_like(x),
-                normal,
-            )
+                # normal_hat =normal/scalar_norm
 
+                norm_padded = jnp.pad(
+                    normal_hat,
+                    self.config.padding,
+                    mode="constant",
+                    constant_values=0,
+                )
+                delta_vel = vel - levelset_vel
 
-            # check if the velocity direction of the normal and apply contact
-            # dot product is 0 when the vectors are orthogonal
-            # and 1 when they are parallel
-            # if othogonal no contact is happening
-            # if parallel the contact is happening
-            delta_vel = vel_nt - levelset_vel
+                delta_vel_padded = jnp.pad(
+                    delta_vel,
+                    self.config.padding,
+                    mode="constant",
+                    constant_values=0,
+                )
 
-            delta_vel_dot_normal = jnp.dot(delta_vel, normal)
+                delta_vel_dot_normal = jnp.dot(delta_vel, normal_hat)
 
-            delta_vel_padded = jnp.pad(
-                delta_vel,
-                self.config.padding,
-                mode="constant",
-                constant_values=0,
-            )
+                delta_vel_cross_normal = jnp.cross(
+                    delta_vel_padded, norm_padded
+                )  # works only for vectors of len
 
-            norm_padded = jnp.pad(
-                normal,
-                self.config.padding,
-                mode="constant",
-                constant_values=0,
-            )
-            delta_vel_cross_normal = jnp.cross(
-                delta_vel_padded, norm_padded
-            )  # works only for vectors of len 3
-            norm_delta_vel_cross_normal = jnp.linalg.vector_norm(
-                delta_vel_cross_normal
-            )
+                norm_delta_vel_cross_normal = jnp.linalg.vector_norm(
+                    delta_vel_cross_normal
+                )
 
-            omega = delta_vel_cross_normal / norm_delta_vel_cross_normal
+                omega = delta_vel_cross_normal / norm_delta_vel_cross_normal
 
-            mu_prime = jnp.minimum(
-                self.mu, norm_delta_vel_cross_normal / delta_vel_dot_normal
-            )
+                mu_prime = jnp.minimum(
+                    self.mu, norm_delta_vel_cross_normal / delta_vel_dot_normal
+                )
 
-            normal_cross_omega = jnp.cross(
-                norm_padded, omega
-            )  # works only for vectors of len 3
+                normal_cross_omega = jnp.cross(
+                    norm_padded, omega
+                )  # works only for vectors of len 3
 
-            tangent = (
-                (norm_padded + mu_prime * normal_cross_omega)
-                .at[: self.config.dim]
-                .get()
-            )
+                tangent = (
+                    (norm_padded + mu_prime * normal_cross_omega)
+                    .at[: self.config.dim]
+                    .get()
+                )
 
-            # sometimes tangent become nan if velocity is zero at initialization
-            # which causes problems
-            tangent = jnp.nan_to_num(tangent)
+                # sometimes tangent become nan if velocity is zero at initialization
+                # which causes problems
+                tangent = jnp.nan_to_num(tangent)
 
-            new_nodes_vel_nt = jax.lax.cond(
-                delta_vel_dot_normal > 0.0,
-                lambda x: x - delta_vel_dot_normal * tangent,
-                # lambda x: x - delta_vel_dot_normal*normal, # no friction debug
-                lambda x: x,
-                vel_nt,
-            )
+                return jax.lax.cond(
+                    (delta_vel_dot_normal > 0.0),
+                    lambda x: x - delta_vel_dot_normal * tangent,
+                    # lambda x: x
+                    # - delta_vel_dot_normal
+                    # * normal_hat,  # uncomment for debug, no friction
+                    lambda x: x,
+                    vel,
+                )
 
-            node_moments_nt = new_nodes_vel_nt * mass
+            vel_nt = calculate_velocity(moment_nt)
+    
+            node_moment_nt = vel_nt * mass
 
-            return node_moments_nt
+    
+            vel = calculate_velocity(moment)
+            node_moment = vel * mass
 
-            # return give_moment(normal)
-            # return jax.lax.cond(
-            #     small_node_cut_off,
-            #     # * (scalar_norm > 0.0),
-            #     give_moment,
-            #     lambda x: jnp.zeros_like(x),
-            #     normal
-            # )
+            return node_moment, node_moment_nt
 
-        levelset_moment_stack = vmap_selected_nodes(self.id_stack, self.velocity_stack)
+        levelset_moment_stack, levelset_moment_nt_stack = vmap_selected_nodes(
+            self.id_stack,
+            self.velocity_stack,
+            nodes.moment_nt_stack.at[self.id_stack].get(),
+            nodes.moment_stack.at[self.id_stack].get(),
+            nodes.mass_stack.at[self.id_stack].get(),
+            nodes.normal_stack.at[self.id_stack].get(),
+        )
 
+        new_moment_stack = nodes.moment_stack.at[self.id_stack].set(
+            levelset_moment_stack
+        )
+
+        new_moment_nt_stack = nodes.moment_nt_stack.at[self.id_stack].set(
+            levelset_moment_nt_stack
+        )
+
+        # new_nodes = eqx.tree_at(
+        #     lambda state: (state.moment_nt_stack,state.moment_stack),
+        #     nodes,
+        #     (new_moment_nt_stack,new_moment_stack),
+        # )
+        
         new_nodes = eqx.tree_at(
             lambda state: (state.moment_nt_stack),
             nodes,
-            (nodes.moment_nt_stack.at[self.id_stack].set(levelset_moment_stack)),
+            (new_moment_nt_stack),
         )
-
         return new_nodes, self
