@@ -2,8 +2,9 @@ site_name: HydraxMPM
 nav:
   - Introduction: index.md
   - Installation: installing.md
-  # - Usage: usage/index.md
-  # - Basic API:
+  - Usage: usage/index.md
+  - Basic API:
+      - Config: api/config.md
     # - Particles: api/particles.md
     # - Shapefunctions: api/shapefunctions.md
   # - Examples: 
@@ -64,8 +65,15 @@ plugins:
             ignore_init_summary: false
             trim_doctest_flags: true
             relative_crossrefs: true
-            show_if_no_docstring: false
             show_docstring_modules: false
+          # rendering:
+            show_root_heading: true  # actually display anything at all...
+            show_root_full_path: true  # display "optimistix.asdf" not just "asdf"
+            show_if_no_docstring: false
+            show_signature_annotations: false
+            show_source: false  # don't include source code
+            members_order: source  # order methods according to their order of definition in the source code, not alphabetical order
+            heading_level: 4
             # docstring_section_style: list
           #   show_if_no_docstring: true
           #   show_source: false  # don't include source code

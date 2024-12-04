@@ -1,6 +1,6 @@
 [project]
 name = "hydraxmpm"
-version = "0.1.0"
+version = "0.0.1"
 description = "A simple Material Point Method solver in JAX"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,8 +24,7 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering",
-    "Development Status :: 2 - Pre-Alpha",
-    "Private :: Do Not Upload"
+    "Development Status :: 2 - Pre-Alpha"
 ]
 urls = {repository = "https://github.com/GrainLearning/HydraxMPM" }
 
@@ -55,6 +54,7 @@ dev = [
     "mkdocstrings-python>=1.12.2",
     "pytest>=8.3.3",
     "ruff>=0.7.3",
+    "twine>=6.0.1",
 ]
 plot = [
     "imageio>=2.36.0",

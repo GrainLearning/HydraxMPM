@@ -19,8 +19,6 @@ def _numpy_tuple_deep(x: np.ndarray) -> tuple:
     return tuple(map(_numpy_tuple, x))
 
 
-
-
 class MPMConfig(eqx.Module):
     inv_cell_size: float = eqx.field(static=True, converter=lambda x: float(x))
 
@@ -51,8 +49,8 @@ class MPMConfig(eqx.Module):
     dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
 
     project: str = eqx.field(static=True, converter=lambda x: str(x))
-    
-    device: jax.Device  = eqx.field(static=True)
+
+    device: jax.Device = eqx.field(static=True)
 
     def __init__(
         self: Self,
@@ -60,17 +58,36 @@ class MPMConfig(eqx.Module):
         end: list,
         cell_size: float,
         num_points: int = 0,
-        shapefunction: str = "linear",
+        shapefunction: str = "cubic",
         ppc=1,
         num_steps=0,
         store_every=0,
         dt=0.0,
-        unroll_grid_kernels=True,
         default_gpu_id: int = None,
         project: str = "",
-        device = None,
+        device=None,
         **kwargs: Generic,
     ):
+        """
+        **Args:**
+            origin: domain start.
+            end: domain end.
+            cell_size: cell size of regular grid.
+            num_points: number of material points. Defaults to 0.
+            shapefunction: shapefunction type.
+                Use either "linear" or "cubic".
+                Defaults to "cubic".
+            ppc: number of particles discretized per cell. Defaults to 1.
+            num_steps: number of steps to run. Defaults to 0.
+            store_every: output every nth step. Defaults to 0.
+            dt: constant time step. Defaults to 0.0.
+            default_gpu_id: default gpu to run on. Defaults to None.
+            project: project name. Defaults to "".
+            device: device ids or multi-gpu ids.
+                This feature is being developed.
+                Defaults to None.
+
+        """
         self.inv_cell_size = 1.0 / cell_size
         self.grid_size = ((np.array(end) - np.array(origin)) / cell_size + 1).astype(
             int
@@ -119,13 +136,14 @@ class MPMConfig(eqx.Module):
         self.dir_path = os.path.dirname(file) + "/"
 
         self.project = project
-        
+
         self.device = device
-        
+
         if default_gpu_id:
             set_default_gpu(default_gpu_id)
 
     def print_summary(self):
+        """Print a basic summary of the config"""
         print("=" * 50)
         print("Config summary")
         print("=" * 50)
@@ -139,10 +157,5 @@ class MPMConfig(eqx.Module):
         print(f"[MPMConfig] dt = {self.dt}")
         print(f"[MPMConfig] total time = {self.dt*self.num_steps}")
         print("=" * 50)
-        
-        # TODO print sharding
 
-        # print(f"Number of logical devices: {len(devices)}")
-        # print(f"Shape of device array    : {devices.shape}")
-        # print(f"\nMesh     : {mesh}")
-        # print(f"Sharding : {sharding}\n\n")
+        # TODO print sharding
