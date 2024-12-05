@@ -4,6 +4,7 @@ from functools import partial
 import os
 import time
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -93,8 +94,20 @@ particles, nodes = _discretize(config=config, particles=particles, nodes=nodes)
 # # get reference solid volume fraction particle mass  /volume
 # phi_ref_stack = particles.get_phi_stack(rho_p)
 
-stress_ref_stack = particles.get_stress_stack()
-p_ref_stack = stress_ref_stack.trace() / 3
+particles, nodes = hdx.discretize(config, particles, nodes, density_ref=rho)
+
+p_ref = 10
+
+def get_stress_ref(xs):
+    return -p_ref * jnp.eye(3)
+
+stress_ref_stack = jax.vmap(get_stress_ref)(jnp.ones(config.num_points))
+
+particles = eqx.tree_at(
+    lambda state: (state.stress_stack),
+    particles,
+    (stress_ref_stack),
+)
 
 # define a modified cam clay material
 _mcc = partial(hdx.ModifiedCamClay,
@@ -103,7 +116,7 @@ _mcc = partial(hdx.ModifiedCamClay,
                R=1,
                lam=0.0186,
                kap=0.0010,
-               p_ref_stack=p_ref_stack,
+               p_ref_stack=p_ref * jnp.ones(config.num_points),
                rho_p=rho_p,
                )
 # instantiate an MCC material
@@ -186,6 +199,7 @@ def io_vtk(carry, step):
 
 # Run solver
 carry = hdx.run_solver_io(
+    config=config,
     solver=solver,
     particles=particles,
     nodes=nodes,
@@ -196,10 +210,10 @@ carry = hdx.run_solver_io(
 
 print("--- %s seconds ---" % (time.time() - start_time))
 (
+    config,
     solver,
     particles,
     nodes,
-    shapefunctions,
     material_stack,
     forces_stack,
 ) = carry
