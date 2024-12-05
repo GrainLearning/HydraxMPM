@@ -158,3 +158,11 @@ class Particles(eqx.Module):
         """
         density_stack = self.mass_stack / self.volume_stack
         return density_stack / rho_p
+
+    def get_stress_stack(self: Self) -> chex.Array:
+        """Get stress stack
+
+        Returns:
+            chex.Array: stress stack
+        """
+        return self.stress_stack
