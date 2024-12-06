@@ -36,7 +36,7 @@ def io_material_point_callback(
         if step < start_output:
             return
 
-        jax.debug.print("step {}", step)
+        # jax.debug.print("step {}", step)
 
         for mi, material in enumerate(material_stack):
             mat_out_dict = {}
@@ -108,7 +108,7 @@ def io_vtk_callback(
             material_stack,
             forces_stack,
         ) = carry
-        jax.debug.print("{}",step)
+        # jax.debug.print("{}",step)
         if step < start_output:
             return
         position_stack = particles.position_stack
@@ -124,7 +124,7 @@ def io_vtk_callback(
 
         cloud = pv.PolyData(np.array(position_3D_stack))
 
-        jax.debug.print("step {}", step)
+        # jax.debug.print("step {}", step)
 
         for key in material_output:
             for material in material_stack:

@@ -6,7 +6,7 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from matplotlib.pyplot import sca
+
 from typing_extensions import Self
 
 from ..config.mpm_config import MPMConfig
@@ -28,7 +28,7 @@ class NodeLevelSet(Forces):
         id_stack: chex.Array = None,
         velocity_stack: chex.Array = None,
         mu: float = 0.0,
-        thickness=4,
+        thickness=2,
     ):
         """Initialize the rigid particles."""
 

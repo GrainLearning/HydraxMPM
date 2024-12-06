@@ -16,7 +16,7 @@ from ..particles.particles import Particles
 from ..utils.jax_helpers import scan_kth
 from .solver import Solver
 from .usl import USL
-
+from jax_tqdm import scan_tqdm
 
 @partial(
     jax.jit,
@@ -84,6 +84,8 @@ def run_solver(
     if forces_output is None:
         forces_output = ()
 
+    
+    @scan_tqdm(config.num_steps)
     def scan_fn(carry, control):
         (
             prev_step,
@@ -155,7 +157,6 @@ def run_solver(
         unroll=False,
     )
 
-
 @partial(
     jax.jit,
     static_argnames=("config", "callbacks"),
@@ -183,6 +184,7 @@ def run_solver_io(
 
         return carry
 
+    @scan_tqdm(config.num_steps)
     def scan_fn(carry, step):
         step_next = step + config.store_every
         solver, particles, nodes, material_stack, forces_stack = jax.lax.fori_loop(
