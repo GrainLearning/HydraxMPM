@@ -5,7 +5,7 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from typing_extensions import Self
+from typing_extensions import Self, Sequence
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -22,8 +22,17 @@ class USL_ASFLIP(Solver):
     Dp: chex.Array
     Dp_inv: chex.Array
     Bp_stack: chex.Array
+    constraint_axes: int = eqx.field(static=True)
 
-    def __init__(self, config, alpha=1.0, phi_c=0.5, beta_min=0.0, beta_max=0.0):
+    def __init__(
+        self,
+        config,
+        alpha=1.0,
+        phi_c=0.5,
+        beta_min=0.0,
+        beta_max=0.0,
+        constraint_axes=None,
+    ):
         # jax.debug.print("USL_APIC solver supported for cubic shape functions only")
         self.Dp = (1.0 / 3.0) * config.cell_size * config.cell_size * jnp.eye(3)
 
@@ -36,6 +45,7 @@ class USL_ASFLIP(Solver):
         self.phi_c = phi_c
         self.beta_min = beta_min
         self.beta_max = beta_max
+        self.constraint_axes = constraint_axes
         super().__init__(config)
 
     def update(self, particles, nodes, material_stack, forces_stack, step):
@@ -50,7 +60,7 @@ class USL_ASFLIP(Solver):
                 step=step,
             )
             new_forces_stack.append(new_forces)
-            
+
         forces_stack = new_forces_stack
 
         nodes = self.p2g(particles=particles, nodes=nodes)
@@ -64,11 +74,10 @@ class USL_ASFLIP(Solver):
                 step=step,
             )
             new_forces_stack.append(new_forces)
-            
+
         forces_stack = new_forces_stack
 
         particles, self = self.g2p(particles=particles, nodes=nodes)
-
 
         new_material_stack = []
         for material in material_stack:
@@ -242,14 +251,21 @@ class USL_ASFLIP(Solver):
             vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
 
             p_Bp_next = jnp.sum(intr_Bp, axis=0)
+
             if self.config.dim == 2:
-                p_Bp_next = p_Bp_next.at[2, 2].set(0)
+                p_Bp_next = p_Bp_next.at[2, 2].set(0.0)
 
             T = self.alpha * (p_velocities + delta_vels - vels_nt)
             p_velocities_next = vels_nt + T
 
             if self.config.dim == 2:
-                p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
+                p_velgrads_next = p_velgrads_next.at[2, 2].set(0.0)
+
+            # if self.constraint_axes is not None:
+            #     p_velocities_next = p_velocities_next.at[self.constraint_axes].set(0.0)
+            #     p_velgrads_next = p_velgrads_next.at[
+            #         self.constraint_axes, self.constraint_axes
+            #     ].set(0.0)  # delete
 
             p_F_next = (jnp.eye(3) + p_velgrads_next * self.config.dt) @ p_F
 
@@ -264,7 +280,10 @@ class USL_ASFLIP(Solver):
             Beta_p = jax.lax.cond(
                 phi < self.phi_c, lambda: self.beta_max, lambda: self.beta_min
             )
-            p_positions_next = p_positions + (vels_nt + Beta_p * T) * self.config.dt
+
+            vel_update = vels_nt + Beta_p * T
+
+            p_positions_next = p_positions + vel_update * self.config.dt
 
             return (
                 p_velocities_next,

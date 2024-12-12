@@ -1,11 +1,12 @@
 import os
 import sys
 
+import dataclasses
+
 import equinox as eqx
+import jax
 import numpy as np
 from typing_extensions import Generic, Self
-
-import jax
 
 from ..utils.jax_helpers import set_default_gpu
 
@@ -156,3 +157,6 @@ class MPMConfig(eqx.Module):
         print("~" * 75)
 
         # TODO print sharding
+
+    def replace(self,**kwargs: Generic):
+        return dataclasses.replace(self,**kwargs)

@@ -1,8 +1,11 @@
+import dataclasses
+
 import chex
 import equinox as eqx
-import jax.numpy as jnp
-from typing_extensions import Optional, Self
 import jax
+import jax.numpy as jnp
+from typing_extensions import Optional, Self, Generic
+
 from ..config.mpm_config import MPMConfig
 
 
@@ -48,6 +51,7 @@ class Particles(eqx.Module):
         stress_stack: Optional[chex.Array] = None,
         force_stack: Optional[chex.Array] = None,
         F_stack: Optional[chex.Array] = None,
+        volume0_stack: Optional[chex.Array] = None,
     ) -> Self:
         """
         Args:
@@ -132,9 +136,9 @@ class Particles(eqx.Module):
     def refresh(self) -> Self:
         """Zero velocity gradient"""
         return eqx.tree_at(
-            lambda state: (state.L_stack,state.force_stack),
+            lambda state: (state.L_stack, state.force_stack),
             self,
-            (self.L_stack.at[:].set(0.0),self.force_stack.at[:].set(0.0)),
+            (self.L_stack.at[:].set(0.0), self.force_stack.at[:].set(0.0)),
         )
 
     def calculate_volume(self: Self):
@@ -159,10 +163,5 @@ class Particles(eqx.Module):
         density_stack = self.mass_stack / self.volume_stack
         return density_stack / rho_p
 
-    def get_stress_stack(self: Self) -> chex.Array:
-        """Get stress stack
-
-        Returns:
-            chex.Array: stress stack
-        """
-        return self.stress_stack
+    def replace(self, **kwargs: Generic):
+        return dataclasses.replace(self, **kwargs)

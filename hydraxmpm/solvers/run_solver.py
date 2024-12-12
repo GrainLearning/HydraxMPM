@@ -18,6 +18,7 @@ from .solver import Solver
 from .usl import USL
 from jax_tqdm import scan_tqdm
 
+
 @partial(
     jax.jit,
     static_argnames=(
@@ -84,7 +85,6 @@ def run_solver(
     if forces_output is None:
         forces_output = ()
 
-    
     @scan_tqdm(config.num_steps)
     def scan_fn(carry, control):
         (
@@ -157,9 +157,10 @@ def run_solver(
         unroll=False,
     )
 
+
 @partial(
     jax.jit,
-    static_argnames=("config", "callbacks"),
+    static_argnames=("config", "callbacks", "unroll"),
 )
 def run_solver_io(
     config: MPMConfig,
@@ -169,10 +170,14 @@ def run_solver_io(
     material_stack: List[Material],
     forces_stack: List[Forces] = None,
     callbacks: Tuple[Callable] = None,
+    unroll: bool = False,
 ) -> Tuple[
     Tuple[Particles, Nodes, List[Material], List[Forces]],
     Tuple[Solver, chex.Array],
 ]:
+    if callbacks is None:
+        callbacks = ()
+
     def main_loop(step, carry):
         solver, particles, nodes, material_stack, forces_stack = carry
 
@@ -198,8 +203,7 @@ def run_solver_io(
             material_stack,
             forces_stack,
         )
-        
- 
+
         for callback in callbacks:
             callback(carry, step_next)
 
@@ -211,7 +215,7 @@ def run_solver_io(
         scan_fn,
         (solver, particles, nodes, material_stack, forces_stack),
         xs=xs,
-        unroll=False,
+        unroll=unroll,
     )
 
-    return carry
+    return carry, accumulate
