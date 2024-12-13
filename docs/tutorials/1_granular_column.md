@@ -1,5 +1,4 @@
 <!-- Fix code structure -->
-<!-- Fix link to github tutorial -->
 <!-- Add learning objective -->
 <!-- add images /gifs -->
 # Tutorial 1. Granular column collapse
@@ -13,7 +12,7 @@ Before starting, please make sure that you have completed the following items:
 3. Read through an overview of the [code structure]()
 4. Have [Paraview](https://www.paraview.org/download/)
 
-It is recommended that you follow along with the tutorial. Stuck or in a rush? then see code available in GitHub under [/tutorials/t1_granular_column.py]().
+It is recommended that you follow along with the tutorial. Stuck or in a rush? then see code available in GitHub under [/tutorials/t1_granular_column.py](https://github.com/GrainLearning/HydraxMPM/blob/main/tutorials/t1_granular_column.py).
 
 ## Learning objectives
 
@@ -39,7 +38,7 @@ The output is stored as [vtk](https://docs.vtk.org/en/latest/design_documents/VT
 
 ## Step 2: import modules
 
-Import HydraxMPM and supporting JAX dependencies. 
+Import HydraxMPM and supporting the JAX dependencies. 
 
 ```python {hl_lines="3"}
 
@@ -47,13 +46,11 @@ Import HydraxMPM and supporting JAX dependencies.
 
 ```
 
-HydraxMPM is top-level package, containing the bits and pieces under the same namespace, e.g., `hdx.Particles` or `hdx.Gravity`.
+HydraxMPM is top-level package. It contains all the bits and pieces under the same namespace, e.g., `hdx.Particles` or `hdx.Gravity`.
 
 ## Step 3: create points representing initial granular column
 
-Create rectangular column a rectangular column of material points.
-
-We pad the material body so material points do not touch the boundary. Particles are spaced evenly given a cell size and particles per cell (in one direction).
+Create rectangular column a rectangular column of material points. Particles are spaced evenly given a cell size and the number of particles per cell (in one direction). We pad so that material points do not touch the boundary. 
 
 ```python 
 
@@ -88,15 +85,15 @@ This is a juicy sandwich of all common general simulation parameters.
  - `hdx.MPMConfig` is the config dataclass used for all MPM simulations.
  - `origin` contains start x and y coordinates of the domain boundary
  - `end` contains end x and y coordinates of the domain
- - `project` the name of the project - mainly used for output purposes
+ - `project` is the name of the project - mainly used for output purposes
  - `ppc` is the number of particles per cell (in one direction). this is only used in `hdx.discretize` function (more on that later)
- - `cell_size` background grid grid cell size
- - `num_points` number of material points
- - `shapefunction` two shapefunctions, either `linear` or `cubic` cubic is better in most cases.
- - `num_steps` counting all iterations to do
- - `store_every` plot every nth step
+ - `cell_size` is background grid cell size
+ - `num_points` is number of material points
+ - `shapefunction` the interpolation type from particle to grid. Two shapefunctions are supported, either `linear` or `cubic`. Cubic is better in most cases.
+ - `num_steps` the total iteration count
+ - `store_every` output every nth step
  - `default_gpu_id` if you are working on a shared GPU workstation, this is the parameter you change to avoid making the other person(s) angry! Run `nvidia-smi`, in your terminal to find the id of an empty GPU. 
- - `dt` constant time step
+ - `dt` is a constant time step
  - `file=__file__` this records the path of your driver script, which is important to save relative output in the correct folder.
 
 <!-- TODO fix dixtize docs -->
@@ -115,7 +112,7 @@ Lets see the summary of the config
 --8<-- "t1_granular_column.py:38:38"
 
 ```
-If all went well you should get this output:
+If all went well you should get the following output:
 
 ```
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -133,30 +130,45 @@ total time: 12.000000000000002
 
 
 
-## Step 4: create Material
+## Step 4: create the `Material`
 
 Lets create a material with some initial bulk density and a particle density
 
 ```python 
 
---8<-- "t1_granular_column.py:40:56"
+--8<-- "t1_granular_column.py:40:44"
 
 ```
 
-Lets break it down:
+Now the material dataclass
 
-1. All basic material e.g., `hdx.ModifiedCamClay`, are initialized in a similar manner
-2. Notice we pass the `config` along, this helps to create a static background grid of a fixed size.
-3. Constitutive model parameters are chosen at random, and they have a big impact of the simulation.
+```python 
 
-!!! Tip
+--8<-- "t1_granular_column.py:45:56"
+
+```
+
+Lets break this down:
+
+- `hdx.ModifiedCamClay` is the Modified Cam Clay material class
+- We always pass `config` along when creating HydraxMPM dataclasses.
+- The only non-parameter input is the reference solid volume fraction. 
+
+
+!!! Tip 
+    Materials in HydraxMPM are normally initialize either with a reference pressure or reference solid volume fraction. Given one, we can find the other.
+
+??? Tip
     Material may be used in MPM analysis or single integration analysis. Sometimes its good to do both
 
 
 
-## Step 5: create Nodes and Particles classes
+## Step 5: create  the `Nodes` and `Particles`  data classes
 
-Ah here we make use of JAX vmap feature. We create a symmetric stress tensor given a hydrostatic pressure.
+We initialize particle stresses to match the known pressure state, given a predefined solid-volume fraction above. 
+
+
+Here we finally make use of JAX [vmap](https://jax.readthedocs.io/en/latest/_autosummary/jax.vmap.html), to get the stress tensor. 
 
 ```python 
 
@@ -164,14 +176,13 @@ Ah here we make use of JAX vmap feature. We create a symmetric stress tensor giv
 
 ```
 
-Initial positions and stresses are used to initialize the `hdx.Particles` class
-
+Pass all positions and stresses to the `Particles` dataclass.
 ```python 
 
 --8<-- "t1_granular_column.py:63:65"
 
 ```
-and background nodes
+We can create background grid nodes via the config.
 
 ```python 
 
@@ -179,35 +190,41 @@ and background nodes
 
 ```
 
-
-## Step 6: create Forces
-
-The first force is a slow linear ramp gravity
+The `discretize` function determines initial particle volume by dividing the number of particles in a cell by the cell size.
 ```python 
 
---8<-- "t1_granular_column.py:69:74"
-
-```
-Boundary so particles do not fall through, we are using 0 friction.
-```python 
-
---8<-- "t1_granular_column.py:75:77"
+--8<-- "t1_granular_column.py:69:72"
 
 ```
 
 
+## Step 6: create the `Gravity` and `Domain`
 
-## Step 7: create Solver
+Gravity is slowly ramped up 
 
-The solver is the bread and butter of the code. 
 ```python 
 
---8<-- "t1_granular_column.py:75:77"
+--8<-- "t1_granular_column.py:73:77"
 
 ```
 
+Creating the outside domain box.
 
+```python 
 
+--8<-- "t1_granular_column.py:79:81"
+
+```
+
+## Step 7: create the `Solver`
+
+The solver determines how the background grid and material points interact.
+
+```python 
+
+--8<-- "t1_granular_column.py:82:82"
+
+```
 
 ??? Tip
     We recommend using the `hdx.ASFLIP` for granular  materials
@@ -218,12 +235,31 @@ The solver is the bread and butter of the code.
 - See [available callback functions]()
 
 
+```python 
+
+--8<-- "t1_granular_column.py:84:104"
+
+```
+
 
 
 ## Step 9: Modify script to incorporate collapse
 
 
 
+```python 
+
+--8<-- "t1_granular_column.py:108:121"
+
+```
+
 
 ## Step 10: Granular column collapse
 
+
+
+```python 
+
+--8<-- "t1_granular_column.py:125:143"
+
+```

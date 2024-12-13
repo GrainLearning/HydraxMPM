@@ -9,12 +9,12 @@ column_width = 0.3  # [m]
 column_height = 0.4  # [m]
 ppc = 2
 
-# domain
+
 cell_size = 0.025  # [m]
 sep = cell_size / ppc
 padding = 4.5 * sep
 
-# create column in center of particles with padding
+# create padded meshgrid of positions 
 x = jnp.arange(0, column_width + sep, sep) + padding - sep 
 y = jnp.arange(0, column_height + sep, sep) + padding - sep
 xv, yv = jnp.meshgrid(x, y)
@@ -66,21 +66,20 @@ particles = hdx.Particles(
 
 nodes = hdx.Nodes(config)
 
+particles, nodes = hdx.discretize(
+    config=config, particles=particles, nodes=nodes, density_ref=rho_0
+)
+
 stop_ramp_step = config.num_steps
 
 increment = jnp.array([0.0, -9.8]) / stop_ramp_step
 
 gravity = hdx.Gravity(config=config, increment=increment, stop_ramp_step=stop_ramp_step)
 
-# Add domain boundary
 box = hdx.NodeLevelSet(config, mu=0.0)
 
-particles, nodes = hdx.discretize(
-    config=config, particles=particles, nodes=nodes, density_ref=rho_0
-)
 
-solver = hdx.USL_ASFLIP(config, constraint_axes=0)
-
+solver = hdx.USL_ASFLIP(config)
 
 print("Start gravity pack")
 carry, accumulate = hdx.run_solver_io(
@@ -103,6 +102,8 @@ carry, accumulate = hdx.run_solver_io(
 
 solver, particles, new_nodes, material_stack, forces_stack = carry
 print("Gravity pack done")
+
+# updating domain, gravity, and boundary
 
 config = config.replace(
     origin=jnp.array([0.0, 0.0]),

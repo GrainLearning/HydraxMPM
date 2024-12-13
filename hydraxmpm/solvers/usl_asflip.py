@@ -22,7 +22,6 @@ class USL_ASFLIP(Solver):
     Dp: chex.Array
     Dp_inv: chex.Array
     Bp_stack: chex.Array
-    constraint_axes: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -31,9 +30,8 @@ class USL_ASFLIP(Solver):
         phi_c=0.5,
         beta_min=0.0,
         beta_max=0.0,
-        constraint_axes=None,
     ):
-        # jax.debug.print("USL_APIC solver supported for cubic shape functions only")
+        
         self.Dp = (1.0 / 3.0) * config.cell_size * config.cell_size * jnp.eye(3)
 
         self.Dp_inv = jnp.linalg.inv(self.Dp)
@@ -45,7 +43,6 @@ class USL_ASFLIP(Solver):
         self.phi_c = phi_c
         self.beta_min = beta_min
         self.beta_max = beta_max
-        self.constraint_axes = constraint_axes
         super().__init__(config)
 
     def update(self, particles, nodes, material_stack, forces_stack, step):
@@ -260,12 +257,6 @@ class USL_ASFLIP(Solver):
 
             if self.config.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0.0)
-
-            # if self.constraint_axes is not None:
-            #     p_velocities_next = p_velocities_next.at[self.constraint_axes].set(0.0)
-            #     p_velgrads_next = p_velgrads_next.at[
-            #         self.constraint_axes, self.constraint_axes
-            #     ].set(0.0)  # delete
 
             p_F_next = (jnp.eye(3) + p_velgrads_next * self.config.dt) @ p_F
 
