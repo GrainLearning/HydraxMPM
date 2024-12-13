@@ -87,7 +87,6 @@ def scan_kth(f, init, xs=None, reverse=False, unroll=1, store_every=1):
 
     def f_outer(carry, xs):
         carry, ys = jax.lax.scan(f, carry, xs=xs, **kwds)
-        jax.debug.print("step {} \r", xs[-1])
         return carry, [yss[-1] for yss in ys]
 
     return jax.lax.scan(f_outer, init, xs=xs, **kwds)

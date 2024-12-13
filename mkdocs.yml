@@ -1,9 +1,16 @@
 site_name: HydraxMPM
+site_description: Documentation for the HydraxMPM.
+site_author: Retief Lubbe
+
+repo_url: https://github.com/GrainLearning/HydraxMPM
+repo_name: GrainLearning/HydraxMPM
+
 nav:
-  - Introduction: index.md
-  - Installation: installing.md
-  - Usage: usage/index.md
-  - Basic API:
+  - 'index.md'
+  - Tutorials: tutorials/1_granular_column.md
+  - How-to: 
+    - Initialize material points: how-tos/initialize_material_points.md
+  - API:
       - Config: api/config.md
     # - Particles: api/particles.md
     # - Shapefunctions: api/shapefunctions.md
@@ -15,12 +22,25 @@ nav:
   #   - Math utils: api/math.md
   # - About: about.md
 
+strict: true  # Don't allow warnings during the build process
+
+
+watch:
+  - hydraxmpm
+  - tutorials
+
+extra_css:
+  - _static/extra.css
+
 theme:
     name: material
     palette:
-      primary: amber
+      primary: custom
       scheme: slate
-      accent: purple
+      toggle:
+        icon: material/brightness-7 
+        name: Switch to dark mode
+      accent: custom
       features:
         - navigation.sections
         - content.code.copy
@@ -31,7 +51,9 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      check_paths: true
+      base_path: [docs, tutorials]
   - pymdownx.superfences
   - admonition
   - def_list
@@ -46,7 +68,6 @@ extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
-extra_css: [extra.css]
 
 plugins:
   - search
@@ -55,22 +76,20 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [hydraxmpm,examples]
+          paths: [hydraxmpm,tutorials]
           options:
-            show_source: false
-            docstring_section_style: table
-            signature_crossrefs: true
+            docstring_section_style: list
+            # signature_crossrefs: true
             show_bases: false
             show_symbol_type_heading: true
-            ignore_init_summary: false
-            trim_doctest_flags: true
-            relative_crossrefs: true
-            show_docstring_modules: false
+            # ignore_init_summary: true
+            # trim_doctest_flags: true
+            # relative_crossrefs: true
+            # show_docstring_modules: false
           # rendering:
-            show_root_heading: true  # actually display anything at all...
-            show_root_full_path: true  # display "optimistix.asdf" not just "asdf"
-            show_if_no_docstring: false
-            show_signature_annotations: false
+            # show_root_full_path: true  # display "optimistix.asdf" not just "asdf"
+            # show_if_no_docstring: false
+            # show_signature_annotations: false
             show_source: false  # don't include source code
             members_order: source  # order methods according to their order of definition in the source code, not alphabetical order
             heading_level: 4

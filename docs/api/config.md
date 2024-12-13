@@ -1,8 +1,7 @@
-# Math utils
+# Configuration 
 
 A configuration data object is passed down to all `HydraxMPM` objects. This pre-allocates necessary memory for simulations.
 
-**Config Types**
 
 Two config types are available:
 
@@ -10,17 +9,6 @@ Two config types are available:
 * **`IPConfig`**: For single integration point element tests.
 
 
----
-
-**Material Point Method Config**
-
-::: config.mpm_config.MPMConfig
-        selection:
-            members:
-                - __init__
-
-                
-**Integration Point Config**
 
 
 !!! tip "Modifying config"
@@ -28,3 +16,15 @@ Two config types are available:
     Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla et euismod
     nulla. Curabitur feugiat, tortor non consequat finibus, justo purus auctor
     massa, nec semper lorem quam in massa.
+
+---
+
+## MPMConfig
+::: config.mpm_config.MPMConfig
+
+
+## IPConfig
+::: config.mpm_config.MPMConfig
+
+                
+**Integration Point Config**

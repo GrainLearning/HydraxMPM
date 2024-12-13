@@ -15,7 +15,7 @@ def discretize(
     config: MPMConfig,
     particles: Particles,
     nodes: Nodes,
-    density_ref: float = 1000,
+    density_ref,
 ) -> Tuple[Particles, Nodes]:
     """Discretize the domain.
 

@@ -1,8 +1,54 @@
+# Basic usage
+
+
+
+## Sampling particles
+
 <!-- 
-# Lets get going...
+
+
+- Sample in optimal integration point
+- Give an example
+
+
+- Can sample within a regid body, the STL must be a manifold
+- Give an example
+
+
+ -->
+
+## Rigid body contacts
+
+
+<!-- 
+
+- Give a ref on mesh contact algorithm used
+- Burgender and modified burgender
+
+## Generating mesh
+- Talk about mesh should be fine enough such that a particle fills cells
+
+###  Sampling on mesh
+
+- Talk about using sub division survace in blender
+- Give an example of how can be sampled ontop of mesh
+- Can be visualized using pyvista
+
+
+# Animations,
+
+- Talk om that animations can be generated using blended . chan file
+- Talk about euler angles, positons etc.
+- Mesh can start from outside the simulation domain (tip)
+
+ -->
+
+## Visualizing results
 
 
 
+
+<!-- 
 ## Setting up a solver
 
 There are several MPM solvers available. All solvers are explicit time integration and update stress last.

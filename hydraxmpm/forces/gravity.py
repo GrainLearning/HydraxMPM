@@ -31,6 +31,9 @@ class Gravity(Forces):
         particle_gravity = True
     ) -> Self:
         """Initialize Gravity force on Nodes."""
+        if gravity is None:
+            gravity = jnp.zeros(config.dim)
+            
         self.gravity = gravity
         self.increment = increment
         self.stop_ramp_step = stop_ramp_step

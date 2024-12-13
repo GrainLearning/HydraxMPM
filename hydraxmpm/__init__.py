@@ -9,6 +9,7 @@ from .forces.gravity import Gravity
 from .forces.nodelevelset import NodeLevelSet
 from .forces.rigidparticles import RigidParticles
 from .forces.outscope import OutScope
+
 # from .materials.druckerprager import DruckerPrager
 from .materials.druckerprager_ep import DruckerPragerEP as DruckerPragerEP
 from .materials.linearelastic import LinearIsotropicElastic
@@ -21,12 +22,12 @@ from .materials.modifiedcamclay import ModifiedCamClay
 from .materials.pg.uh import UH
 
 
-
 from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
+
 # from .materials.experimental.csuh import CSUH
 from .materials.experimental.mcc_curved_ncl import MCC_Curved_NCL
 from .materials.linearelastic import LinearIsotropicElastic
-from .materials.modifiedcamclay import ModifiedCamClay
+
 from .materials.mu_i_rheology_incompressible import MuI_incompressible
 from .materials.newtonfluid import NewtonFluid
 from .materials_analysis.mp_benchmarks import mp_benchmark_volume_control_shear
@@ -122,7 +123,11 @@ from .utils.math_helpers import (
     phi_to_e,
     phi_to_e_stack,
 )
-from .utils.mpm_callback_helpers import io_vtk_callback, io_material_point_callback
+from .utils.mpm_callback_helpers import (
+    io_vtk_callback,
+    io_material_point_callback,
+    io_movie_callback,
+)
 from .utils.mpm_domain_helpers import (
     discretize,
     fill_domain_with_particles,
