@@ -13,8 +13,7 @@ Forces (Rigid body contact, gravity, slip and no slip boundaries)
 ## Installation instructions
 - Install uv [here](https://docs.astral.sh/uv/getting-started/installation/)
 - Clone repository `git clone git@github.com:GrainLearning/HydraxMPM.git && cd HydraxMPM`
-- For GPU `uv sync --group plot`
-- For CPU `uv sync --group cpu plot`
+- Install dependencies `uv sync`
 - Run an example, e.g., `uv run examples/dambreak/dambreak.py`. Output is found in the `./examples/dambreak/` directory.
 
 

@@ -7,7 +7,9 @@ repo_name: GrainLearning/HydraxMPM
 
 nav:
   - 'index.md'
-  - Basic usage: usage/index.md
+  - Tutorials: tutorials/1_granular_column.md
+  - How-to: 
+    - Initialize material points: how-tos/initialize_material_points.md
   - API:
       - Config: api/config.md
     # - Particles: api/particles.md
@@ -25,6 +27,7 @@ strict: true  # Don't allow warnings during the build process
 
 watch:
   - hydraxmpm
+  - tutorials
 
 extra_css:
   - _static/extra.css
@@ -48,7 +51,9 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      check_paths: true
+      base_path: [docs, tutorials]
   - pymdownx.superfences
   - admonition
   - def_list
@@ -71,7 +76,7 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [hydraxmpm,examples]
+          paths: [hydraxmpm,tutorials]
           options:
             docstring_section_style: list
             # signature_crossrefs: true

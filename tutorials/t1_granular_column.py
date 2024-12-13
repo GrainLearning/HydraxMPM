@@ -2,7 +2,6 @@
 
 import jax
 import jax.numpy as jnp
-import matplotlib.pylab as plt
 import hydraxmpm as hdx
 
 # granular column
@@ -65,7 +64,6 @@ particles = hdx.Particles(
     config=config, position_stack=position_stack, stress_stack=stress_stack
 )
 
-# create background nodes
 nodes = hdx.Nodes(config)
 
 stop_ramp_step = config.num_steps
