@@ -108,7 +108,7 @@ print("Gravity pack done")
 config = config.replace(
     origin=jnp.array([0.0, 0.0]),
     end=jnp.array([1.2, 0.5]),
-    project="t1_collapse",
+    project="t2_collapse",
 )
 
 solver = hdx.USL_ASFLIP(config)
