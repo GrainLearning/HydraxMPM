@@ -20,7 +20,7 @@ def io_movie_callback(
     file_path=None,
 ):
     if file_path is None:
-        file_path = f"{config.dir_path }/output/{config.project}/movie.gif"
+        file_path = f"{config.dir_path }/{config.output_path}/{config.project}/movie.gif"
 
     if bbox_options is None:
         bbox_options = {}
@@ -155,7 +155,7 @@ def io_material_point_callback(
                 mat_out_dict[key] = X_stack
 
                 jnp.savez(
-                    f"{config.dir_path }/output/{config.project}/numpy_mat_{mi}_{step}",
+                    f"{config.dir_path }/{config.output_path}/{config.project}/numpy_mat_{mi}_{step}",
                     **mat_out_dict,
                 )
         particle_out_dict = {}
@@ -170,7 +170,7 @@ def io_material_point_callback(
 
             particle_out_dict[key] = X_stack
             jnp.savez(
-                f"{config.dir_path }/output/{config.project}/numpy_particle_{step}",
+                f"{config.dir_path }/{config.output_path}/{config.project}/numpy_particle_{step}",
                 **particle_out_dict,
             )
 
@@ -207,7 +207,7 @@ def io_vtk_callback(
             ).flatten()
         )
 
-        bbox.save(f"{config.dir_path }/output/{config.project}/box.vtk")
+        bbox.save(f"{config.dir_path }/{config.output_path}/{config.project}/box.vtk")
 
     def io_vtk(carry, step):
         (
@@ -285,7 +285,7 @@ def io_vtk_callback(
             rigid_cloud = pv.PolyData(np.array(rigid_position_stack))
 
             rigid_cloud.save(
-                f"{config.dir_path }/output/{config.project}/rigid_particles_{step}.vtk"
+                f"{config.dir_path }/{output_dir}/{config.project}/rigid_particles_{step}.vtk"
             )
 
     def callback(carry, step):

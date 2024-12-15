@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 import dataclasses
 
@@ -49,6 +50,8 @@ class MPMConfig(eqx.Module):
 
     dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
 
+    output_path: str = eqx.field(static=True, converter=lambda x: str(x))
+
     project: str = eqx.field(static=True, converter=lambda x: str(x))
 
     device: jax.Device = eqx.field(static=True)
@@ -65,6 +68,7 @@ class MPMConfig(eqx.Module):
         store_every: int = 0,
         dt: float = 0.0,
         default_gpu_id: int = None,
+        output_path: str = "output",
         project: str = "",
         device: int = None,
         **kwargs: Generic,
@@ -83,6 +87,7 @@ class MPMConfig(eqx.Module):
             dt: constant time step. Defaults to 0.0.
             default_gpu_id: default gpu to run on. Defaults to None.
             project: project name. Defaults to "".
+            output_path: output path relative to dir_path. Defaults to "output".
             device: sharding (not implemented yet). Defaults to None.
         """
 
@@ -132,6 +137,8 @@ class MPMConfig(eqx.Module):
             file = sys.argv[0]
 
         self.dir_path = os.path.dirname(file) + "/"
+        
+        self.output_path = output_path
 
         self.project = project
 
@@ -160,3 +167,14 @@ class MPMConfig(eqx.Module):
 
     def replace(self,**kwargs: Generic):
         return dataclasses.replace(self,**kwargs)
+    
+    def back_up_output(self):
+        output_path = f"{self.dir_path }/{self.output_path}"
+        if os.path.exists(output_path):
+            print(f'Moving existing output files into a backup directory\n')
+            timestamp = os.path.getmtime(output_path)
+            formatted_time = time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime(timestamp))
+            path = output_path.rstrip('/')
+            backup_dir = f'{path}_backup_{formatted_time}'
+            os.makedirs(backup_dir, exist_ok=True)
+            os.rename(output_path, backup_dir)
