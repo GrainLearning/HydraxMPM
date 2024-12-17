@@ -92,8 +92,8 @@ class NodeLevelSet(Forces):
         nodes: Nodes,
         step: int = 0,
     ):
-        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0,0), out_axes=(0, 0))
-        def vmap_selected_nodes(n_id, levelset_vel, moment_nt, moment, mass,normal):
+        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0), out_axes=(0, 0))
+        def vmap_selected_nodes(n_id, levelset_vel, moment_nt, moment, mass, normal):
             # normal = nodes.normal_stack.at[n_id].get()
             # scalar_norm = jnp.linalg.vector_norm(normal)
 
@@ -179,10 +179,9 @@ class NodeLevelSet(Forces):
                 )
 
             vel_nt = calculate_velocity(moment_nt)
-    
+
             node_moment_nt = vel_nt * mass
 
-    
             vel = calculate_velocity(moment)
             node_moment = vel * mass
 
@@ -210,7 +209,7 @@ class NodeLevelSet(Forces):
         #     nodes,
         #     (new_moment_nt_stack,new_moment_stack),
         # )
-        
+
         new_nodes = eqx.tree_at(
             lambda state: (state.moment_nt_stack),
             nodes,

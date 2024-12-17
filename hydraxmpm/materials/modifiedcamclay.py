@@ -107,7 +107,7 @@ class ModifiedCamClay(Material):
 
     ln_v_c: chex.Array
     phi_c: chex.Array
-    
+
     rho_p: jnp.float32
 
     def __init__(
@@ -166,7 +166,7 @@ class ModifiedCamClay(Material):
             )(give_phi_ref)
 
             p_ref_stack = vmap_give_phi_ref(phi_ref_stack, R, ln_N, lam, kap, p_t)
-    
+
         self.phi_ref_stack = phi_ref_stack
 
         self.p_ref_stack = p_ref_stack

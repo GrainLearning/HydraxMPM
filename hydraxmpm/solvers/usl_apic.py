@@ -45,7 +45,7 @@ class USL_APIC(Solver):
         particles = particles.refresh()
 
         # nodes = nodes.get_interactions(particles.position_stack
-        # 
+        #
         new_forces_stack = []
         for forces in forces_stack:
             particles, new_forces = forces.apply_on_particles(
@@ -54,7 +54,7 @@ class USL_APIC(Solver):
                 step=step,
             )
             new_forces_stack.append(new_forces)
-            
+
         forces_stack = new_forces_stack
 
         nodes = self.p2g(particles=particles, nodes=nodes)
@@ -68,7 +68,7 @@ class USL_APIC(Solver):
                 step=step,
             )
             new_forces_stack.append(new_forces)
-            
+
         forces_stack = new_forces_stack
 
         particles, self = self.g2p(particles=particles, nodes=nodes)

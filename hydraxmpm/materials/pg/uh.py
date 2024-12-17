@@ -248,7 +248,6 @@ class UH(Material):
 
         new_stress_stack, new_eps_e_stack, new_H_stack, new_px_hat_stack = (
             self.vmap_update_ip(
-
                 deps_stack,
                 self.eps_e_stack,
                 particles.stress_stack,
@@ -285,7 +284,6 @@ class UH(Material):
 
         new_stress_stack, new_eps_e_stack, new_H_stack, new_px_hat_stack = (
             self.vmap_update_ip(
-
                 deps_stack,
                 self.eps_e_stack,
                 stress_prev_stack,
@@ -305,10 +303,9 @@ class UH(Material):
 
         return (new_stress_stack, new_self)
 
-    @partial(jax.vmap, in_axes=(None,  0, 0, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0, 0))
+    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0, 0))
     def vmap_update_ip(
         self: Self,
-
         deps_next: chex.Array,
         eps_e_prev: chex.Array,
         stress_prev: jnp.float32,
@@ -319,7 +316,7 @@ class UH(Material):
         phi_curr: jnp.float32,
     ) -> Tuple[chex.Array, Self]:
         p_prev = get_pressure(stress_prev)
-        
+
         ln_v = jnp.log(1.0 / phi_curr)
 
         p_hat_prev = p_prev + self.p_t
@@ -329,7 +326,6 @@ class UH(Material):
         deps_e_v_tr = get_volumetric_strain(deps_next)
 
         # eps_e_v_prev = get_volumetric_strain(eps_e_prev)
-
 
         # deps_e_v_tr = jnp.nanmax(jnp.array([deps_e_v_tr, 0.0 ]))
 
@@ -416,7 +412,7 @@ class UH(Material):
                 # dH = get_dH(p_hat_next, q_next, self.M, Mf, deps_p_v)
                 # dH = get_dH2(p_hat_next, q_next, self.M, Mf, deps_p_v)
                 # dH = get_dH(
-                    # p_hat_next, q_next, self.M, Mf, dgamma_p_next, deps_p_v, tol=1.0
+                # p_hat_next, q_next, self.M, Mf, dgamma_p_next, deps_p_v, tol=1.0
                 # )
                 # jnp.maximum(dH,1e-10)
 
@@ -472,7 +468,7 @@ class UH(Material):
             pmulti_curr, deps_p_v_next = jax.lax.stop_gradient(find_roots())
             R, aux = residuals([pmulti_curr, deps_p_v_next], None)
 
-                # return aux, pmulti_curr, deps_p_v_next
+            # return aux, pmulti_curr, deps_p_v_next
 
             # aux, pmulti_curr, deps_p_v_next = jax.lax.cond(
             #     ln_v < self.ln_v_c,
@@ -507,7 +503,7 @@ class UH(Material):
 
             # p_hat_next = eqx.error_if(
             #     p_hat_next, jnp.isnan(p_hat_next).any(), "p_hat_next is nan"
-            # ) 
+            # )
             s_next = eqx.error_if(s_next, jnp.isnan(s_next).any(), "s_next is nan")
 
             stress_next = s_next - (p_hat_next - self.p_t) * jnp.eye(3)
@@ -548,7 +544,7 @@ class UH(Material):
             return stress_next, eps_e_next, H_next, px_hat_next
 
         # optionally add (p_hat_stack > 0) ...
-        # 
+        #
         stress_next, eps_e_next, H_next, px_hat_next = jax.lax.cond(
             ln_v < self.ln_v_c,
             lambda: jax.lax.cond(yf > 0.0, pull_to_ys, elastic_update),

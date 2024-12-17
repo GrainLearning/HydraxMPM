@@ -4,60 +4,121 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import Callable, Self, Tuple
 
+from ..common.types import (
+    TypeFloat,
+    TypeFloatScalarAStack,
+    TypeFloatVector3AStack,
+    TypeFloatVectorAStack,
+    TypeIntScalarAStack,
+    TypeUIntScalarAStack,
+    TypeFloatVectorPStack,
+)
 from ..config.mpm_config import MPMConfig
 from ..shapefunctions.cubic import vmap_linear_cubicfunction
 from ..shapefunctions.linear import vmap_linear_shapefunction
 
-
-def get_hash(pos, grid, dim):
-    if dim == 2:
-        return (pos[1] + pos[0] * grid[1]).astype(jnp.int32)
-
-    return (pos[2] + pos[0] * grid[2] + pos[1] * grid[2] * grid[0]).astype(jnp.int32)
+from jaxtyping import UInt
 
 
 class Grid(eqx.Module):
-    intr_id_stack: jax.Array
-    intr_shapef_stack: chex.Array
-    intr_hash_stack: chex.Array
-    intr_shapef_grad_stack: chex.Array
-    intr_dist_stack: chex.Array
+    """Represents the background grid mappings.
 
-    shapefunction_call: Callable = eqx.field(static=True)
+    This class creates the connectivity between particles and grid nodes, and mapping data between them.
+
+    Functionality is intended to be used internally, but can also be called externally.
+
+    Example usage outside core module:
+    ```python
+    import hydraxmpm as hdx
+    import jax.numpy as jnp
+
+    # Create MPM configuration
+    config = hdx.MPMConfig(...)
+
+    # Create grid
+    grid = hdx.Grid(config)
+
+    # Example particle values
+    position_stack = jnp.array([...])
+    mass_stack = ...
+    velocity_stack = ...
+
+    # option A. make connectivity and perform p2g
+    def p2g_func(point_id, intr_shapef, intr_shapef_grad):
+        mass = mass_stack[point_id]
+        velocity = velocity_stack[point_id]
+        scaled_mass = intr_shapef * mass
+        scaled_velocity = intr_shapef * velocity
+        return scaled_mass, scaled_velocity
+
+    # Combine interaction finding and scattering for efficiency
+    intr_scaled_mass, intr_scaled_velocity = grid.vmap_interactions_and_scatter(
+        p2g_func, position_stack
+    )
+
+    # option B. make connectivity and perform p2g
+    # Get interacting nodes based on particle positions
+    grid = hdx.get_interactions(grid, position_stack)
+
+    # Scatter particle data to grid using vectorized function
+    intr_scaled_mass, intr_scaled_velocity = grid.vmap_intr_scatter(p2g_func)
+
+    # ... (use scattered data for further computations)
+
+    # perform g2p...
+    ```
+
+    Attributes:
+        config: (:class:`MPMConfig`): MPM configuration object.
+        intr_id_stack (jnp.ndarray): ids of interacting nodes for each particle (connectivity information).
+        intr_hash_stack: (jnp.ndarray): spatial hash of interacting nodes for lookup.
+        intr_shapef_stack: shape function for particle-node interactions.
+        intr_shapef_grad_stack: gradients of the shape functions for particle-node interactions.
+        intr_dist_stack: distances between particles and interacting nodes (grid coordinates)
+
+    """
 
     config: MPMConfig = eqx.field(static=True)
 
-    def __init__(
-        self: Self,
-        config: MPMConfig = None,
-    ) -> Self:
-        self.config = config
+    shapefunction_call: Callable = eqx.field(init=False, static=True)
 
+    intr_id_stack: TypeUIntScalarAStack = eqx.field(init=False)
+    intr_hash_stack: TypeUIntScalarAStack = eqx.field(init=False)
+    intr_shapef_stack: TypeFloatScalarAStack = eqx.field(init=False)
+    intr_shapef_grad_stack: TypeFloatVector3AStack = eqx.field(init=False)
+    intr_dist_stack: TypeFloatVector3AStack = eqx.field(init=False)
+
+    def __init__(self, config: MPMConfig) -> Self:
+        self.config = config
+        # post init
         self.intr_id_stack = jnp.arange(
-            config.num_points * config.window_size, device=self.config.device
+            self.config.num_points * self.config.window_size, device=self.config.device
         ).astype(jnp.uint32)
 
         self.intr_hash_stack = jnp.zeros(
-            config.num_points * config.window_size, device=self.config.device
-        ).astype(jnp.int32)
+            self.config.num_points * self.config.window_size, device=self.config.device
+        ).astype(jnp.uint32)
 
         self.intr_dist_stack = jnp.zeros(
-            (config.num_points * config.window_size, 3), device=self.config.device
+            (self.config.num_points * self.config.window_size, 3),
+            device=self.config.device,
         )  # 3D needed for APIC / AFLIP
 
         self.intr_shapef_stack = jnp.zeros(
-            (config.num_points * config.window_size), device=self.config.device
+            (self.config.num_points * self.config.window_size),
+            device=self.config.device,
         )
         self.intr_shapef_grad_stack = jnp.zeros(
-            (config.num_points * config.window_size, 3), device=self.config.device
+            (self.config.num_points * self.config.window_size, 3),
+            device=self.config.device,
         )
 
-        if config.shapefunction == "linear":
+        if self.config.shapefunction == "linear":
             self.shapefunction_call = vmap_linear_shapefunction
-        elif config.shapefunction == "cubic":
+        elif self.config.shapefunction == "cubic":
             self.shapefunction_call = vmap_linear_cubicfunction
 
-    def get_interactions(self, position_stack: chex.Array) -> Self:
+    def get_interactions(self, position_stack: TypeFloatVectorPStack) -> Self:
         def vmap_intr(intr_id: chex.ArrayBatched) -> Tuple[chex.Array, chex.Array]:
             point_id = (intr_id / self.config.window_size).astype(jnp.uint32)
 
@@ -78,19 +139,9 @@ class Grid(eqx.Module):
                 intr_grid_pos.astype(jnp.int32), self.config.grid_size, mode="wrap"
             )
 
-            # intr_hash = get_hash(
-            #     intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
-            # )
-
             intr_dist = rel_pos - intr_grid_pos
 
             shapef, shapef_grad_padded = self.shapefunction_call(intr_dist, self.config)
-
-            # shapef = jax.lax.cond(
-            #     ((intr_hash<0) | (intr_hash>=self.config.num_cells)),
-            #     lambda : 0.0,
-            #     lambda : shapef
-            # )
 
             # is there a more efficient way to do this?
             intr_dist_padded = jnp.pad(
@@ -129,9 +180,9 @@ class Grid(eqx.Module):
         )
 
     def vmap_interactions_and_scatter(
-        self, p2g_func: Callable, position_stack: chex.Array
+        self, p2g_func: Callable, position_stack: TypeFloatVectorPStack
     ) -> Self:
-        def vmap_intr(intr_id: chex.ArrayBatched) -> Tuple[chex.Array, chex.Array]:
+        def vmap_intr(intr_id: UInt) -> Tuple[chex.Array, chex.Array]:
             point_id = (intr_id / self.config.window_size).astype(jnp.uint32)
 
             stencil_id = (intr_id % self.config.window_size).astype(jnp.uint16)
@@ -150,9 +201,6 @@ class Grid(eqx.Module):
             intr_hash = jnp.ravel_multi_index(
                 intr_grid_pos.astype(jnp.int32), self.config.grid_size, mode="wrap"
             )
-            # intr_hash = get_hash(
-            #     intr_grid_pos.astype(jnp.int32), self.config.grid_size, self.config.dim
-            # )
 
             intr_dist = rel_pos - intr_grid_pos
 
@@ -205,6 +253,8 @@ class Grid(eqx.Module):
         ), out_stack
 
     def vmap_intr_scatter(self, p2g_func: Callable):
+        """map particle to grid, not relative distances not included in mapping"""
+
         def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad):
             point_id = (intr_id / self.config.window_size).astype(jnp.uint32)
             return p2g_func(point_id, intr_shapef, intr_shapef_grad)

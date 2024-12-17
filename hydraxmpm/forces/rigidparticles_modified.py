@@ -42,7 +42,7 @@ class RigidParticlesModified(Forces):
     grid: Grid
     thickness: tuple = eqx.field(static=True)
     truncate_outbound: bool = eqx.field(static=True)
-    
+
     update_rigid_particles: Callable = eqx.field(static=True)
 
     def __init__(
@@ -55,8 +55,8 @@ class RigidParticlesModified(Forces):
         alpha: jnp.float32 = 0.8,
         beta: jnp.float32 = 2.0,
         update_rigid_particles: Callable = None,
-        thickness = 0,
-        truncate_outbound = True
+        thickness=0,
+        truncate_outbound=True,
     ) -> Self:
         """Initialize the rigid particles."""
         num_rigid = position_stack.shape[0]
@@ -94,14 +94,13 @@ class RigidParticlesModified(Forces):
                 rigid particles.
             - Get contacting nodes and apply the velocities on the grid.
         """
-        
+
         def check_in_domain(pos):
             ls_valid = pos > jnp.array(self.config.origin) + jnp.array(self.thickness)
             gt_valid = pos < jnp.array(self.config.end) - jnp.array(self.thickness)
             return jnp.all(ls_valid * gt_valid)
 
         is_valid_stack = jax.vmap(check_in_domain)(self.position_stack)
-
 
         def vmap_velocities_p2g_rigid(
             point_id, intr_shapef, intr_shapef_grad, intr_dist
@@ -113,19 +112,20 @@ class RigidParticlesModified(Forces):
         new_grid, r_scaled_velocity_stack = self.grid.vmap_interactions_and_scatter(
             vmap_velocities_p2g_rigid, self.position_stack
         )
-        
-        
+
         def null_outbound_interactions(intr_hash, is_valid):
-            return jax.lax.cond(is_valid,lambda: intr_hash, lambda:-1*jnp.ones(self.config.window_size).astype(jnp.int32))
-        
-        
-        new_intr_hash_stack = jax.vmap(
-            null_outbound_interactions
-        )(
-            new_grid.intr_hash_stack.reshape((self.config.num_points,self.config.window_size)),
-            is_valid_stack
-            ).reshape(-1)
-        
+            return jax.lax.cond(
+                is_valid,
+                lambda: intr_hash,
+                lambda: -1 * jnp.ones(self.config.window_size).astype(jnp.int32),
+            )
+
+        new_intr_hash_stack = jax.vmap(null_outbound_interactions)(
+            new_grid.intr_hash_stack.reshape(
+                (self.config.num_points, self.config.window_size)
+            ),
+            is_valid_stack,
+        ).reshape(-1)
 
         r_nodes_vel_stack = (
             jnp.zeros_like(nodes.moment_nt_stack)

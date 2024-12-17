@@ -20,7 +20,7 @@ phi_c = 0.648  # [-] rigid limit
 phi_0 = 0.65  # [-] initial solid volume fraction
 rho_p = 1200  # [kg/m^3] particle (skeletan density)
 rho = rho_p * phi_0  # [kg/m^3] bulk density
-rho_c = rho_p*phi_c
+rho_c = rho_p * phi_c
 
 # rho = 1500
 # rho = 2000
@@ -43,7 +43,7 @@ _MPMConfig = partial(
     store_every=200,
     project="druckerprager",
     dt=3 * 10**-5,  # [s] time step
-    file=__file__
+    file=__file__,
 )
 
 
@@ -97,8 +97,8 @@ material = hdx.DruckerPragerEP(
     H=0.0,
     mu_1_hat=0.0,
     p_ref_stack=p_ref * jnp.ones(config.num_points),
-    rho_p = rho_p,
-    phi_c = phi_c
+    rho_p=rho_p,
+    phi_c=phi_c,
 )
 
 gravity = hdx.Gravity(config=config, gravity=jnp.array([0.0, g]))

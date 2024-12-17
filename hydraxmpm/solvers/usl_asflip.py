@@ -5,7 +5,7 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from typing_extensions import Self, Sequence
+from typing_extensions import Dict, Self, Sequence
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
@@ -13,37 +13,47 @@ from .solver import Solver
 
 
 class USL_ASFLIP(Solver):
-    """Explicit Update Stress Last (USL) Affine Particle in Cell (APIC) MPM solver."""
+    """Explicit Update Stress Last (USL) Affine."""
 
-    alpha: jnp.float32
-    phi_c: jnp.float32
-    beta_min: jnp.float32
-    beta_max: jnp.float32
-    Dp: chex.Array
-    Dp_inv: chex.Array
-    Bp_stack: chex.Array
+    alpha: float = eqx.field(static=True, converter=lambda x: float(x))
+    phi_c: float = eqx.field(static=True, converter=lambda x: float(x))
+    beta_min: float = eqx.field(static=True, converter=lambda x: float(x))
+    beta_max: float = eqx.field(static=True, converter=lambda x: float(x))
+
+    Dp: chex.Array = eqx.field(init=False)
+    Dp_inv: chex.Array = eqx.field(init=False)
+    Bp_stack: chex.Array = eqx.field(init=False)
 
     def __init__(
         self,
         config,
+        particles_args: Dict = None,
         alpha=1.0,
         phi_c=0.5,
         beta_min=0.0,
         beta_max=0.0,
+        particles=None,
+        nodes=None,
+        materials=None,
+        forces=None,
+        callbacks=None,
     ):
-        
-        self.Dp = (1.0 / 3.0) * config.cell_size * config.cell_size * jnp.eye(3)
-
-        self.Dp_inv = jnp.linalg.inv(self.Dp)
-
-        self.Bp_stack = jnp.zeros((config.num_points, 3, 3), device=config.device)
-
         self.alpha = alpha
-
         self.phi_c = phi_c
         self.beta_min = beta_min
         self.beta_max = beta_max
         super().__init__(config)
+
+    def __post_init__(self):
+        self.Dp = (
+            (1.0 / 3.0) * self.config.cell_size * self.config.cell_size * jnp.eye(3)
+        )
+
+        self.Dp_inv = jnp.linalg.inv(self.Dp)
+
+        self.Bp_stack = jnp.zeros(
+            (self.config.num_points, 3, 3), device=self.config.device
+        )
 
     def update(self, particles, nodes, material_stack, forces_stack, step):
         nodes = nodes.refresh()

@@ -21,19 +21,19 @@ class Gravity(Forces):
     increment: chex.Array
     stop_ramp_step: jnp.int32
     particle_gravity: bool = eqx.field(static=True, converter=lambda x: bool(x))
-    
+
     def __init__(
         self: Self,
         config: MPMConfig,
         gravity: chex.Array = None,
         increment: chex.Array = None,
         stop_ramp_step: jnp.int32 = 0,
-        particle_gravity = True
+        particle_gravity=True,
     ) -> Self:
         """Initialize Gravity force on Nodes."""
         if gravity is None:
             gravity = jnp.zeros(config.dim)
-            
+
         self.gravity = gravity
         self.increment = increment
         self.stop_ramp_step = stop_ramp_step
@@ -50,7 +50,7 @@ class Gravity(Forces):
 
         if self.particle_gravity:
             return nodes, self
-        
+
         if self.increment is not None:
             gravity = self.gravity + self.increment * jnp.minimum(
                 step, self.stop_ramp_step
@@ -62,7 +62,7 @@ class Gravity(Forces):
 
         new_moment_nt_stack = nodes.moment_nt_stack + moment_gravity
         new_moment_stack = nodes.moment_stack + moment_gravity
-        
+
         new_nodes = eqx.tree_at(
             lambda state: (state.moment_nt_stack),
             nodes,
@@ -72,27 +72,25 @@ class Gravity(Forces):
         # self is updated if there is a gravity ramp
         return new_nodes, self
 
-
     def apply_on_particles(
         self: Self,
         particles: Particles = None,
         nodes: Nodes = None,
         step: int = 0,
     ) -> Tuple[Particles, Self]:
-            
         if not self.particle_gravity:
-                return particles, self
-        
+            return particles, self
+
         if self.increment is not None:
             gravity = self.gravity + self.increment * jnp.minimum(
                 step, self.stop_ramp_step
             )
         else:
             gravity = self.gravity
-            
+
         def get_gravitational_force(mass):
-            return mass*gravity
-        
+            return mass * gravity
+
         new_particles = eqx.tree_at(
             lambda state: (state.force_stack),
             particles,

@@ -1,120 +1,182 @@
-import os
-import sys
+# TODO Check in solver if timestep is set
+# TODO Check if particles are set in solver
 
 import dataclasses
+import os
+from pprint import pp
 
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 import numpy as np
-from typing_extensions import Generic, Self
+from jaxtyping import Array, Float, UInt
+from typing_extensions import Optional, Self, Union
 
 from ..utils.jax_helpers import set_default_gpu
 
 
-def _numpy_tuple(x: np.ndarray) -> tuple:
-    assert x.ndim == 1
-    return tuple([sub_x.item() for sub_x in x])
+def _numpy_tuple(x) -> tuple:
+    def _convert(x: Union[UInt[Array, "dim"], Float[Array, "dim"]]) -> tuple:
+        assert x.ndim == 1
+        return tuple([sub_x.item() for sub_x in x])
+
+    return _convert(jnp.array(x))
 
 
-def _numpy_tuple_deep(x: np.ndarray) -> tuple:
-    return tuple(map(_numpy_tuple, x))
+def _numpy_tuple_deep(x):
+    def _covert(
+        x: Union[UInt[Array, "connectivity dim"], Float[Array, "connectivity dim"]],
+    ) -> tuple:
+        return tuple(map(_numpy_tuple, x))
+
+    return _covert(jnp.array(x))
 
 
 class MPMConfig(eqx.Module):
-    inv_cell_size: float = eqx.field(static=True, converter=lambda x: float(x))
-
+    # init necessary
     origin: tuple = eqx.field(static=True, converter=lambda x: _numpy_tuple(x))
+
     end: tuple = eqx.field(static=True, converter=lambda x: _numpy_tuple(x))
-    grid_size: tuple = eqx.field(static=True, converter=lambda x: _numpy_tuple(x))
-    num_cells: int = eqx.field(static=True, converter=lambda x: int(x))
+
     cell_size: float = eqx.field(static=True, converter=lambda x: float(x))
 
-    num_points: int = eqx.field(static=True, converter=lambda x: int(x))
-
-    dt: float = eqx.field(static=True, converter=lambda x: float(x))
-    num_steps: int = eqx.field(static=True, converter=lambda x: int(x))
-    store_every: int = eqx.field(static=True, converter=lambda x: int(x))
-    dim: int = eqx.field(static=True, converter=lambda x: int(x))
-
-    shapefunction: str = eqx.field(static=True, converter=lambda x: str(x))
+    # post init
+    inv_cell_size: float = eqx.field(
+        init=False, static=True, converter=lambda x: float(x)
+    )
+    grid_size: tuple = eqx.field(
+        init=False, static=True, converter=lambda x: _numpy_tuple(x)
+    )
+    dim: int = eqx.field(static=True, init=False)
+    num_cells: int = eqx.field(init=False, static=True, converter=lambda x: int(x))
     forward_window: tuple = eqx.field(
-        static=True, converter=lambda x: _numpy_tuple_deep(x)
+        repr=False, init=False, static=True, converter=lambda x: _numpy_tuple_deep(x)
     )
+
     backward_window: tuple = eqx.field(
-        static=True, converter=lambda x: _numpy_tuple_deep(x)
+        repr=False, init=False, static=True, converter=lambda x: _numpy_tuple_deep(x)
     )
-    window_size: int = eqx.field(static=True, converter=lambda x: int(x))
-    padding: tuple = eqx.field(static=True)
-    ppc: int = eqx.field(static=True, converter=lambda x: int(x))
+    window_size: int = eqx.field(init=False, static=True, converter=lambda x: int(x))
+    padding: tuple = eqx.field(init=False, static=True, repr=False)
+    dir_path: str = eqx.field(init=False, static=True, converter=lambda x: str(x))
 
-    dir_path: str = eqx.field(static=True, converter=lambda x: str(x))
-
-    project: str = eqx.field(static=True, converter=lambda x: str(x))
-
-    device: jax.Device = eqx.field(static=True)
+    # default (set later, maybe)
+    num_points: Optional[int] = eqx.field(
+        default=0, static=True, converter=lambda x: int(x)
+    )
+    store_every: Optional[int] = eqx.field(
+        default=0, static=True, converter=lambda x: int(x)
+    )
+    shapefunction: Optional[str] = eqx.field(
+        default="cubic", static=True, converter=lambda x: str(x)
+    )
+    file: Optional[str] = eqx.field(default="", static=True, converter=lambda x: str(x))
+    project: Optional[str] = eqx.field(
+        default="", static=True, converter=lambda x: str(x)
+    )
+    default_gpu_id: Optional[int] = eqx.field(
+        default=-1, static=True, converter=lambda x: int(x)
+    )
+    dt: Optional[float] = eqx.field(
+        default=0.0, static=True, converter=lambda x: float(x)
+    )
+    ppc: Optional[int] = eqx.field(default=1, static=True, converter=lambda x: int(x))
+    num_steps: Optional[int] = eqx.field(
+        default=0, static=True, converter=lambda x: int(x)
+    )
+    device: Optional[jax.Device] = eqx.field(default=None, static=True)
 
     def __init__(
-        self: Self,
-        origin: list,
-        end: list,
+        self,
+        origin: Float[Array, "dim"] | tuple,
+        end: Float[Array, "dim"] | tuple,
         cell_size: float,
-        num_points: int = 0,
-        shapefunction: str = "cubic",
-        ppc: int = 1,
-        num_steps: int = 0,
-        store_every: int = 0,
-        dt: float = 0.0,
-        default_gpu_id: int = None,
-        project: str = "",
-        device: int = None,
-        **kwargs: Generic,
+        num_points: Optional[int] = 0,
+        store_every: Optional[int] = 0,
+        shapefunction: Optional[str] = "cubic",
+        project: Optional[str] = "",
+        file: Optional[str] = "",
+        default_gpu_id: Optional[int] = -1,
+        dt: Optional[float] = 0.0,
+        ppc: Optional[int] = 1,
+        num_steps: Optional[int] = 0,
+        device: Optional[jax.Device] = None,
     ):
-        """
-        Args:
-            origin: domain start
-            end: domain end
-            cell_size: cell size of grid
-            num_points: number of material points. Defaults to 0.
-            shapefunction: Shapefunction type,
-                select:["cubic","linear"]. Defaults to "cubic".
-            ppc: number of particles discretized per cell. Defaults to 1.
-            num_steps: number of steps to run. Defaults to 0.
-            store_every: output every nth step. Defaults to 0.
-            dt: constant time step. Defaults to 0.0.
-            default_gpu_id: default gpu to run on. Defaults to None.
-            project: project name. Defaults to "".
-            device: sharding (not implemented yet). Defaults to None.
-        """
+        """Configuration object for MPM simulations.
 
-        self.inv_cell_size = 1.0 / cell_size
-        self.grid_size = ((np.array(end) - np.array(origin)) / cell_size + 1).astype(
-            int
+        This dataclass stores parameters for setting up and running Material Point Method (MPM) simulations.
+
+        It is immutable; use the `.replace()` method to create a modified copy.
+
+        ```python
+        import hydraxmpm as hdx
+        import jax.numpy as jnp
+
+        config = hdx.MPMConfig(
+            origin=jnp.array([0.0, 0.0]),
+            end=jnp.array([5.0, 5.0]),
+            cell_size=0.1,
+            file=__file__,  # Store location of the current file for output
+            dt=1e-4, # Example timestep
         )
+
+        # Modify time step
+        dt_critical = 1e-5
+        config = config.replace(dt=dt_critical)
+        ```
+
+        Args:
+            origin: start point of the domain box
+            end: end point of the domain box
+            cell_size: cell size of the background grid
+            num_points: number of particles. Defaults to 0.
+            store_every: store every nth step. Defaults to 0.
+            shapefunction: shapefunction type, either "linear" or "cubic". Defaults to "cubic".
+            file: location of current file (e.g., use __file__).
+                This is used to store output. Defaults to "".
+            default_gpu_id: selects gpu id to run on. Defaults to -1.
+            dt: time step. Defaults to 0.0.
+            ppc: particles per cell in one dimension. Defaults to 1.
+            num_steps: step count to run the simulation for. Defaults to 0.
+        """
+        self.origin = origin
+        self.end = end
         self.cell_size = cell_size
-        self.origin = np.array(origin)
-        self.end = np.array(end)
-
-        self.num_cells = np.prod(self.grid_size).astype(int)
         self.num_points = num_points
-        self.dim = len(self.grid_size)
-
+        self.store_every = store_every
+        self.shapefunction = shapefunction
+        self.file = file
+        self.default_gpu_id = default_gpu_id
+        self.dt = dt
         self.ppc = ppc
         self.num_steps = num_steps
-        self.store_every = store_every
-        self.dt = dt
+        self.project = project
+        self.device = device
 
-        if shapefunction == "linear":
-            window_1D = np.arange(2).astype(int)
-        elif shapefunction == "cubic":
-            window_1D = np.arange(4).astype(int) - 1
+        # post init
+        self.inv_cell_size = 1.0 / self.cell_size
+
+        self.grid_size = (
+            (jnp.array(self.end) - jnp.array(self.origin)) / self.cell_size + 1
+        ).astype(jnp.uint32)
+
+        self.num_cells = np.prod(self.grid_size).astype(jnp.uint32)
+
+        self.dim = len(self.grid_size)
+
+        # create connectivity
+        if self.shapefunction == "linear":
+            window_1D = jnp.arange(2).astype(jnp.uint32)
+        elif self.shapefunction == "cubic":
+            window_1D = jnp.arange(4).astype(jnp.uint32) - 1
 
         if self.dim == 2:
-            self.forward_window = np.array(np.meshgrid(window_1D, window_1D)).T.reshape(
-                -1, self.dim
-            )
+            self.forward_window = jnp.array(
+                jnp.meshgrid(window_1D, window_1D)
+            ).T.reshape(-1, self.dim)
         elif self.dim == 3:
-            self.forward_window = np.array(
-                np.meshgrid(window_1D, window_1D, window_1D)
+            self.forward_window = jnp.array(
+                jnp.meshgrid(window_1D, window_1D, window_1D)
             ).T.reshape(-1, self.dim)
         elif self.dim == 1:
             self.forward_window = window_1D  # not tested!
@@ -122,41 +184,13 @@ class MPMConfig(eqx.Module):
 
         self.backward_window = self.forward_window[::-1] - 1
         self.window_size = len(self.backward_window)
-        self.shapefunction = shapefunction
 
         self.padding = (0, 3 - self.dim)
 
-        if "file" in kwargs:
-            file = kwargs.get("file")
-        else:
-            file = sys.argv[0]
+        self.dir_path = os.path.dirname(self.file) + "/"
 
-        self.dir_path = os.path.dirname(file) + "/"
+        if self.default_gpu_id != -1:
+            set_default_gpu(self.default_gpu_id)
 
-        self.project = project
-
-        self.device = device
-
-        if default_gpu_id:
-            set_default_gpu(default_gpu_id)
-
-    def print_summary(self):
-        """Print a basic summary of the config"""
-        print("~" * 75)
-        print("MPM config summary")
-        print("~" * 75)
-        print(f"project: {self.project}")
-        print(f"dim: {self.dim}")
-        print(f"num_points: {self.num_points}")
-        print(f"num_cells: {self.num_cells}")
-        print(f"num_interactions: {self.num_points*self.window_size}")
-        print(f"domain origin: {self.origin}")
-        print(f"domain end: {self.end}")
-        print(f"dt: {self.dt}")
-        print(f"total time: {self.dt*self.num_steps}")
-        print("~" * 75)
-
-        # TODO print sharding
-
-    def replace(self,**kwargs: Generic):
-        return dataclasses.replace(self,**kwargs)
+    def replace(self, **kwargs) -> Self:
+        return dataclasses.replace(self, **kwargs)

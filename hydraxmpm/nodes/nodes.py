@@ -1,19 +1,38 @@
-import chex
 import equinox as eqx
 import jax.numpy as jnp
 from typing_extensions import Self
 
+from ..common.types import TypeFloatScalarNStack, TypeFloatVectorNStack
 from ..config.mpm_config import MPMConfig
 from .grid import Grid
 
 
 class Nodes(Grid):
-    mass_stack: chex.Array
-    moment_stack: chex.Array
-    moment_nt_stack: chex.Array
-    normal_stack: chex.Array
+    """Represents the background grid nodes in an MPM simulation.
 
-    small_mass_cutoff: int = eqx.field(static=True, converter=lambda x: float(x))
+    These nodes inherit mapping functionalities from the :class:`Grid` class
+    (TODO: Add link to Grid class).
+
+    This class is typically initialized internally by the solver
+    but can be instantiated directly if needed.
+
+
+    Attributes:
+        mass_stack (jnp.ndarray): Mass assigned to each grid node (shape: `(num_nodes)`).
+        moment_stack (jnp.ndarray): Momentum (velocity * mass) stored at each grid node (shape: `(num_nodes, dim)`).
+        moment_nt_stack (jnp.ndarray): Momentum at the next time step, used for integration schemes like FLIP (shape: `(num_nodes, dim)`).
+        normal_stack (jnp.ndarray): Normal vectors associated with each node (shape: `(num_nodes, dim)`).
+            This might represent surface normals if the grid represents a boundary.
+        small_mass_cutoff (float): Threshold for small mass values.
+            Nodes with mass below this cutoff may be treated specially to avoid numerical instabilities.
+
+    """
+
+    mass_stack: TypeFloatScalarNStack
+    moment_stack: TypeFloatVectorNStack
+    moment_nt_stack: TypeFloatVectorNStack
+    normal_stack: TypeFloatVectorNStack
+    small_mass_cutoff: float = eqx.field(static=True, converter=lambda x: float(x))
 
     def __init__(
         self: Self,
@@ -34,14 +53,7 @@ class Nodes(Grid):
         super().__init__(config)
 
     def refresh(self: Self) -> Self:
-        """Reset background MPM node states.
-
-        Args:
-            self: Nodes state.
-
-        Returns:
-            Nodes: Updated node state.
-        """
+        """Reset background MPM node states."""
 
         return eqx.tree_at(
             lambda state: (

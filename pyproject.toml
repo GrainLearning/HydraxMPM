@@ -13,6 +13,9 @@ dependencies = [
     "typing-extensions>=4.12.2",
     "jax>=0.4.35",
     "jax[cuda12]>=0.4.35",
+    "jaxtyping>=0.2.34",
+    "beartype>=0.19.0",
+    "typeguard>=2.13.3",
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},

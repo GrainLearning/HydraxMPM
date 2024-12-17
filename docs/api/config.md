@@ -8,23 +8,11 @@ Two config types are available:
 * **`MPMConfig`**: For Material Point Method (MPM) simulations.
 * **`IPConfig`**: For single integration point element tests.
 
-
-
-
-!!! tip "Modifying config"
-
-    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla et euismod
-    nulla. Curabitur feugiat, tortor non consequat finibus, justo purus auctor
-    massa, nec semper lorem quam in massa.
-
----
-
-## MPMConfig
+## API
 ::: config.mpm_config.MPMConfig
 
-
-## IPConfig
-::: config.mpm_config.MPMConfig
+# TODO
+<!-- ::: config.mpm_config.MPMConfig -->
 
                 
 **Integration Point Config**

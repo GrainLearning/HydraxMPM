@@ -6,10 +6,19 @@ import chex
 import jax
 import jax.numpy as jnp
 
-"""Compression positive pressure from stress tensor."""
+from jaxtyping import Float
+
+from ..common.types import (
+    TypeFloatMatrix3x3AStack,
+    TypeFloatMatrixAStack,
+    TypeFloatVectorAStack,
+    TypeFloatScalarAStack,
+    TypeFloatMatrix3x3,
+    TypeFloat,
+)
 
 
-def get_pressure(stress: chex.Array, dim: jnp.int32 = 3) -> jnp.float32:
+def get_pressure(stress: TypeFloatMatrix3x3, dim: int = 3) -> TypeFloat:
     """Get compression positive pressure from the cauchy stress tensor.
 
     $$
@@ -26,7 +35,9 @@ def get_pressure(stress: chex.Array, dim: jnp.int32 = 3) -> jnp.float32:
     return -(1 / dim) * jnp.trace(stress)
 
 
-def get_pressure_stack(stress_stack: chex.Array, dim: jnp.int32 = 3) -> chex.Array:
+def get_pressure_stack(
+    stress_stack: TypeFloatMatrix3x3AStack, dim: int = 3
+) -> TypeFloatScalarAStack:
     """Vectorized version of [get_pressure][utils.math_helpers.get_pressure]
     for a stack of stress tensors.
 

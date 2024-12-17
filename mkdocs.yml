@@ -12,7 +12,8 @@ nav:
     - Initialize material points: how-tos/initialize_material_points.md
   - API:
       - Config: api/config.md
-    # - Particles: api/particles.md
+      - Particles: api/particles.md
+      - Nodes: api/nodes.md
     # - Shapefunctions: api/shapefunctions.md
   # - Examples: 
     # - Two sphere impact: examples/two_sphere_impact.md

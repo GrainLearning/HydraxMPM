@@ -26,9 +26,8 @@ def point_to_3D(config, point):
 
 @dataclasses.dataclass
 class PvPointHelper:
-    
     import pyvista as pv
-    
+
     timeseries: pv.MultiBlock = None
     timeseries_options: Dict = None
     bbox: pv.Box = None
@@ -51,6 +50,7 @@ class PvPointHelper:
         camera_options=None,
     ):
         import pyvista as pv
+
         if bbox_options is None:
             bbox_options = {}
 

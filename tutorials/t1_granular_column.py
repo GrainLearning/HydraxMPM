@@ -4,26 +4,27 @@ import jax
 import jax.numpy as jnp
 import hydraxmpm as hdx
 
-# granular column
+##### this must be in tutorial
 column_width = 0.3  # [m]
 column_height = 0.4  # [m]
 ppc = 2
-
 
 cell_size = 0.025  # [m]
 sep = cell_size / ppc
 padding = 4.5 * sep
 
-# create padded meshgrid of positions 
-x = jnp.arange(0, column_width + sep, sep) + padding - sep 
+# create padded meshgrid of positions
+x = jnp.arange(0, column_width + sep, sep) + padding - sep
 y = jnp.arange(0, column_height + sep, sep) + padding - sep
 xv, yv = jnp.meshgrid(x, y)
 
 position_stack = jnp.array(list(zip(xv.flatten(), yv.flatten())))
+####
+
 
 config = hdx.MPMConfig(
     origin=jnp.array([0.0, 0.0]),
-    end=jnp.array([column_width +  padding+2*sep, 0.5]),
+    end=jnp.array([column_width + padding + 2 * sep, 0.5]),
     project="t1_pack",
     ppc=ppc,
     cell_size=cell_size,
@@ -35,7 +36,9 @@ config = hdx.MPMConfig(
     dt=3 * 10**-5,  # time step[s]
     file=__file__,  # store current location of file for output
 )
+
 config.print_summary()
+
 
 # Initial bulk density material parameters
 phi_0 = 0.8  # [-] initial solid volume fraction
@@ -52,23 +55,24 @@ material = hdx.ModifiedCamClay(
     rho_p=rho_p,
     p_t=1.0,
     ln_N=jnp.log(1.29),
-    phi_ref_stack=phi_0 * jnp.ones(config.num_points),
+    phi_ref_stack=phi_0 * jnp.ones(config.num_points),  # this must be after
 )
 
-def get_stress_ref(p_ref):
-    return -p_ref * jnp.eye(3)
-
-stress_stack = jax.vmap(get_stress_ref)(material.p_ref_stack)
+# this must be internal
 
 particles = hdx.Particles(
     config=config, position_stack=position_stack, stress_stack=stress_stack
 )
+
 
 nodes = hdx.Nodes(config)
 
 particles, nodes = hdx.discretize(
     config=config, particles=particles, nodes=nodes, density_ref=rho_0
 )
+
+# must be internal
+
 
 stop_ramp_step = config.num_steps
 

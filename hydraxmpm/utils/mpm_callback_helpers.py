@@ -95,7 +95,6 @@ def io_movie_callback(
         if scalar_name == "pressure_stack":
             scalar_stack = get_pressure_stack(particles.stress_stack, config.dim)
 
-
         if scalar_stack is not None:
             polydata.point_data[scalar_name] = np.array(scalar_stack)
 
@@ -104,7 +103,6 @@ def io_movie_callback(
         plotter.add_mesh(bbox, **bbox_options)
 
         if step == 0:
-            
             plotter.camera.tight(padding=0.10, adjust_render_window=True)
 
         plotter.write_frame()

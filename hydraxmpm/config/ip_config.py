@@ -27,7 +27,6 @@ class IPConfig(eqx.Module):
         project: str = "",
         **kwargs: Generic,
     ):
-
         # total_time: jnp.float32
         self.dim = dim
 
