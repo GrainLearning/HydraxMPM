@@ -1,9 +1,12 @@
-from jaxtyping import Array, Float, Int, UInt
+from jaxtyping import Array, Float, Int, UInt, Bool
 
 from typing_extensions import Self, Union
 
 
-TypeFloat = Float[Array, "..."]
+TypeInt = Int[Array, "..."] | int
+TypeUInt = UInt[Array, "..."]
+TypeFloat = Float[Array, "..."] | float
+TypeFloat3 = Float[Array, "3"]
 TypeFloatVector = Float[Array, "dim"]
 TypeFloatMatrix3x3 = Float[Array, "3 3"]
 
@@ -18,6 +21,7 @@ TypeFloatScalarNStack = Float[Array, "num_nodes"]
 TypeFloatVectorNStack = Float[Array, "num_nodes dim"]
 TypeFloatMatrixNStack = Float[Array, "num_nodes dim dim"]
 TypeFloatMatrix3x3NStack = Float[Array, "num_nodes 3 3"]
+TypeBoolNStack = Bool[Array, "num_nodes"]
 
 # Any
 TypeFloatScalarAStack = Float[Array, "*"]

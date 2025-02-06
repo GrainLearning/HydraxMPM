@@ -10,7 +10,7 @@ from typing_extensions import Self
 from ..config.mpm_config import MPMConfig
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from .forces import Forces
+from .force import Forces
 
 
 def _numpy_tuple(x: jnp.ndarray) -> tuple:

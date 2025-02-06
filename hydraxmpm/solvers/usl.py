@@ -1,81 +1,97 @@
-"""Implementation of the Explicit Update Stress Last (USL) Material Point Method (MPM).
+"""Implementation of the Explicit Update Stress Last (USL) ConstitutiveLaw Point Method (MPM).
 
 References:
-    - De Vaucorbeil, Alban, et al. 'Material point method after 25 years:
+    - De Vaucorbeil, Alban, et al. 'ConstitutiveLaw point method after 25 years:
     theory, implementation, and applications.'
 """
 
 from functools import partial
-from typing import List, Tuple
 
-import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from typing_extensions import Self
+from typing_extensions import Callable, Optional, Self, Tuple
 
-from ..config.mpm_config import MPMConfig
-from ..nodes.nodes import Nodes
-from ..particles.particles import Particles
-from .solver import Solver
+from ..common.types import TypeFloat, TypeInt
+from ..constitutive_laws.constitutive_law import ConstitutiveLaw
+from ..forces.force import Force
+from ..grid.grid import Grid
+from ..material_points.material_points import MaterialPoints
+from ..solvers.config import Config
+from .mpm_solver import MPMSolver
 
 
-class USL(Solver):
-    """Update Stress Last (USL) Material Point Method (MPM) solver."""
+class USL(MPMSolver):
+    """Update Stress Last (USL) ConstitutiveLaw Point Method (MPM) solver."""
 
-    alpha: float = eqx.field(static=True, converter=lambda x: float(x))
+    alpha: TypeFloat = eqx.field(default=0.99)
 
-    def __init__(self, config: MPMConfig, alpha: float = 0.99):
-        self.alpha = alpha
-        super().__init__(config)
-
-    def update(
-        self: Self,
-        particles: Particles,
-        nodes: Nodes,
-        material_stack: List,
-        forces_stack: List,
-        step: int = 0,
+    def __init__(
+        self,
+        config: Config,
+        material_points: MaterialPoints,
+        grid: Grid,
+        constitutive_laws: Optional[
+            Tuple[ConstitutiveLaw, ...] | ConstitutiveLaw
+        ] = None,
+        forces: Optional[Tuple[Force, ...]] = None,
+        callbacks: Optional[Tuple[Callable, ...] | Callable] = None,
+        alpha: TypeFloat = 0.99,
+        **kwargs,
     ):
-        particles = particles.refresh()
-        nodes = nodes.refresh()
+        super().__init__(
+            config=config,
+            material_points=material_points,
+            grid=grid,
+            constitutive_laws=constitutive_laws,
+            forces=forces,
+            callbacks=callbacks,
+            **kwargs,
+        )
+        self.alpha = alpha
 
-        nodes = self.p2g(particles=particles, nodes=nodes)
+    def update(self: Self, step: TypeInt = 0) -> Self:
+        # loading state
+        material_points = self.material_points._refresh()
 
-        # Apply forces here
-        new_forces_stack = []
-        for forces in forces_stack:
-            nodes, new_forces = forces.apply_on_nodes(
-                particles=particles,
-                nodes=nodes,
-                step=step,
-            )
-            new_forces_stack.append(new_forces)
-
-        particles = self.g2p(particles=particles, nodes=nodes)
-
-        new_material_stack = []
-        for material in material_stack:
-            particles, new_material = material.update_from_particles(
-                particles=particles
-            )
-            new_material_stack.append(new_material)
-
-        return (
-            self,
-            particles,
-            nodes,
-            new_material_stack,
-            new_forces_stack,
+        material_points, forces = self._update_forces_on_points(
+            material_points=material_points,
+            grid=self.grid,
+            forces=self.forces,
+            step=step,
         )
 
-    def p2g(self, particles, nodes):
+        # grid quantities are being reset here.
+        (self, grid) = self.p2g(material_points, self.grid)
+
+        grid, forces = self._update_forces_grid(
+            material_points=material_points, grid=grid, forces=forces, step=step
+        )
+
+        material_points = self.g2p(material_points=material_points, grid=grid)
+
+        material_points, constitutive_laws = self._update_constitutive_laws(
+            material_points, self.constitutive_laws
+        )
+
+        return eqx.tree_at(
+            lambda state: (
+                state.material_points,
+                state.grid,
+                state.constitutive_laws,
+                state.forces,
+            ),
+            self,
+            (material_points, grid, constitutive_laws, forces),
+        )
+
+    def p2g(self, material_points, grid) -> Tuple[Self, Grid]:
         def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
-            intr_masses = particles.mass_stack.at[point_id].get()
-            intr_volumes = particles.volume_stack.at[point_id].get()
-            intr_velocities = particles.velocity_stack.at[point_id].get()
-            intr_ext_forces = particles.force_stack.at[point_id].get()
-            intr_stresses = particles.stress_stack.at[point_id].get()
+            intr_masses = material_points.mass_stack.at[point_id].get()
+            intr_volumes = material_points.volume_stack.at[point_id].get()
+            intr_velocities = material_points.velocity_stack.at[point_id].get()
+            intr_ext_forces = material_points.force_stack.at[point_id].get()
+            intr_stresses = material_points.stress_stack.at[point_id].get()
 
             scaled_mass = intr_shapef * intr_masses
             scaled_moments = scaled_mass * intr_velocities
@@ -88,77 +104,59 @@ class USL(Solver):
 
             return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
-        # note the interactions and shapefunctions are calculated on the first
+        # note the interactions and shapefunctions are calculated on the
         # p2g to reduce computational overhead.
         (
-            new_nodes,
+            new_self,
             (
                 scaled_mass_stack,
                 scaled_moment_stack,
                 scaled_total_force_stack,
                 scaled_normal_stack,
             ),
-        ) = nodes.vmap_interactions_and_scatter(vmap_intr_p2g, particles.position_stack)
+        ) = self.vmap_interactions_and_scatter(vmap_intr_p2g)
 
-        # Sum all interaction quantities.
-        new_mass_stack = (
-            jnp.zeros_like(new_nodes.mass_stack)
-            .at[new_nodes.intr_hash_stack]
-            .add(scaled_mass_stack)
+        def sum_interactions(stack, scaled_stack):
+            return jnp.zeros_like(stack).at[new_self._intr_hash_stack].add(scaled_stack)
+
+        # sum
+        new_mass_stack = sum_interactions(grid.mass_stack, scaled_mass_stack)
+        new_moment_stack = sum_interactions(grid.moment_stack, scaled_moment_stack)
+        new_force_stack = sum_interactions(
+            self.grid.moment_stack, scaled_total_force_stack
         )
+        new_normal_stack = sum_interactions(grid.normal_stack, scaled_normal_stack)
 
-        new_moment_stack = (
-            jnp.zeros_like(new_nodes.moment_stack)
-            .at[new_nodes.intr_hash_stack]
-            .add(scaled_moment_stack)
-        )
-
-        new_force_stack = (
-            jnp.zeros_like(new_nodes.moment_stack)
-            .at[new_nodes.intr_hash_stack]
-            .add(scaled_total_force_stack)
-        )
-
-        new_normal_stack = (
-            jnp.zeros_like(new_nodes.normal_stack)
-            .at[new_nodes.intr_hash_stack]
-            .add(scaled_normal_stack)
-        )
-
+        # integrate
         new_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
 
-        return eqx.tree_at(
+        return new_self, eqx.tree_at(
             lambda state: (
                 state.mass_stack,
                 state.moment_stack,
                 state.moment_nt_stack,
                 state.normal_stack,
             ),
-            new_nodes,
+            grid,
             (new_mass_stack, new_moment_stack, new_moment_nt_stack, new_normal_stack),
         )
 
-    def g2p(self, particles: Particles, nodes: Nodes):
-        def vmap_intr_g2p(
-            intr_hashes: chex.ArrayBatched,
-            intr_shapef: chex.ArrayBatched,
-            intr_shapef_grad: chex.ArrayBatched,
-        ):
-            """Scatter quantities from nodes to interactions."""
-            intr_masses = nodes.mass_stack.at[intr_hashes].get()
-            intr_moments = nodes.moment_stack.at[intr_hashes].get()
-            intr_moments_nt = nodes.moment_nt_stack.at[intr_hashes].get()
+    def g2p(self, material_points, grid):
+        def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, _):
+            intr_masses = grid.mass_stack.at[intr_hashes].get()
+            intr_moments = grid.moment_stack.at[intr_hashes].get()
+            intr_moments_nt = grid.moment_nt_stack.at[intr_hashes].get()
 
             # Small mass cutoff to avoid unphysical large velocities
             intr_vels = jax.lax.cond(
-                intr_masses > nodes.small_mass_cutoff,
+                intr_masses > grid.small_mass_cutoff,
                 lambda x: x / intr_masses,
                 lambda x: jnp.zeros_like(x),
                 intr_moments,
             )
 
             intr_vels_nt = jax.lax.cond(
-                intr_masses > nodes.small_mass_cutoff,
+                intr_masses > grid.small_mass_cutoff,
                 lambda x: x / intr_masses,
                 lambda x: jnp.zeros_like(x),
                 intr_moments_nt,
@@ -172,7 +170,7 @@ class USL(Solver):
             # Pad velocities for plane strain
             intr_vels_nt_padded = jnp.pad(
                 intr_vels_nt,
-                self.config.padding,
+                self.config._padding,
                 mode="constant",
                 constant_values=0,
             )
@@ -187,24 +185,18 @@ class USL(Solver):
             new_intr_scaled_delta_vel_stack,
             new_intr_scaled_vel_nt_stack,
             new_intr_scaled_velgrad_stack,
-        ) = nodes.vmap_intr_gather(vmap_intr_g2p)
+        ) = self.vmap_intr_gather(vmap_intr_g2p)
 
-        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0, 0))
+        @partial(jax.vmap, in_axes=0)
         def vmap_particles_update(
-            intr_delta_vels_reshaped: chex.ArrayBatched,
-            intr_vels_nt_reshaped: chex.ArrayBatched,
-            intr_velgrad_reshaped: chex.ArrayBatched,
-            p_velocities: chex.ArrayBatched,
-            p_positions: chex.ArrayBatched,
-            p_F: chex.ArrayBatched,
-            p_volumes_orig: chex.ArrayBatched,
-        ) -> Tuple[
-            chex.ArrayBatched,
-            chex.ArrayBatched,
-            chex.ArrayBatched,
-            chex.ArrayBatched,
-            chex.ArrayBatched,
-        ]:
+            intr_delta_vels_reshaped,
+            intr_vels_nt_reshaped,
+            intr_velgrad_reshaped,
+            p_velocities,
+            p_positions,
+            p_F,
+            p_volumes_orig,
+        ):
             """Update particle quantities by summing interaction quantities."""
             p_velgrads_next = jnp.sum(intr_velgrad_reshaped, axis=0)
 
@@ -242,17 +234,18 @@ class USL(Solver):
             new_L_stack,
         ) = vmap_particles_update(
             new_intr_scaled_delta_vel_stack.reshape(
-                -1, self.config.window_size, self.config.dim
+                -1, self._window_size, self.config.dim
             ),
             new_intr_scaled_vel_nt_stack.reshape(
-                -1, self.config.window_size, self.config.dim
+                -1, self._window_size, self.config.dim
             ),
-            new_intr_scaled_velgrad_stack.reshape(-1, self.config.window_size, 3, 3),
-            particles.velocity_stack,
-            particles.position_stack,
-            particles.F_stack,
-            particles.volume0_stack,
+            new_intr_scaled_velgrad_stack.reshape(-1, self._window_size, 3, 3),
+            material_points.velocity_stack,
+            material_points.position_stack,
+            material_points.F_stack,
+            material_points.volume0_stack,
         )
+
         return eqx.tree_at(
             lambda state: (
                 state.volume_stack,
@@ -261,7 +254,7 @@ class USL(Solver):
                 state.position_stack,
                 state.velocity_stack,
             ),
-            particles,
+            material_points,
             (
                 new_volume_stack,
                 new_F_stack,

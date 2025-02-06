@@ -1,16 +1,18 @@
 from functools import partial
 from typing import Tuple
 
-import chex
 import jax
 import jax.numpy as jnp
 
-from ..config.mpm_config import MPMConfig
+from ..common.types import TypeInt, TypeFloat, TypeFloat3, TypeFloatVector
 
 
 def vmap_linear_cubicfunction(
-    intr_dist: chex.ArrayBatched, config: MPMConfig
-) -> Tuple[jnp.float32, chex.ArrayBatched]:
+    intr_dist: TypeFloatVector,
+    inv_cell_size: TypeFloat,
+    dim: TypeInt,
+    padding: Tuple[int, int],
+) -> Tuple[TypeFloat, TypeFloat3]:
     condlist = [
         (intr_dist >= -2) * (intr_dist < -1),
         (intr_dist >= -1) * (intr_dist < 0),
@@ -20,7 +22,7 @@ def vmap_linear_cubicfunction(
 
     _piecewise = partial(jnp.piecewise, x=intr_dist, condlist=condlist)
 
-    h = config.inv_cell_size
+    h = inv_cell_size
 
     def middle_splines():
         basis = _piecewise(
@@ -142,14 +144,14 @@ def vmap_linear_cubicfunction(
         ],
     )
 
-    if config.dim == 2:
+    if dim == 2:
         shapef_grad = jnp.array(
             [
                 dbasis.at[0].get() * basis.at[1].get(),
                 dbasis.at[1].get() * basis.at[0].get(),
             ]
         )
-    elif config.dim == 3:
+    elif dim == 3:
         shapef_grad = jnp.array(
             [
                 dbasis.at[0].get() * basis.at[1].get() * basis.at[2].get(),
@@ -164,7 +166,7 @@ def vmap_linear_cubicfunction(
 
     shapef_grad_padded = jnp.pad(
         shapef_grad,
-        config.padding,
+        padding,
         mode="constant",
         constant_values=0.0,
     )

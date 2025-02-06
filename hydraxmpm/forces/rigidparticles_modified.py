@@ -11,7 +11,7 @@ from jax import Array
 
 from ..nodes.nodes import Nodes
 from ..particles.particles import Particles
-from ..forces.forces import Forces
+from .force import Forces
 from ..config.mpm_config import MPMConfig
 
 from ..nodes.grid import Grid
