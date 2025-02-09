@@ -86,7 +86,8 @@ class Boundary(Force):
         self: Self,
         material_points: Optional[MaterialPoints] = None,
         grid: Optional[Grid] = None,
-        step: Optional[TypeInt | int] = 0,
+        step: Optional[TypeInt] = 0,
+        dt: Optional[TypeFloat] = 0.01,
         dim: TypeInt = 3,
     ):
         @partial(jax.vmap, in_axes=0, out_axes=0)

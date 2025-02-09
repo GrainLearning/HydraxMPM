@@ -77,7 +77,7 @@ class Gravity(Force):
         # self is updated if there is a gravity ramp
         return new_grid, self
 
-    def apply_on_particles(
+    def apply_on_points(
         self: Self,
         material_points: Optional[MaterialPoints] = None,
         grid: Optional[Grid] = None,
@@ -94,6 +94,7 @@ class Gravity(Force):
             )
         else:
             gravity = self.gravity
+        # jax.debug.print("gravity {}", gravity)
 
         def get_gravitational_force(mass: TypeFloat):
             return mass * gravity
