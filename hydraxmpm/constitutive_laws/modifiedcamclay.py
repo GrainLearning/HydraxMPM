@@ -8,7 +8,6 @@ from typing_extensions import Optional, Self, Tuple
 
 from ..common.types import (
     TypeFloat,
-    TypeFloatMatrixPStack,
     TypeFloatScalarPStack,
     TypeInt,
 )
@@ -94,7 +93,6 @@ class ModifiedCamClay(ConstitutiveLaw):
 
     _cp: TypeFloat  # ?
 
-    eps_e_stack: Optional[TypeFloatMatrixPStack] = None
     px_hat_stack: Optional[TypeFloatScalarPStack] = None
     p_0_stack: Optional[TypeFloatScalarPStack] = None
 

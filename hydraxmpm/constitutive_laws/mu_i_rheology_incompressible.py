@@ -112,19 +112,33 @@ class MuI_incompressible(ConstitutiveLaw):
 
             p_0 = vmap_give_p_ref(self.K, rho_0, rho_0)
         else:
-            if eqx.is_array(p_0):
-                vmap_give_rho_ref = partial(
-                    jax.vmap,
-                    in_axes=(None, None, 0),
-                )(give_rho)
-            else:
-                vmap_give_rho_ref = give_rho
+            p_0_stack = p_0
+            if not eqx.is_array(p_0_stack):
+                p_0_stack = p_0_stack * jnp.ones(material_points.num_points)
 
-                rho = vmap_give_rho_ref(self.K, self.rho_0, p_0)
+            vmap_give_rho_ref = partial(
+                jax.vmap,
+                in_axes=(None, None, 0),
+            )(give_rho)
 
-        material_points = material_points.init_stress_from_p_0(p_0)
+            rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack)
+
+        rho_rho_0_stack = rho / self.rho_0
+
+        jax.debug.print("{}", rho_rho_0_stack)
+        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
+
+        new_stress_stack = vmap_update_ip(
+            material_points.stress_stack,
+            material_points.F_stack,
+            material_points.L_stack,
+            rho_rho_0_stack,
+        )
+        material_points = material_points.replace(stress_stack=new_stress_stack)
+        # material_points = material_points.init_stress_from_p_0(p_0)
         # if there is pressure, then density is not on reference density
         material_points = material_points.init_mass_from_rho_0(rho)
+
         params = self.__dict__
         params.update(rho_0=rho_0, p_0=p_0)
         return self.__class__(**params), material_points
@@ -165,16 +179,16 @@ class MuI_incompressible(ConstitutiveLaw):
     ):
         deps_dt = get_sym_tensor(L)
 
-        p = jnp.maximum(self.K * (rho_rho_0 - 1.0), 1.0e-12)
-
         deps_dev_dt = get_dev_strain(deps_dt)
-
         dgamma_dt = get_scalar_shear_strain(deps_dt)
+
+        # regularize p and dgamma_dt to avoid division by zero
+        p = jnp.nanmax(jnp.array([self.K * (rho_rho_0 - 1.0), 1.0e-12]))
+        dgamma_dt = jnp.nanmax(jnp.array([dgamma_dt, 1.0e-12]))
+
         I = get_inertial_number(p, dgamma_dt, self.d, self.rho_p)
 
-        # regularize I
-        I = jnp.maximum(I, 1e-9)
-
+        # this part is needed to regularize instabilithy at low-I
         alpha = 0.000001
         eta_E_s = p * self.mu_s / jnp.sqrt(dgamma_dt * dgamma_dt + alpha * alpha)
 

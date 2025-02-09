@@ -3,6 +3,7 @@ from typing import Optional, Self, Tuple, Union
 from ..common.base import Base
 from ..common.types import (
     TypeFloat,
+    TypeFloatMatrixPStack,
     TypeFloatScalarAStack,
     TypeInt,
 )
@@ -14,6 +15,8 @@ class ConstitutiveLaw(Base):
     rho_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
     p_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
     d: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
+
+    eps_e_stack: Optional[TypeFloatMatrixPStack] = None
 
     def __init__(self, **kwargs):
         self.d = kwargs.get("d", None)
@@ -59,10 +62,3 @@ class ConstitutiveLaw(Base):
     def phi_0(self):
         """Assumes dry case"""
         return self.rho_0 / self.rho_p
-
-    # @property
-    # def phi_stack(self, material_points):
-    #     """assumes dry conditions"""
-    #     if material_points is None:
-    #         return 2 / self.rho_p
-    #     return density_stack / self.rho_p

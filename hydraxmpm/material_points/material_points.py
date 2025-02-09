@@ -15,12 +15,13 @@ from ..common.types import (
 )
 from ..utils.math_helpers import (
     get_hencky_strain_stack,
+    get_inertial_number_stack,
     get_KE_stack,
     get_pressure_stack,
     get_q_vm_stack,
     get_scalar_shear_strain_stack,
     get_strain_rate_from_L_stack,
-    get_inertial_number_stack,
+    get_volumetric_strain_stack,
 )
 
 
@@ -203,6 +204,10 @@ class MaterialPoints(Base):
         return get_hencky_strain_stack(self.F_stack)[0]
 
     @property
+    def eps_v_stack(self):
+        return get_volumetric_strain_stack(self.eps_stack)
+
+    @property
     def depsdt_stack(self):
         return get_strain_rate_from_L_stack(self.L_stack)
 
@@ -225,3 +230,23 @@ class MaterialPoints(Base):
 
     def inertial_number_stack(self, rho_p, d):
         return get_inertial_number_stack(self.p_stack, self.dgammadt_stack, d, rho_p)
+
+    def deps_p_dt_stack(self, dt, eps_e_stack=None, eps_e_prev_stack=None):
+        """Plastic strain rate tensor"""
+        if eps_e_stack is None:
+            return self.depsdt_stack
+        else:
+            deps_e_dt_stack = (eps_e_stack - eps_e_prev_stack) * dt
+            return self.depsdt_stack - deps_e_dt_stack
+
+    def dgamma_p_dt_stack(self, dt, eps_e_stack=None, eps_e_prev_stack=None):
+        """Plastic scalar shear strain rate"""
+        return get_scalar_shear_strain_stack(
+            self.deps_p_dt_stack(dt, eps_e_stack, eps_e_prev_stack)
+        )
+
+    def deps_p_v_dt_stack(self, dt, eps_e_stack=None, eps_e_prev_stack=None):
+        """Plastic scalar volumetric strain rate"""
+        return get_volumetric_strain_stack(
+            self.deps_p_dt_stack(dt, eps_e_stack, eps_e_prev_stack)
+        )
