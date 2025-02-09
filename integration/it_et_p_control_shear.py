@@ -5,12 +5,6 @@ import jax
 import hydraxmpm as hdx
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
-import matplotlib as mpl
-from matplotlib import ticker
-import scienceplots
-
-plt.style.use("science")
-mpl.rcParams["lines.linewidth"] = 2
 
 
 def test_single_et():
@@ -33,8 +27,8 @@ def test_single_et():
             nu=0.2,
             M=1.2,
             R=1.0,
-            lam=0.026,
-            kap=0.005,
+            lam=0.0026,
+            kap=0.0001,
             ln_N=0.7,
             d=0.005,
             p_0=1000,
@@ -42,7 +36,7 @@ def test_single_et():
             init_by_density=False,
         ),
         et_benchmarks=hdx.ConstantVolumeSimpleShear(
-            x_range=(0.0, 0.1), y_range=(0.0, 0.0)
+            x_range=(0.0, 0.5), y_range=(0.0, 0.0)
         ),
     )
     solver = solver.setup()
@@ -64,13 +58,6 @@ def test_single_et():
         specific_volume_stack,
         inertial_number_stack,
     )
-    ax.flat[3].set_ylim(1.6, 1.8)
-    ax.flat[3].set_xlim(450, 1150)
-    ax.flat[3].margins(0.17, 0.15)
-    ax.flat[3].set_xticks([500, 750, 1000], minor=True)
-    ax.flat[3].set_yticks([1.6, 1.7, 1.8, 1.9], minor=True)
-
-    fig.suptitle("Modified Cam-Clay simple shear")
 
     plt.tight_layout()
 
@@ -81,9 +68,9 @@ def test_multiple_ets():
     """Test to see if element test runs"""
     jax.config.update("jax_enable_x64", True)
     et_benchmarks = (
-        hdx.ConstantVolumeSimpleShear(x_range=(0.0, 0.1), y_range=(0.0, 0.0)),
-        hdx.IsotropicCompression(x_range=(0.0, 0.002)),
-        hdx.IsotropicCompression(x_range=(0.0, -0.001)),
+        hdx.ConstantVolumeSimpleShear(x_range=(0.0, 0.2), y_range=(0.0, 0.0)),
+        hdx.IsotropicCompression(x_range=(0.0, 0.0003)),
+        hdx.IsotropicCompression(x_range=(0.0, -0.00003)),
     )
     # one plot together
     fig_multi, ax_multi = plt.subplots(ncols=3, nrows=2, figsize=(8, 5))
@@ -107,8 +94,8 @@ def test_multiple_ets():
                 nu=0.2,
                 M=1.2,
                 R=1.0,
-                lam=0.026,
-                kap=0.005,
+                lam=0.0026,
+                kap=0.0001,
                 ln_N=0.7,
                 d=0.005,
                 p_0=1000,
@@ -138,22 +125,38 @@ def test_multiple_ets():
             specific_volume_stack,
             inertial_number_stack,
             fig_ax=(fig_multi, ax_multi),
+            ax0_lim=[[-50, 1300], [-50, 750]],
+            ax1_lim=[[-0.01, 0.12], [-50, 750]],
+            ax2_lim=[[-0.01, 0.21], [-50, 750]],
+            ax3_lim=[[400, 2000], [1.975, 1.985]],
+            ax4_lim=[[-0.01, None], [None, None]],
+            ax5_lim=[[-0.0001, None], [None, None]],
         )
 
-        ax_multi.flat[3].set_ylim(1.65, 1.75)
-        ax_multi.flat[3].set_xlim(450, 1150)
-        ax_multi.flat[3].margins(0.17, 0.1)
-        ax_multi.flat[3].set_xticks([500, 750, 1000], minor=True)
-        ax_multi.flat[3].set_yticks([1.65, 1.7, 1.75], minor=True)
+        # fig, ax = hdx.plot_set1(
+        #     p_stack,
+        #     q_vm_stack,
+        #     gamma_stack,
+        #     dgammadt_stack,
+        #     specific_volume_stack,
+        #     inertial_number_stack,
+        #     fig_ax=(fig, ax),
+        #     ax0_lim=[[-100, 1300], [-100, 750]],
+        #     ax1_lim=[[-0.01, 0.12], [-50, 750]],
+        #     ax2_lim=[[-0.01, 0.21], [-50, 750]],
+        #     ax3_lim=[[400, 2000], [1.95, 2.0]],
+        #     ax4_lim=[[-0.01, None], [None, None]],
+        #     ax5_lim=[[-0.0001, None], [None, None]],
+        # )
 
-    fig_multi.suptitle(
-        "Modified Cam-Clay simple shear + isotropic compression + isotropic extension"
-    )
+        # fig.tight_layout()
+
+        # fig.savefig(dir_path + f"/plots/et_mcc_multi_et_{eti}.png")
 
     fig_multi.tight_layout()
 
     fig_multi.savefig(dir_path + "/plots/et_mcc_multi_et_all.png")
 
 
-test_single_et()
+# test_single_et()
 test_multiple_ets()
