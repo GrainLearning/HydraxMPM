@@ -6,7 +6,9 @@ import hydraxmpm as hdx
 
 def test_create_volume_control_shear():
     # volume control shear
-    et_benchmark = hdx.ConstantVolumeSimpleShear(x_range=(0.0, 1.0), y_range=(0.0, 0.0))
+    et_benchmark = hdx.ConstantPressureSimpleShear(
+        x=1.0, p=1000.0, init_material_points=True
+    )
 
     material_points = hdx.MaterialPoints()
     config = hdx.Config(total_time=1.0, num_steps=2)
@@ -16,7 +18,7 @@ def test_create_volume_control_shear():
 def test_create_pressure_control_shear():
     # volume control shear
     et_benchmark = hdx.ConstantPressureSimpleShear(
-        x_range=(0.0, 1.0), p_range=(1000.0, 1000.0), init_material_points=True
+        x=1.0, p=1000.0, init_material_points=True
     )
 
     material_points = hdx.MaterialPoints()

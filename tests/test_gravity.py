@@ -20,7 +20,7 @@ def test_apply_grav_on_particles():
 
     grav = hdx.Gravity(gravity=jnp.array([0.0, -9.8]))
 
-    new_particles, grav = grav.apply_on_particles(material_points, step=1)
+    new_particles, grav = grav.apply_on_points(material_points, step=1)
 
     force_stack = new_particles.force_stack
 
