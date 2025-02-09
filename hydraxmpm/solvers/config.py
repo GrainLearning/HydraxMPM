@@ -7,6 +7,18 @@ from ..utils.jax_helpers import set_default_gpu
 
 
 class Config(eqx.Module):
+    """
+
+    Configuration for the solvers:
+
+    - [MPMSolver][solvers.mpm_solver.MPMSolver]
+    - [ETSolver][solvers.mpm_solver.ETSolver]
+
+
+
+
+    """
+
     store_every: Optional[int] = eqx.field(default=0, static=True)
     ppc: Optional[int] = eqx.field(default=1, static=True)
     file: Optional[str] = eqx.field(default="", static=True)
@@ -40,6 +52,32 @@ class Config(eqx.Module):
         output: Optional[dict | Tuple[str, ...]] = None,
         **kwargs,
     ):
+        """
+
+        Note:
+            At least two of the following must be defined total_time, num_steps,
+            dt for the config to be valid
+
+
+
+        Args:
+            total_time: Total run time. Defaults to None.
+            num_steps: Total number of steps. Defaults to None.
+            dt: Time increment. Defaults to None.
+            store_every: Store at every nth step. Defaults to 0.
+            file: Location of current file. Defaults to "".
+            project: Output project location. Defaults to "".
+            default_gpu_id: Default GPU ID. Defaults to -1.
+            output_path: Output path. Defaults to None.
+            shapefunction: Shape function type. Defaults to "cubic".
+            ppc: Particles per cell. Defaults to 1.
+            dim: Either 3D (`3`), or plain strain (`2`). Defaults to 3.
+            output: A `Dict` of outputs if MPM solver is used,
+                and a`List` of outputs if element test solver is used.
+                See the [How to visualize results](../how-tos/visualize.md) for further details.
+                Defaults to None.
+
+        """
         if output is None:
             self.output = dict()
         else:

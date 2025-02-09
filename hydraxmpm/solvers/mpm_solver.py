@@ -180,6 +180,8 @@ class MPMSolver(Base):
                 new_force = force.init_ids(
                     grid_size=new_grid.grid_size, dim=self.config.dim, dt=self.config.dt
                 )
+            else:
+                new_force = force
             new_forces.append(new_force)
 
         new_forces = tuple(new_forces)
@@ -431,7 +433,7 @@ class MPMSolver(Base):
 
         return carry
 
-    def map_p2g(self, key, X_stack=None, return_solver=False):
+    def map_p2g(self, key=None, X_stack=None, return_solver=False):
         """Assumes shapefunctions/interactions have already been generated"""
         if X_stack is None:
             X_stack = self.material_points.__getattribute__(key)
@@ -530,6 +532,20 @@ class MPMSolver(Base):
     def p2g_gamma_stack(self):
         eps_stack = self.map_p2g("eps_stack")
         return get_scalar_shear_strain_stack(eps_stack)
+
+    @property
+    def p2g_specific_volume_stack(self):
+        specific_volume_stack = self.material_points.specific_volume_stack(
+            self.constitutive_laws[0].rho_p
+        )
+        return self.map_p2g(X_stack=specific_volume_stack)
+
+    @property
+    def p2g_inertial_number_stack(self):
+        inertial_number_stack = self.material_points.inertial_number_stack(
+            self.constitutive_laws[0].rho_p, self.constitutive_laws[0].d
+        )
+        return self.map_p2g(X_stack=inertial_number_stack)
 
     # @property
     # TODO

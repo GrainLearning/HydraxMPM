@@ -53,27 +53,28 @@ class ETSolver(Base):
         # we run this once after initialization
         if self._setup_done:
             return self
-            # To do setup materials
 
-        constitutive_law, material_points = self.constitutive_law.init_state(
-            self.material_points
-        )
         # setup deformation modes
         new_et_benchmarks = []
-
-        for deformation_mode in self.et_benchmarks:
-            new_deformation_mode = deformation_mode.init_steps(
-                num_steps=self.config.num_steps
+        new_material_points = self.material_points
+        for benchmark in self.et_benchmarks:
+            new_deformation_mode, new_material_points = benchmark.init_state(
+                self.config, new_material_points
             )
             new_et_benchmarks.append(new_deformation_mode)
-        et_benchmarks = tuple(new_et_benchmarks)
+
+        new_et_benchmarks = tuple(new_et_benchmarks)
+
+        new_constitutive_law, new_material_points = self.constitutive_law.init_state(
+            new_material_points
+        )
 
         params = self.__dict__
 
         params.update(
-            et_benchmarks=et_benchmarks,
-            material_points=material_points,
-            constitutive_law=constitutive_law,
+            et_benchmarks=new_et_benchmarks,
+            material_points=new_material_points,
+            constitutive_law=new_constitutive_law,
             _setup_done=True,
         )
 
@@ -107,32 +108,29 @@ class ETSolver(Base):
         constitutive_law: ConstitutiveLaw,
         et_benchmark: ETBenchmark,
     ):
-        servo_params = None
+        # TODO have X_target become new X_0? or X_guess become X_0?
+        if et_benchmark.X_control_stack is not None:
+            X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
+        else:
+            X_0 = None
 
-        if et_benchmark.stress_mask_indices is not None:
-            servo_params = jnp.zeros((3, 3)).at[et_benchmark.stress_mask_indices].get()
-
-        def scan_fn(carry, control):
+        def scan_fn(carry, xs):
             (
                 constitutive_law_prev,
                 material_points_prev,
                 step,
-                servo_params,
             ) = carry
 
-            L_control, stress_control = control
-            if et_benchmark.stress_mask_indices is not None:
-                stress_control_target = stress_control.at[
-                    et_benchmark.stress_mask_indices
-                ].get()
+            L_control, x_target = xs
 
-            def update_from_params(L_next):
+            def update(L_next):
+                """Call the update function"""
                 L_next_padded = jnp.expand_dims(L_next, axis=0)
                 material_points_next = material_points_prev.update_L_and_F_stack(
                     L_stack_next=L_next_padded,
                     dt=self.config.dt,
                 )
-                # jnp.expand_dims(L_next, axis=0
+
                 material_points_next, constitutive_law_next = (
                     constitutive_law_prev.update(
                         material_points=material_points_next, dt=self.config.dt
@@ -141,29 +139,24 @@ class ETSolver(Base):
                 return material_points_next, constitutive_law_next
 
             def servo_controller(sol, args):
-                L_next = L_control.at[et_benchmark.stress_mask_indices].set(sol)
+                L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
 
-                material_points_next, constitutive_law_next = update_from_params(L_next)
+                material_points_next, constitutive_law_next = update(L_next)
 
-                stress_next = jnp.squeeze(material_points_next.stress_stack, axis=0)
-                stress_guess = stress_next.at[et_benchmark.stress_mask_indices].get()
+                stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
 
-                R = stress_guess - stress_control_target
+                R = et_benchmark.loss_stress(stress_guess, x_target)
                 return R, (material_points_next, constitutive_law_next)
 
-            if et_benchmark.stress_mask_indices is None:
-                material_points_next, constitutive_law_next = update_from_params(
-                    L_control
-                )
-
+            if et_benchmark.X_control_stack is None:
+                material_points_next, constitutive_law_next = update(L_control)
             else:
-                params = servo_params
                 solver = optx.Newton(rtol=1e-8, atol=1e-1)
 
                 sol = optx.root_find(
                     servo_controller,
                     solver,
-                    params,
+                    X_0,
                     throw=False,
                     has_aux=True,
                     max_steps=20,
@@ -171,55 +164,85 @@ class ETSolver(Base):
 
                 material_points_next, constitutive_law_next = sol.aux
 
-            carry = (
-                constitutive_law_next,
+            accumulate = self.get_output(
                 material_points_next,
-                step + 1,
-                servo_params,
+                constitutive_law_next,
+                material_points_prev,
+                constitutive_law_prev,
             )
+            carry = (constitutive_law_next, material_points_next, step + 1)
 
-            accumulate = []
-            for key in list(self.config.output):
-                output = None
-                for name, member in inspect.getmembers(material_points_next):
-                    if key == name:
-                        output = material_points_next.__getattribute__(key)
-                for name, member in inspect.getmembers(constitutive_law_next):
-                    if key == name:
-                        output = constitutive_law_next.__getattribute__(key)
-
-                # workaround around
-                # properties of one class depend on properties of another
-                if key == "phi_stack":
-                    output = material_points_next.phi_stack(constitutive_law_next.rho_p)
-                elif key == "specific_volume_stack":
-                    output = material_points_next.specific_volume_stack(
-                        constitutive_law_next.rho_p
-                    )
-                elif key == "inertial_number_stack":
-                    output = material_points_next.inertial_number_stack(
-                        constitutive_law_next.rho_p,
-                        constitutive_law_next.d,
-                    )
-
-                if eqx.is_array(output):
-                    output = output.squeeze(axis=0)
-
-                if output is None:
-                    raise ValueError(f" {key} output not is not supported")
-                accumulate.append(output)
             return carry, accumulate
 
-        return jax.lax.scan(
+        # accumulate0 = self.get_output(material_points, constitutive_law)
+
+        carry, accumulate = jax.lax.scan(
             scan_fn,
-            (
-                constitutive_law,
-                material_points,
-                0,
-                servo_params,
-            ),  # carry
+            (constitutive_law, material_points, 0),  # carry
             (
                 et_benchmark.L_control_stack,
-                et_benchmark.stress_control_stack,
+                et_benchmark.X_control_stack,
             ),  # control
         )
+        # accumulate_all = accumulate0 + accumulate
+        # accumulate0.extend(accumulate)
+        # accumulate.insert(0, accumulate0)
+        return carry, accumulate
+
+    def get_output(
+        self,
+        material_points,
+        constitutive_law,
+        material_points_prev=None,
+        constitutive_law_prev=None,
+    ):
+        accumulate = []
+        for key in list(self.config.output):
+            output = None
+            for name, member in inspect.getmembers(material_points):
+                if key == name:
+                    output = material_points.__getattribute__(key)
+
+            for name, member in inspect.getmembers(constitutive_law):
+                if key == name:
+                    output = constitutive_law.__getattribute__(key)
+
+            # workaround around
+            # properties of one class depend on properties of another
+            if key == "phi_stack":
+                output = material_points.phi_stack(constitutive_law.rho_p)
+            elif key == "specific_volume_stack":
+                output = material_points.specific_volume_stack(constitutive_law.rho_p)
+            elif key == "inertial_number_stack":
+                output = material_points.inertial_number_stack(
+                    constitutive_law.rho_p,
+                    constitutive_law.d,
+                )
+            elif key == "dgamma_p_dt_stack":
+                if constitutive_law_prev is None:
+                    prev_eps_e_stack = jnp.zeros((3, 3))
+                else:
+                    prev_eps_e_stack = constitutive_law_prev.eps_e_stack
+                output = material_points.dgamma_p_dt_stack(
+                    self.config.dt,
+                    constitutive_law.eps_e_stack,
+                    prev_eps_e_stack,
+                )
+            elif key == "deps_p_v_dt_stack":
+                if constitutive_law_prev is None:
+                    prev_eps_e_stack = jnp.zeros((3, 3))
+                else:
+                    prev_eps_e_stack = constitutive_law_prev.eps_e_stack
+                output = material_points.deps_p_v_dt_stack(
+                    self.config.dt,
+                    constitutive_law.eps_e_stack,
+                    prev_eps_e_stack,
+                )
+
+            if eqx.is_array(output):
+                output = output.squeeze(axis=0)
+
+            if output is None:
+                raise ValueError(f" {key} output not is not supported")
+            accumulate.append(output)
+        return accumulate
