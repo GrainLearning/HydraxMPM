@@ -6,12 +6,7 @@ import equinox as eqx
 # from typeguard import typechecked
 from jaxtyping import Array, Float, jaxtyped
 
-# from typeguard import typechecked as typechecker
-from beartype import beartype as typechecker
 
-
-# Type-check a function
-# @jaxtyped(typechecker=typechecker)
 class Base(eqx.Module):
     """Base class contains. setup and replace functions"""
 

@@ -1,5 +1,13 @@
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import (
+    LogLocator,
+    ScalarFormatter,
+    FormatStrFormatter,
+    NullFormatter,
+    StrMethodFormatter,
+)
+
+from matplotlib import ticker
 
 
 def make_plot(
@@ -13,9 +21,10 @@ def make_plot(
     ylim=None,
     xlogscale=False,
     ylogscale=False,
+    label=None,
     **kwargs,
 ):
-    out = ax.plot(x, y, **kwargs)
+    out = ax.plot(x, y, label=label, **kwargs)
     (line,) = out
     if start_end_markers:
         ax.plot(x[0], y[0], ".", color=line.get_color())
@@ -25,12 +34,22 @@ def make_plot(
 
     ax.set_ylabel(ylabel)
 
+    def format_func(value, tick_number):
+        return "%g" % (value)
+
+    # ax.xaxis.set_major_formatter(plt.FuncFormatter(format_func))
     if xlogscale:
         ax.set_xscale("log")
+        # ax.yaxis.set_major_formatter(FormatStrFormatter("%s"))
         ax.xaxis.set_major_formatter(ScalarFormatter())
+        ax.xaxis.set_minor_formatter(ScalarFormatter())
     if ylogscale:
         ax.set_yscale("log")
+        # ax.semilogy(range(100))
         ax.yaxis.set_major_formatter(ScalarFormatter())
+        ax.yaxis.set_minor_formatter(ScalarFormatter())
+        # ax.ticklabel_format(style="plain", axis="y")
+        # ax.yaxis.set_major_formatter(plt.FuncFormatter(format_func))
 
     if xlim:
         ax.set_xlim(xlim)
@@ -46,6 +65,8 @@ def plot_set1(
     dgammadt_stack,
     specific_volume_stack,
     inertial_number_stack,
+    dgamma_p_dt_stack,
+    deps_p_v_dt_stack,
     fig_ax=None,
     **kwargs,
 ):
@@ -66,81 +87,79 @@ def plot_set1(
         _description_
     """
     if fig_ax is None:
-        fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(8, 5))
+        fig, ax = plt.subplots(
+            ncols=3, nrows=2, figsize=(7.5 * 0.9, 4.5 * 0.9), dpi=300
+        )
     else:
         fig, ax = fig_ax
 
     q_p_stack = q_vm_stack / p_stack
 
-    ax0_lim = kwargs.get("ax0_lim", [[0, None], [0, None]])
-
+    ls = kwargs.get("ls", "-")
+    color = kwargs.get("color", None)
+    label = kwargs.get("label", None)
     make_plot(
         ax.flat[0],
         p_stack,
         q_vm_stack,
         xlabel="$p$ [Pa]",
         ylabel="$q$ [Pa]",
-        xlim=ax0_lim[0],
-        ylim=ax0_lim[1],
+        ls=ls,
+        color=color,
+        label=label,
     )
-    ax1_lim = kwargs.get("ax1_lim", [[0, None], [0, None]])
-
+    # ax.flat[0].set_xlim((0, None), auto=True)
+    # ax.flat[0].set_ylim((0, None), auto=True)
+    # ax.flat[0].margins(0.1, 0.15)
     make_plot(
         ax.flat[1],
         gamma_stack,
         q_vm_stack,
         xlabel="$\\gamma$ [-]",
         ylabel="$q$ [Pa]",
-        xlim=ax1_lim[0],
-        ylim=ax1_lim[1],
+        ls=ls,
+        color=color,
     )
-    ax2_lim = kwargs.get("ax2_lim", [[0, None], [0, None]])
 
     make_plot(
         ax.flat[2],
-        dgammadt_stack,
-        q_vm_stack,
-        xlabel="$\\dot\\gamma$ [-]",
-        ylabel="$q$ [Pa]",
-        xlim=ax2_lim[0],
-        ylim=ax2_lim[1],
+        specific_volume_stack,
+        q_p_stack,
+        ylabel="$q/p$ [-]",
+        xlabel="$v=\\phi^{-1}$ [-]",
+        ls=ls,
+        color=color,
     )
 
-    ax3_lim = kwargs.get("ax3_lim", [[0, None], [0, None]])
     make_plot(
         ax.flat[3],
         p_stack,
         specific_volume_stack,
         xlogscale=True,
         ylogscale=True,
-        xlim=ax3_lim[0],
-        ylim=ax3_lim[1],
         xlabel="$p$ [Pa]",
-        ylabel="$v=\\frac{1}{\\phi}$ [-]",
+        ylabel="$v=\\phi^{-1}$ [-]",
+        ls=ls,
+        color=color,
     )
-
-    ax4_lim = kwargs.get("ax4_lim", [[0, None], [0, None]])
     make_plot(
         ax.flat[4],
         gamma_stack,
         q_p_stack,
-        xlim=ax4_lim[0],
-        ylim=ax4_lim[1],
         xlabel="$\\gamma$ [-]",
         ylabel="$q/p$ [-]",
+        ls=ls,
+        color=color,
     )
 
-    ax5_lim = kwargs.get("ax5_lim", [[0, None], [0, None]])
     make_plot(
         ax.flat[5],
         inertial_number_stack,
         q_p_stack,
-        xlim=ax5_lim[0],
-        ylim=ax5_lim[1],
-        # xlogscale=True,
-        # ylogscale=True,
         xlabel="$I$ [-]",
         ylabel="$q/p$ [-]",
+        ls=ls,
+        color=color,
     )
 
     return fig, ax

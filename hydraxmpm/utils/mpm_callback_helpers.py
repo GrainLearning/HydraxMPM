@@ -70,6 +70,7 @@ def io_helper_vtk(
             for key in material_points_output:
                 output_name = clean_word(key, remove_word_stack)
                 cloud[output_name] = solver.material_points.__getattribute__(key)
+
             cloud.save(f"{solver.config.output_path}/particles_{step}.vtk")
 
         solver_output = solver.config.output.get("solver", ())
