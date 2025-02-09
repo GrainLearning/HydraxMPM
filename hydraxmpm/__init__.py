@@ -13,10 +13,12 @@ from .common.base import Base
 from .constitutive_laws.linearelastic import LinearIsotropicElastic
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay
 from .constitutive_laws.mu_i_rheology_incompressible import MuI_incompressible
+from .constitutive_laws.newtonfluid import NewtonFluid
 from .et_benchmarks.et_benchmarks import (
+    ConstantPressureSimpleShear,
+    ConstantVolumeSimpleShear,
     ETBenchmark,
     IsotropicCompression,
-    VolumeControlShear,
 )
 from .forces.boundary import Boundary
 from .forces.force import Force
@@ -39,7 +41,6 @@ hook.uninstall()
 
 # from .materials.druckerprager import DruckerPrager
 
-# from .materials.newtonfluid import NewtonFluid
 # from .solvers.config import Config
 # from .solvers.ip_solver import IPSolver
 
