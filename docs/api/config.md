@@ -1,18 +1,10 @@
 # Configuration 
 
-A configuration data object is passed down to all `HydraxMPM` objects. This pre-allocates necessary memory for simulations.
+A configuration data object is passed down to `HydraxMPM` solvers. The same configuration is used for both single integration point solver and material point method solver.
 
-
-Two config types are available:
-
-* **`MPMConfig`**: For Material Point Method (MPM) simulations.
-* **`IPConfig`**: For single integration point element tests.
 
 ## API
-::: config.mpm_config.MPMConfig
+::: solvers.config.Config
 
-# TODO
-<!-- ::: config.mpm_config.MPMConfig -->
 
-                
-**Integration Point Config**
+::: solvers.mpm_solver.MPMSolver

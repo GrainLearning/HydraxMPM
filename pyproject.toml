@@ -13,7 +13,7 @@ dependencies = [
     "jax[cuda12]>=0.4.35",
     "jaxtyping>=0.2.37",
     "typeguard==2.13.3",
-    "beartype>=0.19.0",
+
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},
@@ -59,6 +59,8 @@ plot = [
     "matplotlib>=3.9.2",
     "pyvista>=0.44.1",
     "seaborn>=0.13.2",
+    "scienceplots>=2.1.1",
+    
 ]
 
 

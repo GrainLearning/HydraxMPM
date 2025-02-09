@@ -42,7 +42,7 @@ Import HydraxMPM and supporting the JAX dependencies.
 
 ```python {hl_lines="3"}
 
---8<-- "t1_granular_column.py:2:5"
+# --8<-- "t1_granular_column.py:2:5"
 
 ```
 
@@ -54,7 +54,7 @@ Create rectangular column a rectangular column of material points. Particles are
 
 ```python 
 
---8<-- "t1_granular_column.py:8:23"
+# --8<-- "t1_granular_column.py:8:23"
 
 ```
 
@@ -77,7 +77,7 @@ This is a juicy sandwich of all common general simulation parameters.
 
 ```python 
 
---8<-- "t1_granular_column.py:24:37"
+# --8<-- "t1_granular_column.py:24:37"
 
 ```
  Ok... it seems like a lot, but actually pretty straight forward:
@@ -109,7 +109,7 @@ This is a juicy sandwich of all common general simulation parameters.
 Lets see the summary of the config
 ```python 
 
---8<-- "t1_granular_column.py:38:38"
+# --8<-- "t1_granular_column.py:38:38"
 
 ```
 If all went well you should get the following output:
@@ -134,19 +134,19 @@ total time: 12.000000000000002
 
 Lets create a material with some initial bulk density and a particle density
 
-```python 
+<!-- ```python  -->
 
---8<-- "t1_granular_column.py:40:44"
+# --8<-- "t1_granular_column.py:40:44"
 
-```
+<!-- ``` -->
 
 Now the material dataclass
 
-```python 
+<!-- ```python  -->
 
---8<-- "t1_granular_column.py:45:56"
+# --8<-- "t1_granular_column.py:45:56"
 
-```
+<!-- ``` -->
 
 Lets break this down:
 
@@ -170,30 +170,30 @@ We initialize particle stresses to match the known pressure state, given a prede
 
 Here we finally make use of JAX [vmap](https://jax.readthedocs.io/en/latest/_autosummary/jax.vmap.html), to get the stress tensor. 
 
-```python 
+<!-- ```python  -->
 
---8<-- "t1_granular_column.py:58:61"
+# --8<-- "t1_granular_column.py:58:61"
 
-```
+<!-- ``` -->
 
 Pass all positions and stresses to the `Particles` dataclass.
-```python 
+<!-- ```python  -->
 
---8<-- "t1_granular_column.py:63:65"
+# --8<-- "t1_granular_column.py:63:65"
 
-```
+<!-- ``` -->
 We can create background grid nodes via the config.
 
-```python 
+<!-- ```python  -->
 
---8<-- "t1_granular_column.py:67:67"
+# --8<-- "t1_granular_column.py:67:67"
 
-```
+<!-- ``` -->
 
 The `discretize` function determines initial particle volume by dividing the number of particles in a cell by the cell size.
 ```python 
 
---8<-- "t1_granular_column.py:69:72"
+# --8<-- "t1_granular_column.py:69:72"
 
 ```
 
@@ -204,27 +204,27 @@ Gravity is slowly ramped up
 
 ```python 
 
---8<-- "t1_granular_column.py:73:77"
+# --8<-- "t1_granular_column.py:73:77"
 
 ```
 
 Creating the outside domain box.
 
-```python 
+<!-- ```python 
 
---8<-- "t1_granular_column.py:79:81"
+# --8<-- "t1_granular_column.py:79:81"
 
-```
+``` -->
 
 ## Step 7: create the `Solver`
 
 The solver determines how the background grid and material points interact.
 
-```python 
+<!-- ```python 
 
---8<-- "t1_granular_column.py:82:82"
+# --8<-- "t1_granular_column.py:82:82"
 
-```
+``` -->
 
 ??? Tip
     We recommend using the `hdx.ASFLIP` for granular  materials
@@ -235,11 +235,11 @@ The solver determines how the background grid and material points interact.
 - See [available callback functions]()
 
 
-```python 
+<!-- ```python 
 
---8<-- "t1_granular_column.py:84:104"
+# --8<-- "t1_granular_column.py:84:104"
 
-```
+``` -->
 
 
 
@@ -247,19 +247,19 @@ The solver determines how the background grid and material points interact.
 
 
 
-```python 
+<!-- ```python 
 
---8<-- "t1_granular_column.py:108:121"
+# --8<-- "t1_granular_column.py:108:121"
 
-```
+``` -->
 
 
 ## Step 10: Granular column collapse
 
 
 
-```python 
+<!-- ```python 
 
---8<-- "t1_granular_column.py:125:143"
+# --8<-- "t1_granular_column.py:125:143"
 
-```
+``` -->

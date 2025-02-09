@@ -1,2 +1,2 @@
 ## API
-::: particles.particles.Particles
+::: material_points.material_points.MaterialPoints
