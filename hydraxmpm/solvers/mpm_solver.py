@@ -23,6 +23,7 @@ from ..shapefunctions.linear import vmap_linear_shapefunction
 from ..solvers.config import Config
 from ..utils.math_helpers import (
     get_hencky_strain_stack,
+    get_inertial_number_stack,
     get_pressure_stack,
     get_q_vm_stack,
     get_scalar_shear_strain_stack,
@@ -159,12 +160,14 @@ class MPMSolver(Base):
         # initialize pressure and density...
         new_constitutive_laws = []
         new_material_points = self.material_points
-        new_material_points.init_volume_from_cellsize(
+        new_material_points = new_material_points.init_volume_from_cellsize(
             self.grid.cell_size, self.config.ppc
         )
+        # print("setup {}", new_material_points.volume_stack)
         for constitutive_law in self.constitutive_laws:
             new_constitutive_law, new_material_points = constitutive_law.init_state(
-                self.material_points
+                # self.material_points
+                new_material_points
             )
             new_constitutive_laws.append(new_constitutive_law)
 
@@ -408,35 +411,69 @@ class MPMSolver(Base):
     @jax.jit
     def run(self: Self, unroll=False):
         def main_loop(step, solver):
+            def save_files(step, name="", **kwargs):
+                if len(kwargs) > 0:
+                    jnp.savez(
+                        f"{self.config.output_path}/{name}.{step.astype(int)}",
+                        **kwargs,
+                    )
+
             new_solver = solver.update(step)
+
+            def save_all():
+                # output material points
+
+                solver_arrays, material_point_arrays = self.get_output(new_solver)
+
+                jax.debug.callback(
+                    save_files, step, "material_points", **material_point_arrays
+                )
+                jax.debug.callback(save_files, step, "solver", **solver_arrays)
+
+                jax.debug.print("[{}]  output {}", step, step / self.config.store_every)
+
+            jax.lax.cond(
+                step % self.config.store_every == 0,
+                lambda _: save_all(),
+                lambda _: None,
+                operand=False,
+            )
+
             return new_solver
 
-        # @scan_tqdm(self.config.num_steps / self.config.store_every)
-        def scan_fn(solver, step):
-            step_next = step + self.config.store_every
-            new_solver = jax.lax.fori_loop(step, step_next, main_loop, solver)
-            for callback in self.callbacks:
-                callback(new_solver, step_next)
+        return jax.lax.fori_loop(0, self.config.num_steps, main_loop, self)
 
-            return new_solver, []
+    def get_output(self, new_solver):
+        material_points_output = new_solver.config.output.get("material_points", ())
 
-        xs = jnp.arange(0, self.config.num_steps, self.config.store_every).astype(
-            jnp.int32
-        )
+        material_point_arrays = {}
+        for key in material_points_output:
+            # workaround around
+            # properties of one class depend on properties of another
+            output = new_solver.material_points.__getattribute__(key)
 
-        carry, _ = jax.lax.scan(
-            scan_fn,
-            self,
-            xs=xs,
-            unroll=unroll,
-        )
+            if callable(output):
+                output = output(
+                    dt=new_solver.config.dt,
+                    rho_p=new_solver.constitutive_laws[0].rho_p,
+                    d=new_solver.constitutive_laws[0].d,
+                    eps_e_stack=new_solver.constitutive_laws[0].eps_e_stack,
+                    eps_e_stack_prev=self.constitutive_laws[0].eps_e_stack,
+                    W_stack=new_solver.constitutive_laws[0].W_stack,
+                )
 
-        return carry
+            material_point_arrays[key] = output
 
-    def map_p2g(self, key=None, X_stack=None, return_solver=False):
+        solver_arrays = {}
+        solver_output = new_solver.config.output.get("solver", ())
+        for key in solver_output:
+            solver_arrays[key] = new_solver.__getattribute__(key)
+
+        return solver_arrays, material_point_arrays
+
+    def map_p2g(self, X_stack, return_solver=False):
         """Assumes shapefunctions/interactions have already been generated"""
-        if X_stack is None:
-            X_stack = self.material_points.__getattribute__(key)
+
         mass_stack = self.material_points.mass_stack
 
         def p2g(point_id, shapef, shapef_grad_padded, intr_dist_padded):
@@ -477,8 +514,8 @@ class MPMSolver(Base):
             return new_self, jax.vmap(divide)(nodes_X_stack, nodes_mass_stack)
         return jax.vmap(divide)(nodes_X_stack, nodes_mass_stack)
 
-    def map_p2g2g(self, key, X_stack=None, return_solver=False):
-        new_self, N_stack = self.map_p2g(key, X_stack, return_solver=True)
+    def map_p2g2g(self, X_stack=None, return_solver=False):
+        new_self, N_stack = self.map_p2g(X_stack, return_solver=True)
 
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist_padded):
             return intr_shapef * N_stack.at[intr_hashes].get()
@@ -501,53 +538,85 @@ class MPMSolver(Base):
             )
 
     @property
+    def p2g_position_stack(self):
+        return self.grid.position_stack
+
+    @property
+    def p2g_position_mesh(self):
+        return self.grid.position_mesh
+
+    @property
     def p2g_p_stack(self):
-        stress_stack = self.map_p2g("stress_stack")
+        stress_stack = self.map_p2g(self.material_points.stress_stack)
         return get_pressure_stack(stress_stack)
 
     @property
     def p2g_q_vm_stack(self):
-        stress_stack = self.map_p2g("stress_stack")
+        stress_stack = self.map_p2g(self.material_points.stress_stack)
         return get_q_vm_stack(stress_stack)
 
     @property
     def p2g_q_p_stack(self):
-        stress_stack = self.map_p2g("stress_stack")
+        stress_stack = self.map_p2g(self.material_points.stress_stack)
         q_stack = get_q_vm_stack(stress_stack)
         p_stack = get_pressure_stack(stress_stack)
         return q_stack / p_stack
 
     @property
     def p2g_KE_stack(self):
-        KE_stack = self.map_p2g("KE_stack")
-        return KE_stack
+        KE_stack = self.material_points.KE_stack
+        return self.map_p2g(KE_stack)
+
+    @property
+    def p2g_KE_stack(self):
+        KE_stack = self.material_points.KE_stack
+        return self.map_p2g(KE_stack)
 
     @property
     def p2g_dgamma_dt_stack(self):
-        depsdt_stack = self.map_p2g("depsdt_stack")
-        dgammadt_stack = get_scalar_shear_strain_stack(depsdt_stack)
-        return dgammadt_stack
+        depsdt_stack = self.map_p2g(self.material_points.depsdt_stack)
+        return get_scalar_shear_strain_stack(depsdt_stack)
 
     @property
     def p2g_gamma_stack(self):
-        eps_stack = self.map_p2g("eps_stack")
+        eps_stack = self.map_p2g(self.material_points.eps_stack)
         return get_scalar_shear_strain_stack(eps_stack)
 
     @property
     def p2g_specific_volume_stack(self):
         specific_volume_stack = self.material_points.specific_volume_stack(
-            self.constitutive_laws[0].rho_p
+            rho_p=self.constitutive_laws[0].rho_p
         )
         return self.map_p2g(X_stack=specific_volume_stack)
 
     @property
-    def p2g_inertial_number_stack(self):
-        inertial_number_stack = self.material_points.inertial_number_stack(
-            self.constitutive_laws[0].rho_p, self.constitutive_laws[0].d
-        )
-        return self.map_p2g(X_stack=inertial_number_stack)
+    def p2g_viscosity_stack(self):
+        q_stack = self.p2g_q_vm_stack
+        dgamma_dt_stack = self.p2g_dgamma_dt_stack
+        return (jnp.sqrt(3) * q_stack) / dgamma_dt_stack
 
-    # @property
-    # TODO
-    # def p2g_phi_stack(self):
-    #     return self.map_p2g("phi_stack")
+    @property
+    def p2g_inertial_number_stack(self):
+        pdgamma_dt_stack = self.p2g_dgamma_dt_stack
+        p_stack = self.p2g_p_stack
+        inertial_number_stack = get_inertial_number_stack(
+            p_stack,
+            pdgamma_dt_stack,
+            p_dia=self.constitutive_laws[0].d,
+            rho_p=self.constitutive_laws[0].rho_p,
+        )
+        # inertial_number_stack = self.material_points.inertial_number_stack(
+        #     rho_p=self.constitutive_laws[0].rho_p, d=self.constitutive_laws[0].d
+        # )
+        return inertial_number_stack
+
+    @property
+    def p2g_PE_stack(self):
+        PE_stack = self.material_points.PE_stack(
+            self.config.dt, self.constitutive_laws[0].W_stack
+        )
+        return self.map_p2g(X_stack=PE_stack)
+
+    @property
+    def p2g_KE_PE_stack(self):
+        return self.p2g_KE_stack / self.p2g_PE_stack

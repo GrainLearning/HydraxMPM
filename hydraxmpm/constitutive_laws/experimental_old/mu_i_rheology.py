@@ -63,7 +63,6 @@ class MuI(Material):
         absolute_density: jnp.float32 = 0.0,
         dim: jnp.int32 = 3,
     ) -> Self:
-        jax.debug.print("{}", K)
         return cls(
             mu_s=mu_s,
             mu_d=mu_d,

@@ -13,42 +13,28 @@ from ..material_points.material_points import MaterialPoints
 from ..utils.math_helpers import (
     get_dev_strain,
     get_inertial_number,
+    get_inertial_number_stack,
     get_scalar_shear_strain,
     get_sym_tensor,
+    get_pressure,
 )
 from .constitutive_law import ConstitutiveLaw
 
-
-def get_mu_I(I, mu_s, mu_d, I0):
-    return mu_s + (mu_d - mu_s) * (1 / (1 + I0 / I))
+import optimistix as optx
 
 
-def get_mu_I_regularized_exp(I, mu_s, mu_d, I0, pen, dgamma_dt):
-    s = 1.0 / jnp.sqrt(dgamma_dt**2 + pen**2)
-    return mu_s * s + (mu_d - mu_s) * (1.0 / (1.0 + I0 / I))
+def give_phi(p, I, Ic, phi_c, K):
+    return phi_c * (1 - I / Ic) * (1 + p / K)
 
 
-def get_I_phi(phi, phi_c, I_phi):
-    return -I_phi * jnp.log(phi / phi_c)
-
-
-def get_pressure(dgammadt, I, d, rho_p):
-    return rho_p * ((dgammadt * d) / I) ** 2
-
-
-def give_p(K, rho, rho_0):
-    return K * (rho / rho_0 - 1.0)
-
-
-def give_rho(K, rho_0, p):
-    return rho_0 * ((p / K) + 1)
-
-
-class MuI_incompressible(ConstitutiveLaw):
+class ExpMuIPhiILC(ConstitutiveLaw):
     mu_s: TypeFloat
     mu_d: TypeFloat
     I_0: TypeFloat
     K: TypeFloat
+    Ic: TypeFloat
+    phi_c: TypeFloat
+    init_by_density: bool = True
 
     """
     (nearly) incompressible mu I
@@ -70,7 +56,10 @@ class MuI_incompressible(ConstitutiveLaw):
         mu_s: TypeFloat,
         mu_d: TypeFloat,
         I_0: TypeFloat,
+        Ic: TypeFloat,
+        phi_c: TypeFloat,
         K: TypeFloat = 1.0,
+        init_by_density: bool = True,
         **kwargs,
     ) -> Self:
         self.mu_s = mu_s
@@ -80,6 +69,12 @@ class MuI_incompressible(ConstitutiveLaw):
         self.I_0 = I_0
 
         self.K = K
+
+        self.Ic = Ic
+
+        self.phi_c = phi_c
+
+        self.init_by_density = init_by_density
 
         # init d, dim, rho_p, _setup_done
         super().__init__(**kwargs)
@@ -95,59 +90,39 @@ class MuI_incompressible(ConstitutiveLaw):
         rho_0 = self.rho_0
 
         rho = self.rho_0
-
         if self.init_by_density:
-            if eqx.is_array(rho_0):
-                vmap_give_p_ref = partial(
-                    jax.vmap,
-                    in_axes=(None, 0, None),
-                )(give_p)
-            else:
-                vmap_give_p_ref = give_p
-
-            p_0 = vmap_give_p_ref(self.K, rho_0, rho_0)
+            raise ValueError("Not supported")
         else:
             p_0_stack = p_0
+
+            dgamma_dt_stack = material_points.dgammadt_stack
             if not eqx.is_array(p_0_stack):
                 p_0_stack = p_0_stack * jnp.ones(material_points.num_points)
+            I_stack = get_inertial_number_stack(
+                p_0_stack, dgamma_dt_stack, self.d, self.rho_p
+            )
 
-            vmap_give_rho_ref = partial(
-                jax.vmap,
-                in_axes=(None, None, 0),
-            )(give_rho)
+            phi_stack = give_phi(p_0, I_stack, self.Ic, self.phi_c, self.K)
+            jax.debug.print("phi_stack {}", phi_stack)
+            rho_0 = phi_stack * self.rho_p
 
-            rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack)
-
-        rho_rho_0_stack = rho / self.rho_0
-        # print(rho_rho_0_stack)
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
+
+        phi_stack = rho_0 / self.rho_p
 
         new_stress_stack = vmap_update_ip(
             material_points.stress_stack,
             material_points.F_stack,
             material_points.L_stack,
-            rho_rho_0_stack,
+            phi_stack,
         )
         material_points = material_points.replace(stress_stack=new_stress_stack)
         # material_points = material_points.init_stress_from_p_0(p_0)
         # if there is pressure, then density is not on reference density
-        material_points = material_points.init_mass_from_rho_0(rho)
-
-        W_stack = None
-        if self.approx_strain_energy_density:
-            W_stack = jnp.zeros(material_points.num_points)
-
-        P_stack = None
-        if self.approx_stress_power:
-            P_stack = jnp.zeros(material_points.num_points)
+        material_points = material_points.init_mass_from_rho_0(rho_0)
 
         params = self.__dict__
-        params.update(
-            rho_0=rho_0,
-            p_0=p_0,
-            W_stack=W_stack,
-            P_stack=P_stack,
-        )
+        params.update(rho_0=rho_0, p_0=p_0)
         return self.__class__(**params), material_points
 
     def update(
@@ -158,18 +133,16 @@ class MuI_incompressible(ConstitutiveLaw):
     ) -> Tuple[MaterialPoints, Self]:
         """Update the material state and particle stresses for MPM solver."""
 
-        rho_rho_0_stack = material_points.rho_stack / self.rho_0
-        # rho_stack = material_points.rho_stack
-
-        deps_dt_stack = material_points.depsdt_stack
+        # rho_rho_0_stack = material_points.rho_stack / self.rho_0
+        phi_stack = material_points.phi_stack(self.rho_p)
 
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
 
         new_stress_stack = vmap_update_ip(
             material_points.stress_stack,
             material_points.F_stack,
-            deps_dt_stack,
-            rho_rho_0_stack,
+            material_points.L_stack,
+            phi_stack,
         )
 
         new_material_points = eqx.tree_at(
@@ -178,23 +151,21 @@ class MuI_incompressible(ConstitutiveLaw):
             (new_stress_stack),
         )
 
-        new_self = self.post_update(new_stress_stack, deps_dt_stack, dt)
-
-        return new_material_points, new_self
+        return new_material_points, self
 
     def update_ip(
         self: Self,
         stress_prev,
         F,
-        deps_dt,
-        rho_rho_0,
+        L,
+        phi,
     ):
+        deps_dt = get_sym_tensor(L)
+
         deps_dev_dt = get_dev_strain(deps_dt)
 
         if self.error_check:
-            rho_rho_0 = eqx.error_if(
-                rho_rho_0, jnp.isnan(rho_rho_0).any(), "rho_rho_0 is nan"
-            )
+            phi = eqx.error_if(phi, jnp.isnan(phi).any(), "phi is nan")
 
             deps_dev_dt = eqx.error_if(
                 deps_dev_dt, jnp.isnan(deps_dev_dt).any(), "deps_dev_dt is nan"
@@ -207,15 +178,48 @@ class MuI_incompressible(ConstitutiveLaw):
                 dgamma_dt, jnp.isnan(dgamma_dt).any(), "dgamma_dt is nan"
             )
 
-        # stress free condition...
-        rho_rho_0 = jnp.nanmax(jnp.array([rho_rho_0 - 1.0, 1e-6])) + 1.0
+        # rho_rho_0 = jnp.nanmax(jnp.array([rho_rho_0 - 1.0, 1e-6])) + 1.0
 
-        p = self.K * (rho_rho_0 - 1.0)
+        # regularize p and dgamma_dt to avoid division by zero
+        # p = jnp.nanmax(jnp.array([self.K * (rho_rho_0 - 1.0), 1.0e-12]))
+        # p = self.K * (rho_rho_0 - 1.0)
+
+        def residuals(sol, args):
+            I = get_inertial_number(sol, dgamma_dt, self.d, self.rho_p)
+
+            phi_guess = give_phi(sol, I, self.Ic, self.phi_c, self.K)
+
+            aux = I
+            return phi - phi_guess, aux
+
+        def find_roots():
+            solver = optx.Newton(
+                rtol=1e-10,
+                atol=1e-10,
+            )
+
+            sol = optx.root_find(
+                residuals,
+                solver,
+                get_pressure(stress_prev),
+                throw=False,
+                has_aux=True,
+                max_steps=10,
+                options=dict(lower=1.0),
+            )
+            return sol.value
+
+        p = jax.lax.stop_gradient(find_roots())
+        R, I = residuals(p, None)
 
         if self.error_check:
             p = eqx.error_if(p, jnp.isnan(p).any(), "p is nan")
 
         def stress_update(_):
+            # I = get_inertial_number(p, dgamma_dt, self.d, self.rho_p)
+
+            # I = jnp.nanmax(jnp.array([I, 1e-10]))
+
             # correction for viscosity diverges
             # r = 1e-10
             r = 0.001

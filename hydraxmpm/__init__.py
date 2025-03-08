@@ -13,12 +13,16 @@ from .common.base import Base
 from .constitutive_laws.linearelastic import LinearIsotropicElastic
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay
 from .constitutive_laws.mu_i_rheology_incompressible import MuI_incompressible
+from .constitutive_laws.exp_mu_i_phi_i import ExpMuIPhI
+from .constitutive_laws.exp_mu_i_csl import ExpMuICSL
 from .constitutive_laws.newtonfluid import NewtonFluid
+from .constitutive_laws.exp_mu_i_phi_i_lc import ExpMuIPhiILC
 from .et_benchmarks.et_benchmarks import (
     ConstantPressureSimpleShear,
     ConstantVolumeSimpleShear,
     ETBenchmark,
     IsotropicCompression,
+    TriaxialCompressionDrained,
 )
 from .forces.boundary import Boundary
 from .forces.force import Force
@@ -31,8 +35,8 @@ from .solvers.mpm_solver import MPMSolver
 from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
 from .solvers.usl_asflip import USL_ASFLIP
-from .utils.mpm_callback_helpers import io_helper_vtk
-from .utils.plot import make_plot, plot_set1
+from .utils.mpm_callback_helpers import npz_to_vtk
+from .utils.plot import make_plot, plot_set1, plot_set1_short
 
 hook.uninstall()
 

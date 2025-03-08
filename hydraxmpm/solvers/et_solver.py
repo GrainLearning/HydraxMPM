@@ -80,7 +80,7 @@ class ETSolver(Base):
 
         return self.__class__(**params)
 
-    # @jax.jit
+    @jax.jit
     def run(self: Self, return_carry: bool = False):
         accumulate_list = []
         carry_list = []
@@ -151,7 +151,7 @@ class ETSolver(Base):
             if et_benchmark.X_control_stack is None:
                 material_points_next, constitutive_law_next = update(L_control)
             else:
-                solver = optx.Newton(rtol=1e-8, atol=1e-1)
+                solver = optx.Newton(rtol=1e-10, atol=1e-2)
 
                 sol = optx.root_find(
                     servo_controller,
@@ -197,47 +197,27 @@ class ETSolver(Base):
         constitutive_law_prev=None,
     ):
         accumulate = []
-        for key in list(self.config.output):
+        for key in self.config.output:
             output = None
+            # workaround around
+            # properties of one class depend on properties of another
             for name, member in inspect.getmembers(material_points):
                 if key == name:
                     output = material_points.__getattribute__(key)
 
+                    if callable(output):
+                        output = output(
+                            dt=self.config.dt,
+                            rho_p=constitutive_law.rho_p,
+                            d=constitutive_law.d,
+                            eps_e_stack=constitutive_law.eps_e_stack,
+                            eps_e_stack_prev=constitutive_law_prev.eps_e_stack,
+                        )
             for name, member in inspect.getmembers(constitutive_law):
                 if key == name:
                     output = constitutive_law.__getattribute__(key)
-
-            # workaround around
-            # properties of one class depend on properties of another
-            if key == "phi_stack":
-                output = material_points.phi_stack(constitutive_law.rho_p)
-            elif key == "specific_volume_stack":
-                output = material_points.specific_volume_stack(constitutive_law.rho_p)
-            elif key == "inertial_number_stack":
-                output = material_points.inertial_number_stack(
-                    constitutive_law.rho_p,
-                    constitutive_law.d,
-                )
-            elif key == "dgamma_p_dt_stack":
-                if constitutive_law_prev is None:
-                    prev_eps_e_stack = jnp.zeros((3, 3))
-                else:
-                    prev_eps_e_stack = constitutive_law_prev.eps_e_stack
-                output = material_points.dgamma_p_dt_stack(
-                    self.config.dt,
-                    constitutive_law.eps_e_stack,
-                    prev_eps_e_stack,
-                )
-            elif key == "deps_p_v_dt_stack":
-                if constitutive_law_prev is None:
-                    prev_eps_e_stack = jnp.zeros((3, 3))
-                else:
-                    prev_eps_e_stack = constitutive_law_prev.eps_e_stack
-                output = material_points.deps_p_v_dt_stack(
-                    self.config.dt,
-                    constitutive_law.eps_e_stack,
-                    prev_eps_e_stack,
-                )
+                    if callable(output):
+                        continue
 
             if eqx.is_array(output):
                 output = output.squeeze(axis=0)

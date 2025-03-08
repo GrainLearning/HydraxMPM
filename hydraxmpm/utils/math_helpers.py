@@ -14,6 +14,14 @@ from ..common.types import (
 )
 
 
+def get_double_contraction(A, B):
+    return jnp.trace(A @ B.T)
+
+
+def get_double_contraction_stack(A_stack, B_stack):
+    return jax.vmap(get_double_contraction)(A_stack, B_stack)
+
+
 def get_pressure(stress: TypeFloatMatrix3x3, dim: int = 3) -> TypeFloat:
     """Get compression positive pressure from the cauchy stress tensor.
 

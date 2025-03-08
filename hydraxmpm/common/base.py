@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Self
+from typing import Self, Optional, Dict
 
 import equinox as eqx
 
@@ -10,8 +10,14 @@ from jaxtyping import Array, Float, jaxtyped
 class Base(eqx.Module):
     """Base class contains. setup and replace functions"""
 
+    name: Optional[str] = eqx.field(static=True, default=None)
+    other: Optional[Dict] = eqx.field(static=True, default=None)
+    error_check: bool = eqx.field(static=True, default=False)
+
     def __init__(self: Self, **kwargs) -> Self:
-        pass
+        self.name = kwargs.get("name", None)
+        self.other = kwargs.get("other", None)
+        self.error_check = kwargs.get("error_check", False)
 
     def replace(self: Self, **kwargs) -> Self:
         return dataclasses.replace(self, **kwargs)

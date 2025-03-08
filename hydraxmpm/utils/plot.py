@@ -22,13 +22,18 @@ def make_plot(
     xlogscale=False,
     ylogscale=False,
     label=None,
+    start_end_markersize=None,
     **kwargs,
 ):
     out = ax.plot(x, y, label=label, **kwargs)
     (line,) = out
     if start_end_markers:
-        ax.plot(x[0], y[0], ".", color=line.get_color())
-        ax.plot(x[-1], y[-1], "x", color=line.get_color())
+        ax.plot(
+            x[0], y[0], ".", color=line.get_color(), markersize=start_end_markersize
+        )
+        ax.plot(
+            x[-1], y[-1], "x", color=line.get_color(), markersize=start_end_markersize
+        )
 
     ax.set_xlabel(xlabel)
 
@@ -65,8 +70,6 @@ def plot_set1(
     dgammadt_stack,
     specific_volume_stack,
     inertial_number_stack,
-    dgamma_p_dt_stack,
-    deps_p_v_dt_stack,
     fig_ax=None,
     **kwargs,
 ):
@@ -137,8 +140,8 @@ def plot_set1(
         specific_volume_stack,
         xlogscale=True,
         ylogscale=True,
-        xlabel="$p$ [Pa]",
-        ylabel="$v=\\phi^{-1}$ [-]",
+        xlabel="$p$ [Pa] (log-scale)",
+        ylabel="$v=\\phi^{-1}$ [-] (log-scale)",
         ls=ls,
         color=color,
     )
@@ -160,6 +163,94 @@ def plot_set1(
         ylabel="$q/p$ [-]",
         ls=ls,
         color=color,
+    )
+
+    return fig, ax
+
+
+def plot_set1_short(
+    p_stack,
+    q_vm_stack,
+    gamma_stack,
+    specific_volume_stack,
+    inertial_number_stack,
+    fig_ax=None,
+    **kwargs,
+):
+    """
+
+    ax_lim = [[xmin,xmax],[ymin,ymax]]
+
+    Args:
+        p_stack: _description_
+        q_vm_stack: _description_
+        gamma_stack: _description_
+        dgammadt_stack: _description_
+        specific_volume_stack: _description_
+        inertial_number_stack: _description_
+        fig_ax: _description_. Defaults to None.
+
+    Returns:
+        _description_
+    """
+    if fig_ax is None:
+        fig, ax = plt.subplots(
+            ncols=3, nrows=1, figsize=(7.5 * 0.9, 4.5 * 0.9), dpi=300
+        )
+    else:
+        fig, ax = fig_ax
+
+    q_p_stack = q_vm_stack / p_stack
+
+    ls = kwargs.get("ls", "-")
+    color = kwargs.get("color", None)
+    label = kwargs.get("label", None)
+    lw = kwargs.get("lw", None)
+    make_plot(
+        ax.flat[0],
+        p_stack,
+        q_vm_stack,
+        xlabel="$p$ [Pa]",
+        ylabel="$q$ [Pa]",
+        ls=ls,
+        lw=lw,
+        color=color,
+        label=label,
+    )
+
+    make_plot(
+        ax.flat[1],
+        p_stack,
+        specific_volume_stack,
+        xlogscale=True,
+        ylogscale=True,
+        xlabel="$p$ [Pa] (log-scale)",
+        ylabel="$v=\\phi^{-1}$ [-] (log-scale)",
+        ls=ls,
+        color=color,
+        lw=lw,
+    )
+
+    make_plot(
+        ax.flat[2],
+        gamma_stack,
+        q_p_stack,
+        xlabel="$\\gamma$ [-]",
+        ylabel="$q/p$ [-]",
+        ls=ls,
+        color=color,
+        lw=lw,
+    )
+
+    make_plot(
+        ax.flat[3],
+        specific_volume_stack,
+        q_p_stack,
+        ylabel="$q/p$ [-]",
+        xlabel="$v=\\phi^{-1}$ [-]",
+        ls=ls,
+        color=color,
+        lw=lw,
     )
 
     return fig, ax

@@ -191,12 +191,14 @@ class USL_ASFLIP(MPMSolver):
             intr_moments = grid.moment_stack.at[intr_hashes].get()
             intr_moments_nt = grid.moment_nt_stack.at[intr_hashes].get()
 
+            # intr_vels = intr_moments / (intr_masses + grid.small_mass_cutoff)
             intr_vels = jax.lax.cond(
                 intr_masses > grid.small_mass_cutoff,
                 lambda x: x / intr_masses,
                 lambda x: jnp.zeros_like(x),
                 intr_moments,
             )
+            # intr_vels_nt = intr_moments_nt / (intr_masses + grid.small_mass_cutoff)
             intr_vels_nt = jax.lax.cond(
                 intr_masses > grid.small_mass_cutoff,
                 lambda x: x / intr_masses,
@@ -265,6 +267,12 @@ class USL_ASFLIP(MPMSolver):
             T = self.alpha * (p_velocities + delta_vels - vels_nt)
             p_velocities_next = vels_nt + T
 
+            if self.error_check:
+                p_velgrads_next = eqx.error_if(
+                    p_velocities_next,
+                    jnp.isnan(p_velocities_next).any(),
+                    "p_velocities_next is nan",
+                )
             if self.config.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0.0)
 

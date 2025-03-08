@@ -104,20 +104,23 @@ class Boundary(Force):
 
                 # vel = mom / mass
 
-                vel = jax.lax.cond(
-                    mass > grid.small_mass_cutoff,
-                    lambda x: x / mass,
-                    lambda x: jnp.zeros_like(x),
-                    mom,
-                )
+                vel = mom / (mass + 1e-12)
 
-                normal_hat = jax.lax.cond(
-                    mass > grid.small_mass_cutoff,
-                    lambda x: x / jnp.linalg.vector_norm(x),
-                    lambda x: jnp.zeros_like(x),
-                    normal,
-                )
-                normal_hat = jnp.nan_to_num(normal_hat)
+                # vel = jax.lax.cond(
+                #     mass > grid.small_mass_cutoff,
+                #     lambda x: x / mass,
+                #     lambda x: jnp.zeros_like(x),
+                #     mom,
+                # )
+                norm = jnp.linalg.vector_norm(normal)
+                normal_hat = normal / (norm + 1e-12)
+                # normal_hat = jax.lax.cond(
+                #     mass > grid.small_mass_cutoff,
+                #     lambda x: x /(norm),
+                #     lambda x: jnp.zeros_like(x),
+                #     normal,
+                # )
+                # normal_hat = jnp.nan_to_num(normal_hat)
 
                 # normal_hat =normal/scalar_norm
 
