@@ -6,7 +6,7 @@
     The shapefunction quantites are stored in this class. Two shapefunctions are currently implemented, namely, cubic splines and linear shape functions [^1].
 
 !!! note
-    It is important to specify the `shapefuction_type` in `MPMConfig` before creating the shapefunction class. 
+    It is important to specify the `shapefuction_type` in `MPMConfig` before creating the shapefunction class.
 
 
 ::: shapefunctions.shapefunctions
@@ -20,7 +20,7 @@
 
     ```py
         import hydraxmpm as hdx
-        
+
         config = hdx.MPMConfig(
             shapefunction_type="cubic"
         )
@@ -29,7 +29,7 @@
 
     ```
 <!-- !!! reference function to generate material point -->
-    
+
 <!-- ::: shapefunctions.cubic -->
 
 
@@ -43,7 +43,7 @@
 
     ```py
         import hydraxmpm as hdx
-        
+
         config = hdx.MPMConfig(
             shapefunction="linear"
         )

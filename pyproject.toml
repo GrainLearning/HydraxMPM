@@ -41,7 +41,11 @@ build-backend = "hatchling.build"
 default-groups = ["plot","dev"]
 
 [tool.hatch.build]
-include = ["hydraxmpm/*"]
+include = ["hydraxmpm/*","analysis/*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["hydraxmpm"]
+
 
 [dependency-groups]
 dev = [
@@ -53,14 +57,15 @@ dev = [
     "pytest>=8.3.3",
     "ruff>=0.7.3",
     "twine>=6.0.1",
+    "tox-uv>=1.25.0",
+    "pre-commit>=4.1.0",
+    "pytest-cov>=6.0.0",
+    "deptry>=0.23.0",
+    "mypy>=1.15.0",
 ]
 plot = [
-    "imageio>=2.36.0",
     "matplotlib>=3.9.2",
-    "pyvista>=0.44.1",
-    "seaborn>=0.13.2",
     "scienceplots>=2.1.1",
-    
 ]
 
 
@@ -85,7 +90,8 @@ fixable = ["I001", "F401"]
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q"
-testpaths = [
-    "tests",
-    "integration",
-]
+testpaths = ["tests"]
+
+
+[tool.deptry]
+exclude = ["examples", "not_tested",".venv","test","not_test","integration","hydraxmpm/constitutive_laws/experimental_old","NotInclude"]

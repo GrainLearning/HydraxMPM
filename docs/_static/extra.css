@@ -3,7 +3,7 @@
   .doc-symbol-function::after {
     content: "function";
   }
-  
+
   .doc-symbol-method::after {
     content: "method";
   }
@@ -22,14 +22,14 @@
     --md-accent-fg-color:                #A5F3FC;
     --md-accent-bg-color:                hsla(0, 0%, 100%, 1);
     --md-accent-bg-color--light:         hsla(0, 0%, 100%, 0.7);
-  
+
 }
 
 /* Indentation. */
 div.doc-contents:not(.first) {
   padding-left: 30px;
   border-left: .05rem solid var(--md-typeset-table-color);
-  
+
 }
 
 /* Mark external links as such. */
@@ -221,9 +221,9 @@ h2 {
   /* background-color: #A21CAF; */
   /* border: 1px solid #A21CAF;  */
   /* background-color: #A21CAF; */
-  
+
   /* padding: 4px 20px; */
-  
+
   color: #A5F3FC;
   font-weight: bold;
   line-height: 1.2;

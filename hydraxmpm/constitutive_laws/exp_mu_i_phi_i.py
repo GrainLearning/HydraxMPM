@@ -43,15 +43,15 @@ class ExpMuIPhI(ConstitutiveLaw):
 
     """
     (nearly) incompressible mu I
-    
+
     Tensorial form similar to
     Jop, Pierre, Yoël Forterre, and Olivier Pouliquen. "A constitutive law for dense granular flows." Nature 441.7094 (2006): 727-730.
-    
+
     mu I regularized by
     Franci, Alessandro, and Massimiliano Cremonesi. "3D regularized μ (I)-rheology for granular flows simulation." Journal of Computational Physics 378 (2019): 257-277.
-    
+
     Pressure term by
-    
+
     Salehizadeh, A. M., and A. R. Shafiei. "Modeling of granular column collapses with μ (I) rheology using smoothed particle hydrodynamic method." Granular Matter 21.2 (2019): 32.
 
     """

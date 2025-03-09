@@ -50,12 +50,12 @@ $$
 $$
 
 
-State boundary layer 
+State boundary layer
 
 Distance between NCL and current state during yielding
 
 $$
-\ln v_m = \ln Z 
+\ln v_m = \ln Z
 - \lambda \ln \left( \frac{p + p_s}{1 + p_s} \right)
 - (\lambda - \kappa) \ln \left( 1+ \frac{m^2}{M^2} \right)
 $$ -->

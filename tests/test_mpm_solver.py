@@ -117,9 +117,10 @@ def test_map_p2g():
 
     solver = solver.setup()
 
-    p2g_pressure_stack = solver.map_p2g("p_stack")
+    p_stack = solver.material_points.p_stack
+    p2g_pressure_stack = solver.map_p2g(p_stack)
 
-    p2g2p_pressure_stack = solver.map_p2g2g("p_stack")
+    p2g2p_pressure_stack = solver.map_p2g2g(p_stack)
 
     p2g_p_stack = solver.p2g_p_stack
     p2g_q_vm_stack = solver.p2g_q_vm_stack

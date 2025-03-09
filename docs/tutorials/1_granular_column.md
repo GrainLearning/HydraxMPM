@@ -16,7 +16,7 @@ It is recommended that you follow along with the tutorial. Stuck or in a rush? t
 
 ## Learning objectives
 
-By the end of this tutorial you will be able to 
+By the end of this tutorial you will be able to
 
 - Understand the overall code style of a HydraxMPM script
 
@@ -26,19 +26,19 @@ Create a project directory containing the driver script and two sub-folders with
 
 ```
 # driver script
-/tutorial/t1_granular_column.py  
+/tutorial/t1_granular_column.py
 
 # output of gravity pack
-/tutorial/output/t1_pack/ 
+/tutorial/output/t1_pack/
 
 # output of collapse
-/tutorial/output/t2_collapse  
+/tutorial/output/t2_collapse
 ```
 The output is stored as [vtk](https://docs.vtk.org/en/latest/design_documents/VTKFileFormats.html) files in the `/tutorial/output/t1_pack/` and `/tutorial/output/t2_collapse/` folders, respectively.
 
 ## Step 2: import modules
 
-Import HydraxMPM and supporting the JAX dependencies. 
+Import HydraxMPM and supporting the JAX dependencies.
 
 ```python {hl_lines="3"}
 
@@ -50,9 +50,9 @@ HydraxMPM is top-level package. It contains all the bits and pieces under the sa
 
 ## Step 3: create points representing initial granular column
 
-Create rectangular column a rectangular column of material points. Particles are spaced evenly given a cell size and the number of particles per cell (in one direction). We pad so that material points do not touch the boundary. 
+Create rectangular column a rectangular column of material points. Particles are spaced evenly given a cell size and the number of particles per cell (in one direction). We pad so that material points do not touch the boundary.
 
-```python 
+```python
 
 # --8<-- "t1_granular_column.py:8:23"
 
@@ -62,9 +62,9 @@ Create rectangular column a rectangular column of material points. Particles are
     There are several ways of initializing material points. See the [how-to initialize material points](/how-tos/initialize_material_points) .
 
 ??? Tip
-    [Matplotlib](https://matplotlib.org/) or [Pyvista](https://docs.pyvista.org/) may be used visualize initial positions. To visualize the particles copy and paste the following (note plt.show works only when GUI is active). 
+    [Matplotlib](https://matplotlib.org/) or [Pyvista](https://docs.pyvista.org/) may be used visualize initial positions. To visualize the particles copy and paste the following (note plt.show works only when GUI is active).
     ```python
-    
+
         import matplotlib.pyplot as plt
 
         plt.scatter(*position_stack.T ) # unpack x and y and plot
@@ -75,7 +75,7 @@ Create rectangular column a rectangular column of material points. Particles are
 
 This is a juicy sandwich of all common general simulation parameters.
 
-```python 
+```python
 
 # --8<-- "t1_granular_column.py:24:37"
 
@@ -92,7 +92,7 @@ This is a juicy sandwich of all common general simulation parameters.
  - `shapefunction` the interpolation type from particle to grid. Two shapefunctions are supported, either `linear` or `cubic`. Cubic is better in most cases.
  - `num_steps` the total iteration count
  - `store_every` output every nth step
- - `default_gpu_id` if you are working on a shared GPU workstation, this is the parameter you change to avoid making the other person(s) angry! Run `nvidia-smi`, in your terminal to find the id of an empty GPU. 
+ - `default_gpu_id` if you are working on a shared GPU workstation, this is the parameter you change to avoid making the other person(s) angry! Run `nvidia-smi`, in your terminal to find the id of an empty GPU.
  - `dt` is a constant time step
  - `file=__file__` this records the path of your driver script, which is important to save relative output in the correct folder.
 
@@ -107,7 +107,7 @@ This is a juicy sandwich of all common general simulation parameters.
 
 
 Lets see the summary of the config
-```python 
+```python
 
 # --8<-- "t1_granular_column.py:38:38"
 
@@ -152,10 +152,10 @@ Lets break this down:
 
 - `hdx.ModifiedCamClay` is the Modified Cam Clay material class
 - We always pass `config` along when creating HydraxMPM dataclasses.
-- The only non-parameter input is the reference solid volume fraction. 
+- The only non-parameter input is the reference solid volume fraction.
 
 
-!!! Tip 
+!!! Tip
     Materials in HydraxMPM are normally initialize either with a reference pressure or reference solid volume fraction. Given one, we can find the other.
 
 ??? Tip
@@ -165,10 +165,10 @@ Lets break this down:
 
 ## Step 5: create  the `Nodes` and `Particles`  data classes
 
-We initialize particle stresses to match the known pressure state, given a predefined solid-volume fraction above. 
+We initialize particle stresses to match the known pressure state, given a predefined solid-volume fraction above.
 
 
-Here we finally make use of JAX [vmap](https://jax.readthedocs.io/en/latest/_autosummary/jax.vmap.html), to get the stress tensor. 
+Here we finally make use of JAX [vmap](https://jax.readthedocs.io/en/latest/_autosummary/jax.vmap.html), to get the stress tensor.
 
 <!-- ```python  -->
 
@@ -191,7 +191,7 @@ We can create background grid nodes via the config.
 <!-- ``` -->
 
 The `discretize` function determines initial particle volume by dividing the number of particles in a cell by the cell size.
-```python 
+```python
 
 # --8<-- "t1_granular_column.py:69:72"
 
@@ -200,9 +200,9 @@ The `discretize` function determines initial particle volume by dividing the num
 
 ## Step 6: create the `Gravity` and `Domain`
 
-Gravity is slowly ramped up 
+Gravity is slowly ramped up
 
-```python 
+```python
 
 # --8<-- "t1_granular_column.py:73:77"
 
@@ -210,7 +210,7 @@ Gravity is slowly ramped up
 
 Creating the outside domain box.
 
-<!-- ```python 
+<!-- ```python
 
 # --8<-- "t1_granular_column.py:79:81"
 
@@ -220,7 +220,7 @@ Creating the outside domain box.
 
 The solver determines how the background grid and material points interact.
 
-<!-- ```python 
+<!-- ```python
 
 # --8<-- "t1_granular_column.py:82:82"
 
@@ -235,7 +235,7 @@ The solver determines how the background grid and material points interact.
 - See [available callback functions]()
 
 
-<!-- ```python 
+<!-- ```python
 
 # --8<-- "t1_granular_column.py:84:104"
 
@@ -247,7 +247,7 @@ The solver determines how the background grid and material points interact.
 
 
 
-<!-- ```python 
+<!-- ```python
 
 # --8<-- "t1_granular_column.py:108:121"
 
@@ -258,7 +258,7 @@ The solver determines how the background grid and material points interact.
 
 
 
-<!-- ```python 
+<!-- ```python
 
 # --8<-- "t1_granular_column.py:125:143"
 

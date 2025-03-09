@@ -4,7 +4,7 @@
 
 ## Sampling particles
 
-<!-- 
+<!--
 
 
 - Sample in optimal integration point
@@ -20,7 +20,7 @@
 ## Rigid body contacts
 
 
-<!-- 
+<!--
 
 - Give a ref on mesh contact algorithm used
 - Burgender and modified burgender
@@ -48,7 +48,7 @@
 
 
 
-<!-- 
+<!--
 ## Setting up a solver
 
 There are several MPM solvers available. All solvers are explicit time integration and update stress last.

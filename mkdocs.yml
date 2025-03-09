@@ -8,14 +8,14 @@ repo_name: GrainLearning/HydraxMPM
 nav:
   - 'index.md'
   - Tutorials: tutorials/1_granular_column.md
-  - How-to: 
+  - How-to:
     - Initialize material points: how-tos/initialize_material_points.md
   - API:
       - Config: api/config.md
       # - Particles: api/particles.md
       # - Nodes: api/nodes.md
     # - Shapefunctions: api/shapefunctions.md
-  # - Examples: 
+  # - Examples:
     # - Two sphere impact: examples/two_sphere_impact.md
     # - Solvers: api/solvers.md
     # - Shape functions: api/shapefunctions.md
@@ -39,7 +39,7 @@ theme:
       primary: custom
       scheme: slate
       toggle:
-        icon: material/brightness-7 
+        icon: material/brightness-7
         name: Switch to dark mode
       accent: custom
       features:

@@ -36,7 +36,7 @@ from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
 from .solvers.usl_asflip import USL_ASFLIP
 from .utils.mpm_callback_helpers import npz_to_vtk
-from .utils.plot import make_plot, plot_set1, plot_set1_short
+# from .utils.plot import make_plot, plot_set1, plot_set1_short
 
 hook.uninstall()
 

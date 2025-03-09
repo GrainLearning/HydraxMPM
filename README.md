@@ -24,4 +24,3 @@ University of Twente, SMM
 
 ## Acknowledgements
 This research is part of the project TUSAIL [Training in Upscaling Particle Systems: Advancing Industry across Length-scales](https://tusail.eu)  and has received funding from the European Horizon2020 Framework Programme for research, technological development and demonstration under grant agreement ID 955661.
-

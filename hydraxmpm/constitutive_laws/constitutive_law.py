@@ -20,7 +20,7 @@ from ..utils.math_helpers import get_double_contraction, get_sym_tensor
 class ConstitutiveLaw(Base):
     rho_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
     p_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
-    d: float = eqx.field(static=True, default=1.0)
+    d: Optional[float] = eqx.field(static=True, default=1.0)
     rho_p: float = eqx.field(static=True, default=1.0)
 
     # for elastoplastic models

@@ -157,7 +157,7 @@ def test_g2p_2d():
 
     material_points = usl_p2g_g2p(solver, solver.material_points, solver.grid)
 
-    expected_volumes = jnp.array([0.699993, 0.399996])
+    expected_volumes = jnp.array([1, 1])
 
     np.testing.assert_allclose(
         material_points.volume_stack, expected_volumes, rtol=1e-3

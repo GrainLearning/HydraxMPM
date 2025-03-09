@@ -9,7 +9,7 @@ import hydraxmpm as hdx
 def test_create():
     """Unit test the initialization of the isotropic linear elastic material."""
 
-    material = hdx.LinearIsotropicElastic(E=1000.0, nu=0.2)
+    material = hdx.LinearIsotropicElastic(E=1000.0, nu=0.2, name="test")
 
     assert isinstance(material, hdx.LinearIsotropicElastic)
     np.testing.assert_allclose(material.E, 1000.0)
