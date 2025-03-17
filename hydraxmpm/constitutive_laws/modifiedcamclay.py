@@ -39,17 +39,13 @@ def get_state_boundary_layer(p_hat, q, M, cp, lam, p_t, ln_N):
 def get_p_hat(deps_e_v, kap, p_hat_prev):
     """Compute non-linear pressure."""
     p_hat = p_hat_prev / (1.0 - (1.0 / kap) * deps_e_v)
-    return jnp.nanmax(jnp.array([p_hat, 1e-12]))
-    # return jnp.nanmax(jnp.array([p_hat, 2.0]))
-    # return p_hat
+    return jnp.clip(p_hat, 1.0, None)
 
 
 def get_px_hat_mcc(px_hat_prev, cp, deps_p_v):
     """Compute non-linear pressure."""
     px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v)
-    return jnp.nanmax(jnp.array([px_hat, 1e-12]))
-    # return jnp.nanmax(jnp.array([px_hat, 2.0]))
-    # return px_hat
+    return jnp.clip(px_hat, 1.0, None)
 
 
 def get_s(deps_e_d, G, s_prev):
@@ -57,33 +53,13 @@ def get_s(deps_e_d, G, s_prev):
 
 
 def get_K(kap, p_hat):
-    return (1.0 / kap) * (p_hat)
+    K = (1.0 / kap) * (p_hat)
+    return jnp.clip(K, 1e-4, None)
 
 
 def get_G(nu, K):
-    return (3.0 * (1.0 - 2.0 * nu)) / (2.0 * (1.0 + nu)) * K
-
-
-def give_phi_0(p, R, ln_N, lam, kap, p_t):
-    """Assume q =0, give reference solid volume fraction"""
-    p_hat = p + p_t
-
-    ln_v = ln_N - lam * jnp.log(R * p) + kap * jnp.log(R)
-    phi = 1.0 / jnp.exp(ln_v)
-    # ln_eta = get_state_boundary_layer(p_hat, 0.0, 1, (lam - kap), lam, p_t, ln_N)
-    # ln_v = (lam - kap) * jnp.log(R) + ln_eta
-
-    return phi
-
-
-def give_p_0(phi, R, ln_N, lam, kap, p_t):
-    ln_v = jnp.log(1.0 / phi)
-
-    ln_eta = ln_v - (lam - kap) * jnp.log(R)
-
-    p_hat = (1.0 + p_t) * jnp.exp((ln_N - ln_eta) / lam)
-
-    return p_hat - p_t
+    G = (3 * (1 - 2 * nu) / (2 * (1 + nu))) * K
+    return jnp.clip(G, 1e-4, None)
 
 
 class ModifiedCamClay(ConstitutiveLaw):
@@ -136,66 +112,20 @@ class ModifiedCamClay(ConstitutiveLaw):
         super().__init__(**kwargs)
 
     def init_state(self: Self, material_points: MaterialPoints):
-        # There are two ways to initialize via a reference pressure or reference density
-        # these can be given as a scalar or array
+        ln_v0 = jax.vmap(self.get_ln_v0)(material_points.p_stack)
+        rho_0 = self.rho_p / jnp.exp(ln_v0)
+        p_0_stack = material_points.p_stack
 
-        p_0 = self.p_0
-        if p_0 is None:
-            p_0 = material_points.p_stack
-
-        phi_0 = self.phi_0
-
-        if self.init_by_density:
-            if eqx.is_array(phi_0):
-                vmap_give_p_ref = partial(
-                    jax.vmap, in_axes=(0, None, None, None, None, None)
-                )(give_p_0)
-            else:
-                vmap_give_p_ref = give_p_0
-
-            p_0 = vmap_give_p_ref(
-                phi_0, self.R, self.ln_N, self.lam, self.kap, self.p_t
-            )
-        else:
-            if eqx.is_array(p_0):
-                vmap_give_ln_v0 = partial(jax.vmap)(self.get_ln_v0)
-            else:
-                vmap_give_ln_v0 = self.get_ln_v0
-
-            ln_v0 = vmap_give_ln_v0(p_0)
-
-            phi_0 = 1.0 / jnp.exp(ln_v0)
-
-        material_points = material_points.init_stress_from_p_0(p_0)
-
-        rho_0 = phi_0 * self.rho_p
-        material_points = material_points.init_mass_from_rho_0(rho_0)
-        params = self.__dict__
-
-        # can we handle making this scalar or array, both ?
-        p_0_stack = jnp.zeros(material_points.num_points).at[:].set(p_0)
         px_hat_stack = p_0_stack * self.R
 
         eps_e_stack = jnp.zeros((material_points.num_points, 3, 3))
-
-        W_stack = None
-        if self.approx_strain_energy_density:
-            W_stack = jnp.zeros(material_points.num_points)
-
-        P_stack = None
-        if self.approx_stress_power:
-            P_stack = jnp.zeros(material_points.num_points)
-
-        params.update(
+        return self.post_init_state(
+            material_points,
             rho_0=rho_0,
-            p_0=p_0,
             p_0_stack=p_0_stack,
             px_hat_stack=px_hat_stack,
             eps_e_stack=eps_e_stack,
-            W_stack=W_stack,
-            P_stack=P_stack,
         )
-        return self.__class__(**params), material_points
 
     def update(
         self: Self,
@@ -227,7 +157,7 @@ class ModifiedCamClay(ConstitutiveLaw):
             (new_stress_stack),
         )
 
-        new_self = new_self.post_update(new_stress_stack, deps_dt_stack, dt)
+        # new_self = new_self.post_update(new_stress_stack, deps_dt_stack, dt)
         return new_material_points, new_self
 
     @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0))
@@ -237,7 +167,7 @@ class ModifiedCamClay(ConstitutiveLaw):
         eps_e_prev,
         stress_prev,
         px_hat_prev,
-        p_ref,
+        p_0,
         specific_volume,
     ):
         p_prev = get_pressure(stress_prev)
@@ -271,8 +201,6 @@ class ModifiedCamClay(ConstitutiveLaw):
             def residuals(sol, args):
                 pmulti, deps_p_v = sol
 
-                pmulti = jnp.nanmax(jnp.array([pmulti, 0.0]))
-
                 p_hat_next = get_p_hat(deps_e_v_tr - deps_p_v, self.kap, p_hat_prev)
 
                 K_next = get_K(self.kap, p_hat_next)
@@ -291,6 +219,8 @@ class ModifiedCamClay(ConstitutiveLaw):
 
                 yf_next = yield_function(p_hat_next, px_hat_next, q_next, self.M)
 
+                yf_next = yf_next / ((p_0 * p_0 * self.M**2) + 1e-10)
+
                 R = jnp.array([yf_next, deps_v_p_fr - deps_p_v])
 
                 aux = (p_hat_next, s_next, px_hat_next, G_next, K_next)
@@ -303,17 +233,32 @@ class ModifiedCamClay(ConstitutiveLaw):
                 # avoiding non-finite values
 
                 init_val = jnp.array([0.0, 0.0])
-
+                # residual of yield function can be large, especially for small pressures
                 solver = optx.Newton(
-                    rtol=1e-8,
-                    atol=1e-8,
+                    rtol=1e-3,
+                    atol=1e6,  #
                 )
+
+                bound_deps_p_v_max = 10.0
+                bound_pmulti_max = 1000.0
+
                 sol = optx.root_find(
-                    residuals, solver, init_val, throw=False, has_aux=True, max_steps=20
+                    residuals,
+                    solver,
+                    init_val,
+                    throw=True,
+                    has_aux=True,
+                    max_steps=10000,
+                    options=dict(
+                        lower=jnp.array([0.0, -bound_deps_p_v_max]),
+                        upper=jnp.array([bound_pmulti_max, bound_deps_p_v_max]),
+                    ),
                 )
                 return sol.value
 
-            pmulti_curr, deps_p_v_next = jax.lax.stop_gradient(find_roots())
+            pmulti_curr, deps_p_v_next = find_roots()
+
+            # pmulti_curr, deps_p_v_next = jax.lax.stop_gradient(find_roots())
             R, aux = residuals([pmulti_curr, deps_p_v_next], None)
 
             p_hat_next, s_next, px_hat_next, G_next, K_next = aux
@@ -324,7 +269,7 @@ class ModifiedCamClay(ConstitutiveLaw):
 
             stress_next = s_next - (p_next) * jnp.eye(3)
 
-            eps_e_v_next = (p_next - p_ref) / K_next
+            eps_e_v_next = (p_next - p_0) / K_next
 
             eps_e_d_next = s_next / (2.0 * G_next)
 
@@ -332,10 +277,11 @@ class ModifiedCamClay(ConstitutiveLaw):
 
             return stress_next, eps_e_next, px_hat_next
 
+        ptol = 1.0
         stress_next, eps_e_next, px_hat_next = jax.lax.cond(
-            ((p_hat_tr >= 0.0) & (jnp.log(specific_volume) < self.ln_N)),
+            (p_hat_tr >= ptol),
             lambda: jax.lax.cond(yf > 0.0, pull_to_ys, elastic_update),
-            lambda: (jnp.zeros((3, 3)), jnp.zeros((3, 3)), px_hat_prev),
+            lambda: (-ptol * jnp.eye(3), jnp.zeros((3, 3)), px_hat_prev),
         )
 
         return stress_next, eps_e_next, px_hat_next

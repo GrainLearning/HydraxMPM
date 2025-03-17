@@ -265,9 +265,9 @@ class MaterialPoints(Base):
         return jax.vmap(vmap_grav_pe)(self.position_stack, self.mass_stack)
 
     def PE_stack(self, dt, W_stack, **kwargs):
-        assert (
-            W_stack is not None
-        ), "Please set store_SE_density=True for the material points"
+        assert W_stack is not None, (
+            "Please set approx_strain_energy_density=True for the material points"
+        )
         return W_stack * self.volume_stack + self.PE_grav_stack
 
     def KE_PE_Stack(self, dt, W_stack, **kwargs):

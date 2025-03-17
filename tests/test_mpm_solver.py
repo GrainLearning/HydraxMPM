@@ -28,10 +28,12 @@ def test_get_point_grid_interactions():
         _setup_done=True,  # to avoid padding the domain on first setup
     )
 
-    solver = solver._get_particle_grid_interactions_batched()
+    shape_map = solver.shape_map._get_particle_grid_interactions_batched(
+        solver.material_points, solver.grid
+    )
 
     np.testing.assert_allclose(
-        solver._intr_dist_stack,  # normalized at grid
+        shape_map._intr_dist_stack,  # normalized at grid
         jnp.array(
             [
                 [-0.25, -0.25, -0.0],
@@ -51,9 +53,9 @@ def test_get_point_grid_interactions():
         rtol=1e-6,
     )
 
-    np.testing.assert_allclose(solver._intr_hash_stack.shape, (12))
+    np.testing.assert_allclose(shape_map._intr_hash_stack.shape, (12))
     np.testing.assert_allclose(
-        solver._intr_hash_stack,
+        shape_map._intr_hash_stack,
         jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 3, 4, 6, 7]).astype(jnp.uint32),
     )
 
@@ -72,10 +74,12 @@ def test_vmap_get_interactions_scatter():
     def p2g(point_id, shapef, shapef_grad_padded, intr_dist_padded):
         return 1.0
 
-    solver, X_stack = solver.vmap_interactions_and_scatter(p2g)
+    shape_map, X_stack = solver.shape_map.vmap_interactions_and_scatter(
+        p2g, solver.material_points, solver.grid
+    )
 
     np.testing.assert_allclose(
-        solver._intr_dist_stack,  # normalized at grid
+        shape_map._intr_dist_stack,  # normalized at grid
         jnp.array(
             [
                 [-0.25, -0.25, -0.0],
@@ -95,9 +99,9 @@ def test_vmap_get_interactions_scatter():
         rtol=1e-6,
     )
 
-    np.testing.assert_allclose(solver._intr_hash_stack.shape, (12))
+    np.testing.assert_allclose(shape_map._intr_hash_stack.shape, (12))
     np.testing.assert_allclose(
-        solver._intr_hash_stack, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 3, 4, 6, 7])
+        shape_map._intr_hash_stack, jnp.array([0, 1, 3, 4, 0, 1, 3, 4, 3, 4, 6, 7])
     )
 
 
@@ -129,5 +133,3 @@ def test_map_p2g():
 
     p2g_dgamma_dt_stack = solver.p2g_dgamma_dt_stack
     p2g_gamma_stack = solver.p2g_gamma_stack
-
-    # pass

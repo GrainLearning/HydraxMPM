@@ -5,6 +5,10 @@ import equinox as eqx
 
 from ..utils.jax_helpers import set_default_gpu
 
+from pathlib import Path
+
+import shutil
+
 
 class Config(eqx.Module):
     """
@@ -36,6 +40,9 @@ class Config(eqx.Module):
     # internal variables
     _padding: tuple = eqx.field(init=False, static=True, repr=False)
 
+    override_dir: bool = eqx.field(default=False, static=True)
+    create_dir: bool = eqx.field(default=False, static=True)
+
     def __init__(
         self,
         total_time: Optional[float] = None,
@@ -44,12 +51,13 @@ class Config(eqx.Module):
         store_every: Optional[int] = 0,
         file: Optional[str] = "",
         project: Optional[str] = "",
-        default_gpu_id: Optional[int] = -1,
         output_path: Optional[str] = None,
         shapefunction: Optional[str] = "cubic",
         ppc: Optional[int] = 1,
         dim: Optional[int] = 3,
         output: Optional[dict | Tuple[str, ...]] = None,
+        create_dir: Optional[bool] = False,
+        override_dir: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -107,12 +115,21 @@ class Config(eqx.Module):
             if file is not None:
                 self.output_path = os.path.dirname(file) + "/output/" + project + "/"
             else:
-                self.output_path = "/output/" + project + "/"
+                self.output_path = "./output/" + project + "/"
+
+        self.override_dir = override_dir
+        self.create_dir = create_dir
+
+        if self.create_dir:
+            dirpath = Path(self.output_path)
+            if not dirpath.exists():
+                dirpath.mkdir(parents=True)
+
+            if self.override_dir:
+                shutil.rmtree(dirpath)
+                dirpath.mkdir(parents=True)
 
         self.project = project
         self.ppc = ppc
 
-        # Particle-node connectivity, shape functions
         self.shapefunction = shapefunction
-        if default_gpu_id != -1:
-            set_default_gpu(self.default_gpu_id)

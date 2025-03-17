@@ -1,4 +1,4 @@
-from typing import Optional, Self, Tuple
+from typing import Optional, Self, Tuple, Any
 
 from ..common.base import Base
 from ..common.types import TypeFloat, TypeInt
@@ -16,6 +16,7 @@ class Force(Base):
         step: Optional[TypeInt] = 0,
         dt: Optional[TypeFloat] = 0.01,
         dim: TypeInt = 3,
+        **kwargs: Any,
     ) -> Tuple[Grid, Self]:
         return grid, self
 
@@ -26,5 +27,6 @@ class Force(Base):
         step: Optional[TypeInt] = 0,
         dt: Optional[TypeFloat] = 0.01,
         dim: TypeInt = 3,
+        **kwargs: Any,
     ) -> Tuple[MaterialPoints, Self]:
         return material_points, self

@@ -1,7 +1,7 @@
 """Module for imposing zero/non-zero boundaries via rigid material_points."""
 
 from functools import partial
-from typing import Optional, Self
+from typing import Optional, Self, Any
 
 import equinox as eqx
 import jax
@@ -89,6 +89,7 @@ class Boundary(Force):
         step: Optional[TypeInt] = 0,
         dt: Optional[TypeFloat] = 0.01,
         dim: TypeInt = 3,
+        **kwargs: Any,
     ):
         @partial(jax.vmap, in_axes=0, out_axes=0)
         def vmap_selected_grid(moment_nt, moment, mass, normal):

@@ -1,6 +1,6 @@
 """Module for the gravity force. Impose gravity on the nodes."""
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 
 import equinox as eqx
 import jax
@@ -49,6 +49,7 @@ class Gravity(Force):
         step: Optional[TypeInt] = 0,
         dt: TypeFloat = 0.01,
         dim: TypeInt = 3,
+        **kwargs: Any,
     ) -> Tuple[Grid, Self]:
         """Apply gravity on the nodes."""
 

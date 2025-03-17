@@ -1,24 +1,30 @@
 """Module for imposing zero/non-zero boundaries via rigid particles."""
 
 from functools import partial
-from typing import Callable, Tuple
-from typing_extensions import Self
+from typing import Callable, Tuple, Optional, Self, Any
 
-import chex
 import jax
 import jax.numpy as jnp
 from jax import Array
 
-from ..nodes.nodes import Nodes
-from ..particles.particles import Particles
-from .force import Forces
-from ..config.mpm_config import MPMConfig
+from ..grid.grid import Grid
+from ..material_points.material_points import MaterialPoints
+from .force import Force
 
-from ..nodes.grid import Grid
 import equinox as eqx
 
+from ..common.types import (
+    TypeFloat,
+    TypeInt,
+    # TypeUIntScalarAStack,
+    TypeFloatVectorAStack,
+    TypeFloatVector,
+)
 
-class RigidParticlesModified(Forces):
+from ..shapefunctions.mapping import ShapeFunctionMapping
+
+
+class RigidParticles(Force):
     """Shapes are discretized into rigid particles to impose boundary conditions.
 
 
@@ -31,44 +37,42 @@ class RigidParticlesModified(Forces):
 
     """
 
-    position_stack: Array
-    velocity_stack: Array
-    com: Array
-    mu: float
+    position_stack: TypeFloatVectorAStack
+    velocity_stack: TypeFloatVectorAStack
 
-    alpha: float
-    beta: float
+    com: Optional[TypeFloatVector] = None
 
-    grid: Grid
-    thickness: tuple = eqx.field(static=True)
-    truncate_outbound: bool = eqx.field(static=True)
+    mu: TypeFloat
 
-    update_rigid_particles: Callable = eqx.field(static=True)
+    alpha: TypeFloat
+    beta: TypeFloat
+
+    update_rigid_particles: Optional[Callable] = eqx.field(static=True)
+
+    shape_map: ShapeFunctionMapping
 
     def __init__(
         self: Self,
-        config: MPMConfig,
-        position_stack: Array,
-        velocity_stack: Array = None,
-        mu: float = 0.0,
-        com: Array = None,
-        alpha: jnp.float32 = 0.8,
-        beta: jnp.float32 = 2.0,
-        update_rigid_particles: Callable = None,
-        thickness=0,
-        truncate_outbound=True,
+        position_stack: TypeFloatVectorAStack,
+        velocity_stack: TypeFloatVectorAStack = None,
+        mu: TypeFloat = 0.0,
+        com: Optional[TypeFloatVector] = None,
+        alpha: TypeFloat = 0.0001,
+        beta: TypeFloat = 2.0,
+        update_rigid_particles: Optional[Callable] = None,
+        **kwargs,
     ) -> Self:
         """Initialize the rigid particles."""
-        num_rigid = position_stack.shape[0]
 
         if velocity_stack is None:
-            velocity_stack = jnp.zeros((num_rigid, config.dim), device=config.device)
+            velocity_stack = jnp.zeros_like(position_stack)
 
-        self.position_stack = jax.device_put(position_stack, device=config.device)
-        self.velocity_stack = jax.device_put(velocity_stack, device=config.device)
+        self.position_stack = position_stack
 
-        self.grid = Grid(config)
+        self.velocity_stack = velocity_stack
+
         self.mu = mu
+
         self.update_rigid_particles = update_rigid_particles
 
         self.com = com
@@ -76,31 +80,34 @@ class RigidParticlesModified(Forces):
         self.alpha = alpha
 
         self.beta = beta
-        self.thickness = config.cell_size * thickness * jnp.ones(config.dim)
-        self.truncate_outbound = truncate_outbound
-        super().__init__(config)
 
-    def apply_on_nodes(
+        num_points, dim = position_stack.shape
+
+        self.shape_map = ShapeFunctionMapping(
+            shapefunction=kwargs.get("shapefunction", "cubic"),
+            dim=dim,
+            num_points=num_points,
+        )
+
+        super().__init__(**kwargs)
+
+    def apply_on_grid(
         self: Self,
-        nodes: Nodes,
-        particles: Particles = None,
-        step: jnp.int32 = 0,
-    ) -> Tuple[Nodes, Self]:
+        material_points: Optional[MaterialPoints] = None,
+        grid: Optional[Grid] = None,
+        step: Optional[TypeInt] = 0,
+        dt: Optional[TypeFloat] = 0.01,
+        dim: TypeInt = 3,
+        **kwargs: Any,
+    ):
         """Apply the boundary conditions on the nodes moments.
 
-        Procedure:
-            - Get the normals of the non-rigid particles on the grid.
-            - Get the velocities on the grid due to the velocities of the
-                rigid particles.
-            - Get contacting nodes and apply the velocities on the grid.
-        """
-
-        def check_in_domain(pos):
-            ls_valid = pos > jnp.array(self.config.origin) + jnp.array(self.thickness)
-            gt_valid = pos < jnp.array(self.config.end) - jnp.array(self.thickness)
-            return jnp.all(ls_valid * gt_valid)
-
-        is_valid_stack = jax.vmap(check_in_domain)(self.position_stack)
+        #         Procedure:
+        #             - Get the normals of the non-rigid particles on the grid.
+        #             - Get the velocities on the grid due to the velocities of the
+        #                 rigid particles.
+        #             - Get contacting nodes and apply the velocities on the grid.
+        #"""
 
         def vmap_velocities_p2g_rigid(
             point_id, intr_shapef, intr_shapef_grad, intr_dist
@@ -109,43 +116,31 @@ class RigidParticlesModified(Forces):
             r_scaled_velocity = intr_shapef * intr_velocities
             return r_scaled_velocity
 
-        new_grid, r_scaled_velocity_stack = self.grid.vmap_interactions_and_scatter(
-            vmap_velocities_p2g_rigid, self.position_stack
+        new_shape_map, r_scaled_velocity_stack = (
+            self.shape_map.vmap_interactions_and_scatter(
+                vmap_velocities_p2g_rigid, position_stack=self.position_stack, grid=grid
+            )
         )
 
-        def null_outbound_interactions(intr_hash, is_valid):
-            return jax.lax.cond(
-                is_valid,
-                lambda: intr_hash,
-                lambda: -1 * jnp.ones(self.config.window_size).astype(jnp.int32),
-            )
-
-        new_intr_hash_stack = jax.vmap(null_outbound_interactions)(
-            new_grid.intr_hash_stack.reshape(
-                (self.config.num_points, self.config.window_size)
-            ),
-            is_valid_stack,
-        ).reshape(-1)
-
         r_nodes_vel_stack = (
-            jnp.zeros_like(nodes.moment_nt_stack)
-            .at[new_intr_hash_stack]
+            jnp.zeros_like(grid.moment_nt_stack)
+            .at[new_shape_map._intr_hash_stack]
             .add(r_scaled_velocity_stack)
         )
 
         r_nodes_contact_mask_stack = (
-            jnp.zeros_like(nodes.mass_stack, dtype=jnp.bool_)
-            .at[new_intr_hash_stack]
+            jnp.zeros_like(grid.mass_stack, dtype=jnp.bool_)
+            .at[new_shape_map._intr_hash_stack]
             .set(True)
         )
 
         intr_vec_dist_stack = jnp.sqrt(
-            jnp.sum(jnp.pow(self.grid.intr_dist_stack, 2), axis=1)
+            jnp.sum(jnp.pow(new_shape_map._intr_dist_stack, 2), axis=1)
         )
 
         r_nodes_min_dist_stack = (
-            jnp.zeros_like(nodes.mass_stack)
-            .at[new_intr_hash_stack]
+            jnp.zeros_like(grid.mass_stack)
+            .at[new_shape_map._intr_hash_stack]
             .min(intr_vec_dist_stack)
         )
 
@@ -154,7 +149,7 @@ class RigidParticlesModified(Forces):
             """Apply the velocities on the grid from the rigid particles."""
             # skip the nodes with small mass, due to numerical instability
             vel_nt = jax.lax.cond(
-                mass > nodes.small_mass_cutoff,
+                mass > grid.small_mass_cutoff,
                 lambda x: x / mass,
                 lambda x: jnp.zeros_like(x),
                 moment_nt,
@@ -162,7 +157,7 @@ class RigidParticlesModified(Forces):
 
             # normalize the normals
             normal = jax.lax.cond(
-                mass > nodes.small_mass_cutoff,
+                mass > grid.small_mass_cutoff,
                 lambda x: x / jnp.linalg.vector_norm(x),
                 lambda x: jnp.zeros_like(x),
                 normal,
@@ -197,14 +192,14 @@ class RigidParticlesModified(Forces):
 
             delta_vel_padded = jnp.pad(
                 delta_vel,
-                self.config.padding,
+                new_shape_map._padding,
                 mode="constant",
                 constant_values=0,
             )
 
             norm_padded = jnp.pad(
                 normal,
-                self.config.padding,
+                new_shape_map._padding,
                 mode="constant",
                 constant_values=0,
             )
@@ -225,7 +220,7 @@ class RigidParticlesModified(Forces):
 
             tangent = (
                 (norm_padded + mu_prime * normal_cross_omega)
-                .at[: self.config.dim]
+                .at[: new_shape_map.dim]
                 .get()
             )
 
@@ -244,9 +239,9 @@ class RigidParticlesModified(Forces):
             return node_moments_nt
 
         moment_nt_stack = vmap_nodes(
-            nodes.moment_nt_stack,
-            nodes.mass_stack,
-            nodes.normal_stack,
+            grid.moment_nt_stack,
+            grid.mass_stack,
+            grid.normal_stack,
             r_nodes_vel_stack,
             r_nodes_contact_mask_stack,
             r_nodes_min_dist_stack,
@@ -255,11 +250,7 @@ class RigidParticlesModified(Forces):
         if self.update_rigid_particles:
             new_position_stack, new_velocity_stack, new_com = (
                 self.update_rigid_particles(
-                    step,
-                    self.position_stack,
-                    self.velocity_stack,
-                    self.com,
-                    self.config,
+                    step, self.position_stack, self.velocity_stack, self.com, dt
                 )
             )
         else:
@@ -267,9 +258,9 @@ class RigidParticlesModified(Forces):
             new_velocity_stack = self.velocity_stack
             new_com = self.com
 
-        new_nodes = eqx.tree_at(
+        new_grid = eqx.tree_at(
             lambda state: (state.moment_nt_stack),
-            nodes,
+            grid,
             (moment_nt_stack),
         )
 
@@ -279,4 +270,4 @@ class RigidParticlesModified(Forces):
             (new_position_stack, new_velocity_stack, new_com),
         )
 
-        return new_nodes, new_self
+        return new_grid, new_self

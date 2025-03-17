@@ -201,6 +201,7 @@ class MuI_incompressible(ConstitutiveLaw):
             )
 
         dgamma_dt = get_scalar_shear_strain(deps_dt)
+        # dgamma_dt = jnp.nanmax(jnp.array([dgamma_dt, 1.0e-6]))
 
         if self.error_check:
             dgamma_dt = eqx.error_if(
@@ -208,36 +209,36 @@ class MuI_incompressible(ConstitutiveLaw):
             )
 
         # stress free condition...
-        rho_rho_0 = jnp.nanmax(jnp.array([rho_rho_0 - 1.0, 1e-6])) + 1.0
+        # rho_rho_0 = jnp.nanmax(jnp.array([rho_rho_0 - 1.0, 1e-6])) + 1.0
 
         p = self.K * (rho_rho_0 - 1.0)
 
         if self.error_check:
             p = eqx.error_if(p, jnp.isnan(p).any(), "p is nan")
 
+        p = jnp.nanmax(jnp.array([p, 1e-12]))
+
         def stress_update(_):
             # correction for viscosity diverges
             # r = 1e-10
             r = 0.001
+            # r = 0.01
             # eq (12) https://www.sciencedirect.com/science/article/pii/S0021999118307290
-
-            # dgamma_dt = jnp.nanmax(jnp.array([dgamma_dt, 1.0e-12]))
 
             delta_mu = self.mu_d - self.mu_s
 
             eta_d = (p * delta_mu * self.d) / (
                 self.I_0 * jnp.sqrt(p / self.rho_p) + self.d * dgamma_dt
             )
-            eta_d = jnp.nanmax(jnp.array([eta_d, 0.0]))
+            # eta_d = jnp.nanmax(jnp.array([eta_d, 0.0]))
 
             eta_s = (p * self.mu_s) / jnp.sqrt(dgamma_dt * dgamma_dt + r * r)
-
+            # eta_s = jnp.nanmax(jnp.array([eta_s, 0.0]))
             if self.error_check:
                 eta_s = eqx.error_if(eta_s, jnp.isnan(eta_s).any(), "eta_s is nan")
                 eta_d = eqx.error_if(eta_d, jnp.isnan(eta_d).any(), "eta_d is nan")
 
             eta = eta_s + eta_d
-
             stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
 
             if self.error_check:

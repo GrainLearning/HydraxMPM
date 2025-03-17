@@ -150,8 +150,8 @@ def test_g2p_2d():
 
     @jax.jit
     def usl_p2g_g2p(solver, material_points, grid):
-        new_solver, new_grid = solver.p2g(material_points, grid)
-        new_solver, new_particles = new_solver.g2p(material_points, new_grid)
+        new_shape_map, new_grid = solver.p2g(material_points, grid)
+        new_solver, new_particles = solver.g2p(material_points, new_grid, new_shape_map)
         return new_particles
 
     material_points = usl_p2g_g2p(solver, solver.material_points, solver.grid)

@@ -89,13 +89,15 @@ class USL_APIC(MPMSolver):
             step=step,
         )
 
-        self, grid = self.p2g(material_points=material_points, grid=self.grid)
+        new_shape_map, grid = self.p2g(material_points=material_points, grid=self.grid)
 
         grid, forces = self._update_forces_grid(
             material_points=material_points, grid=grid, forces=forces, step=step
         )
 
-        self, material_points = self.g2p(material_points=material_points, grid=grid)
+        self, material_points = self.g2p(
+            material_points=material_points, grid=grid, shape_map=new_shape_map
+        )
 
         material_points, constitutive_laws = self._update_constitutive_laws(
             material_points, self.constitutive_laws
@@ -107,9 +109,10 @@ class USL_APIC(MPMSolver):
                 state.grid,
                 state.constitutive_laws,
                 state.forces,
+                state.shape_map,
             ),
             self,
-            (material_points, grid, constitutive_laws, forces),
+            (material_points, grid, constitutive_laws, forces, new_shape_map),
         )
 
     def p2g(self, material_points, grid):
@@ -144,17 +147,23 @@ class USL_APIC(MPMSolver):
         # note the interactions and shapefunctions are calculated on the
         # p2g to reduce computational overhead.
         (
-            new_self,
+            new_shape_map,
             (
                 scaled_mass_stack,
                 scaled_moment_stack,
                 scaled_total_force_stack,
                 scaled_normal_stack,
             ),
-        ) = self.vmap_interactions_and_scatter(vmap_intr_p2g)
+        ) = self.shape_map.vmap_interactions_and_scatter(
+            vmap_intr_p2g, material_points, grid
+        )
 
         def sum_interactions(stack, scaled_stack):
-            return jnp.zeros_like(stack).at[new_self._intr_hash_stack].add(scaled_stack)
+            return (
+                jnp.zeros_like(stack)
+                .at[new_shape_map._intr_hash_stack]
+                .add(scaled_stack)
+            )
 
         # sum
         new_mass_stack = sum_interactions(grid.mass_stack, scaled_mass_stack)
@@ -166,7 +175,7 @@ class USL_APIC(MPMSolver):
 
         nodes_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
 
-        return new_self, eqx.tree_at(
+        return new_shape_map, eqx.tree_at(
             lambda state: (
                 state.mass_stack,
                 state.moment_stack,
@@ -177,7 +186,7 @@ class USL_APIC(MPMSolver):
             (new_mass_stack, new_moment_stack, nodes_moment_nt_stack, new_normal_stack),
         )
 
-    def g2p(self, material_points, grid) -> Tuple[Self, MaterialPoints]:
+    def g2p(self, material_points, grid, shape_map) -> Tuple[Self, MaterialPoints]:
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = grid.mass_stack.at[intr_hashes].get()
             intr_moments_nt = grid.moment_nt_stack.at[intr_hashes].get()
@@ -214,7 +223,7 @@ class USL_APIC(MPMSolver):
             new_intr_scaled_vel_nt_stack,
             new_intr_scaled_velgrad_stack,
             new_intr_Bp_stack,
-        ) = self.vmap_intr_gather(vmap_intr_g2p)
+        ) = shape_map.vmap_intr_gather(vmap_intr_g2p)
 
         @partial(jax.vmap, in_axes=0)
         def vmap_particles_update(
@@ -266,10 +275,12 @@ class USL_APIC(MPMSolver):
             new_Bp_stack,
         ) = vmap_particles_update(
             new_intr_scaled_vel_nt_stack.reshape(
-                -1, self._window_size, self.config.dim
+                -1, self.shape_map._window_size, self.config.dim
             ),
-            new_intr_scaled_velgrad_stack.reshape(-1, self._window_size, 3, 3),
-            new_intr_Bp_stack.reshape(-1, self._window_size, 3, 3),
+            new_intr_scaled_velgrad_stack.reshape(
+                -1, self.shape_map._window_size, 3, 3
+            ),
+            new_intr_Bp_stack.reshape(-1, self.shape_map._window_size, 3, 3),
             material_points.position_stack,
             material_points.F_stack,
             material_points.volume0_stack,

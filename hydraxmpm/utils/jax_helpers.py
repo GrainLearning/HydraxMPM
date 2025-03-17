@@ -17,14 +17,6 @@ def get_dirpath():
     return os.path.dirname(file) + "/"
 
 
-def simple_warning(condition: jnp.bool_, place: str, message: str):
-    jax.lax.cond(
-        condition,
-        lambda: jax.debug.print("{}: {}", place, message),
-        lambda: None,
-    )
-
-
 def set_default_gpu(gpu_id=0):
     jax.config.update("jax_default_device", jax.devices("gpu")[gpu_id])
 

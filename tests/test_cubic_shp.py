@@ -23,10 +23,10 @@ def test_create():
         ),
     )
 
-    np.testing.assert_allclose(solver._intr_shapef_stack, jnp.zeros((2 * 16)))
+    np.testing.assert_allclose(solver.shape_map._intr_shapef_stack, jnp.zeros((2 * 16)))
 
     np.testing.assert_allclose(
-        solver._intr_shapef_grad_stack,
+        solver.shape_map._intr_shapef_grad_stack,
         jnp.zeros((2 * 16, 3), dtype=jnp.float32),
     )
 
@@ -48,10 +48,12 @@ def test_calc_shp_2d():
         ),
     )
 
-    solver = solver._get_particle_grid_interactions_batched()
+    shape_map = solver.shape_map._get_particle_grid_interactions_batched(
+        solver.material_points, solver.grid
+    )
 
     np.testing.assert_allclose(
-        solver._intr_shapef_stack.shape,
+        shape_map._intr_shapef_stack.shape,
         (2 * 16),
     )
 
@@ -90,7 +92,7 @@ def test_calc_shp_2d():
         1.4210855e-14,
     ]
     np.testing.assert_allclose(
-        expected_shapef_stack, solver._intr_shapef_stack, rtol=1e-4
+        expected_shapef_stack, shape_map._intr_shapef_stack, rtol=1e-4
     )
 
     expected_shapef_grad_stack = [
@@ -129,7 +131,7 @@ def test_calc_shp_2d():
     ]
 
     np.testing.assert_allclose(
-        expected_shapef_grad_stack, solver._intr_shapef_grad_stack, rtol=1e-4
+        expected_shapef_grad_stack, shape_map._intr_shapef_grad_stack, rtol=1e-4
     )
 
 
@@ -151,9 +153,11 @@ def test_calc_shp_3d():
         ),
     )
 
-    solver = solver._get_particle_grid_interactions_batched()
+    shape_map = solver.shape_map._get_particle_grid_interactions_batched(
+        solver.material_points, solver.grid
+    )
 
-    np.testing.assert_allclose(solver._intr_shapef_stack.shape, (64,))
+    np.testing.assert_allclose(shape_map._intr_shapef_stack.shape, (64,))
 
     expected_shapef_stack = [
         4.2187618e-04,
@@ -223,10 +227,10 @@ def test_calc_shp_3d():
     ]
 
     np.testing.assert_allclose(
-        expected_shapef_stack, solver._intr_shapef_stack, rtol=1e-4
+        expected_shapef_stack, shape_map._intr_shapef_stack, rtol=1e-4
     )
 
-    np.testing.assert_allclose(jnp.prod(solver._intr_shapef_stack), 0.0)
+    np.testing.assert_allclose(jnp.prod(shape_map._intr_shapef_stack), 0.0)
 
     expected_shapef_grad_stack = [
         [-2.5312522e-02, -1.4062528e-02, -1.2656288e-02],
@@ -296,5 +300,5 @@ def test_calc_shp_3d():
     ]
 
     np.testing.assert_allclose(
-        expected_shapef_grad_stack, solver._intr_shapef_grad_stack, rtol=1e-4
+        expected_shapef_grad_stack, shape_map._intr_shapef_grad_stack, rtol=1e-4
     )

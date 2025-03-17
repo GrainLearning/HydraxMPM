@@ -1,16 +1,79 @@
 import inspect
+from functools import partial
 from typing import Optional, Self, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optimistix as optx
+import equinox as eqx
 
 from ..common.base import Base
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..et_benchmarks.et_benchmarks import ETBenchmark
 from ..material_points.material_points import MaterialPoints
 from .config import Config
+
+from ..common.types import TypeInt
+
+
+def stress_update(L_next, material_points_prev, constitutive_law_prev, dt):
+    """Call the update function"""
+    L_next_padded = jnp.expand_dims(L_next, axis=0)
+    material_points_next = material_points_prev.update_L_and_F_stack(
+        L_stack_next=L_next_padded, dt=dt
+    )
+
+    material_points_next, constitutive_law_next = constitutive_law_prev.update(
+        material_points=material_points_next, dt=dt
+    )
+    return material_points_next, constitutive_law_next
+
+
+def apply_control(
+    L_control,
+    material_points_prev,
+    constitutive_law_prev,
+    et_benchmark,
+    dt,
+    X_0=None,
+    x_target=None,
+    rtol=1e-10,
+    atol=1e-2,
+    max_steps=20,
+):
+    def servo_controller(sol, args):
+        L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
+
+        material_points_next, constitutive_law_next = stress_update(
+            L_next, material_points_prev, constitutive_law_prev, dt
+        )
+
+        stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
+
+        R = et_benchmark.loss_stress(stress_guess, x_target)
+
+        return R, (material_points_next, constitutive_law_next)
+
+    if et_benchmark.X_control_stack is None:
+        material_points_next, constitutive_law_next = stress_update(
+            L_control, material_points_prev, constitutive_law_prev, dt
+        )
+    else:
+        solver = optx.Newton(rtol=rtol, atol=atol)
+
+        sol = optx.root_find(
+            servo_controller,
+            solver,
+            X_0,
+            throw=False,
+            has_aux=True,
+            max_steps=max_steps,
+        )
+
+        material_points_next, constitutive_law_next = sol.aux
+
+    return material_points_next, constitutive_law_next
 
 
 class ETSolver(Base):
@@ -19,21 +82,37 @@ class ETSolver(Base):
 
     config: Config = eqx.field(static=True)
     material_points: MaterialPoints
+
     constitutive_law: ConstitutiveLaw
+
     et_benchmarks: Tuple[ETBenchmark, ...]
 
     _setup_done: bool = eqx.field(default=False)
+
+    rtol: float = eqx.field(default=1e-10, static=True)
+    atol: float = eqx.field(default=1e-2, static=True)
+    max_steps: int = eqx.field(default=20, static=True)
+    # step: TypeInt
 
     def __init__(
         self,
         config: Config,
         constitutive_law: ConstitutiveLaw,
         material_points: MaterialPoints = None,
+        rtol: float = 1e-10,
+        atol: float = 1e-2,
+        max_steps: int = 20,
         et_benchmarks: Optional[Tuple[ETBenchmark, ...] | ETBenchmark] = None,
+        step: TypeInt = 0,
         **kwargs,
     ) -> Self:
         self.config = config
         self.constitutive_law = constitutive_law
+
+        self.rtol = rtol
+        self.atol = atol
+        self.max_steps = max_steps
+        # self.step = step
 
         if material_points is None:
             material_points = MaterialPoints()
@@ -80,7 +159,50 @@ class ETSolver(Base):
 
         return self.__class__(**params)
 
+    def run_once_update(self: Self):
+        assert len(self.et_benchmarks) == 1, "Only one deformation mode is supported"
+
+        et_benchmark = self.et_benchmarks[0]
+
+        if et_benchmark.X_control_stack is not None:
+            X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
+            x_target = et_benchmark.X_control_stack.at[self.step].get()
+        else:
+            X_0 = None
+            x_target = None
+
+        material_points_next, constitutive_law_next = apply_control(
+            et_benchmark.L_control_stack.at[self.step].get(),
+            self.material_points,
+            self.constitutive_law,
+            et_benchmark,
+            self.config.dt,
+            X_0,
+            x_target,
+            self.rtol,
+            self.atol,
+            self.max_steps,
+        )
+
+        accumulate = self.get_output(
+            material_points_next,
+            constitutive_law_next,
+            self.material_points,
+            self.constitutive_law,
+        )
+
+        new_self = eqx.tree_at(
+            lambda state: (state.material_points, state.constitutive_law, state.step),
+            self,
+            (material_points_next, constitutive_law_next, self.step + 1),
+        )
+
+        return new_self, accumulate
+
     @jax.jit
+    def run_jit(self: Self, return_carry: bool = False):
+        return self.run(return_carry)
+
     def run(self: Self, return_carry: bool = False):
         accumulate_list = []
         carry_list = []
@@ -123,46 +245,18 @@ class ETSolver(Base):
 
             L_control, x_target = xs
 
-            def update(L_next):
-                """Call the update function"""
-                L_next_padded = jnp.expand_dims(L_next, axis=0)
-                material_points_next = material_points_prev.update_L_and_F_stack(
-                    L_stack_next=L_next_padded,
-                    dt=self.config.dt,
-                )
-
-                material_points_next, constitutive_law_next = (
-                    constitutive_law_prev.update(
-                        material_points=material_points_next, dt=self.config.dt
-                    )
-                )
-                return material_points_next, constitutive_law_next
-
-            def servo_controller(sol, args):
-                L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
-
-                material_points_next, constitutive_law_next = update(L_next)
-
-                stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
-
-                R = et_benchmark.loss_stress(stress_guess, x_target)
-                return R, (material_points_next, constitutive_law_next)
-
-            if et_benchmark.X_control_stack is None:
-                material_points_next, constitutive_law_next = update(L_control)
-            else:
-                solver = optx.Newton(rtol=1e-10, atol=1e-2)
-
-                sol = optx.root_find(
-                    servo_controller,
-                    solver,
-                    X_0,
-                    throw=False,
-                    has_aux=True,
-                    max_steps=20,
-                )
-
-                material_points_next, constitutive_law_next = sol.aux
+            material_points_next, constitutive_law_next = apply_control(
+                L_control,
+                material_points_prev,
+                constitutive_law_prev,
+                et_benchmark,
+                self.config.dt,
+                X_0,
+                x_target,
+                self.rtol,
+                self.atol,
+                self.max_steps,
+            )
 
             accumulate = self.get_output(
                 material_points_next,
@@ -174,8 +268,6 @@ class ETSolver(Base):
 
             return carry, accumulate
 
-        # accumulate0 = self.get_output(material_points, constitutive_law)
-
         carry, accumulate = jax.lax.scan(
             scan_fn,
             (constitutive_law, material_points, 0),  # carry
@@ -184,9 +276,7 @@ class ETSolver(Base):
                 et_benchmark.X_control_stack,
             ),  # control
         )
-        # accumulate_all = accumulate0 + accumulate
-        # accumulate0.extend(accumulate)
-        # accumulate.insert(0, accumulate0)
+
         return carry, accumulate
 
     def get_output(

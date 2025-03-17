@@ -39,11 +39,11 @@ def test_p2g_2d():
     )
 
     @jax.jit
-    def usl_p2g(usl, material_points, grid):
-        usl, grid = usl.p2g(material_points, grid)
-        return usl, grid
+    def usl_p2g(solver, material_points, grid):
+        shape_map, grid = solver.p2g(material_points, grid)
+        return shape_map, grid
 
-    usl, grid = usl_p2g(usl, usl.material_points, usl.grid)
+    shape_map, grid = usl_p2g(usl, usl.material_points, usl.grid)
 
     expected_mass_stack = jnp.array([0.27, 0.09, 0.03, 0.01])
 
@@ -118,12 +118,12 @@ def test_g2p_2d():
     )
 
     @jax.jit
-    def usl_p2g_g2p(usl):
-        new_usl, new_grid = usl.p2g(usl.material_points, usl.grid)
-        new_material_points = new_usl.g2p(usl.material_points, new_grid)
-        return new_material_points
+    def usl_p2g_g2p(solver, material_points, grid):
+        new_shape_map, new_grid = solver.p2g(material_points, grid)
+        new_particles = solver.g2p(material_points, new_grid, new_shape_map)
+        return new_particles
 
-    material_points = usl_p2g_g2p(usl)
+    material_points = usl_p2g_g2p(usl, usl.material_points, usl.grid)
 
     expected_volume_stack = jnp.array([0.49855555, 0.2848889])
 
@@ -198,12 +198,12 @@ def test_g2p_3d():
     )
 
     @jax.jit
-    def usl_p2g_g2p(usl):
-        new_usl, new_grid = usl.p2g(usl.material_points, usl.grid)
-        new_material_points = new_usl.g2p(usl.material_points, new_grid)
-        return new_material_points
+    def usl_p2g_g2p(solver, material_points, grid):
+        new_shape_map, new_grid = solver.p2g(material_points, grid)
+        new_particles = solver.g2p(material_points, new_grid, new_shape_map)
+        return new_particles
 
-    material_points = usl_p2g_g2p(usl)
+    material_points = usl_p2g_g2p(usl, usl.material_points, usl.grid)
 
     expected_volume_stack = jnp.array([0.4402222222222, 0.25155553])
 

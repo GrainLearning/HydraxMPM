@@ -19,7 +19,6 @@ from ..utils.math_helpers import get_double_contraction, get_sym_tensor
 
 class ConstitutiveLaw(Base):
     rho_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
-    p_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
     d: Optional[float] = eqx.field(static=True, default=1.0)
     rho_p: float = eqx.field(static=True, default=1.0)
 
@@ -38,11 +37,22 @@ class ConstitutiveLaw(Base):
 
     def __init__(self, **kwargs):
         self.d = kwargs.get("d")
-        self.p_0 = kwargs.get("p_0")
-        phi_0 = kwargs.get("phi_0")
         self.rho_p = kwargs.get("rho_p", 1.0)
 
         self.init_by_density = kwargs.get("init_by_density", False)
+
+        phi_0 = kwargs.get("phi_0")
+        ln_v_0 = kwargs.get("ln_v_0")
+
+        rho_0 = kwargs.get("rho_0")
+
+        if rho_0 is not None:
+            self.rho_0 = rho_0
+        elif ln_v_0 is not None:
+            phi_0 = 1.0 / jnp.exp(ln_v_0)
+            self.rho_0 = self.rho_p * phi_0
+        elif phi_0 is not None:
+            self.rho_0 = self.rho_p * phi_0
 
         if phi_0 is None:
             self.rho_0 = kwargs.get("rho_0", 1.0)
@@ -68,18 +78,14 @@ class ConstitutiveLaw(Base):
     ) -> Tuple[MaterialPoints, Self]:
         pass
 
-    def init_state(
+    def post_init_state(
         self: Self,
         material_points: MaterialPoints,
         **kwargs,
-    ) -> Tuple[Self, MaterialPoints]:
-        p_0 = self.p_0
-        if p_0 is None:
-            p_0 = material_points.p_stack
+    ):
+        rho_0 = kwargs.get("rho_0", self.rho_0)
 
-        material_points = material_points.init_stress_from_p_0(p_0)
-
-        material_points = material_points.init_mass_from_rho_0(self.rho_0)
+        material_points = material_points.init_mass_from_rho_0(rho_0)
 
         W_stack = None
         if self.approx_strain_energy_density:
@@ -90,14 +96,19 @@ class ConstitutiveLaw(Base):
             P_stack = jnp.zeros(material_points.num_points)
 
         params = self.__dict__
-
         params.update(
-            p_0=p_0,
             W_stack=W_stack,
             P_stack=P_stack,
             **kwargs,
         )
         return self.__class__(**params), material_points
+
+    def init_state(
+        self: Self,
+        material_points: MaterialPoints,
+        **kwargs,
+    ) -> Tuple[Self, MaterialPoints]:
+        return self.post_create(material_points, **kwargs)
 
     def post_update(self, next_stress_stack, deps_dt_stack, dt, **kwargs):
         """
@@ -137,6 +148,6 @@ class ConstitutiveLaw(Base):
         return self.rho_0 / self.rho_p
 
     @property
-    def lnv_0(self):
+    def ln_v_0(self):
         v = 1.0 / self.phi_0
         return jnp.log(v)

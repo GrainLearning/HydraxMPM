@@ -9,17 +9,19 @@ from ..common.base import Base
 from ..common.types import (
     TypeFloatScalarAStack,
     TypeFloatVector3AStack,
+    TypeFloatVectorAStack,
     TypeInt,
     TypeUInt,
     TypeUIntScalarAStack,
 )
+
+from ..shapefunctions.mapping import ShapeFunctionMapping
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..forces.force import Force
 from ..grid.grid import Grid
 from ..forces.boundary import Boundary
 from ..material_points.material_points import MaterialPoints
-from ..shapefunctions.cubic import vmap_linear_cubicfunction
-from ..shapefunctions.linear import vmap_linear_shapefunction
+
 from ..solvers.config import Config
 from ..utils.math_helpers import (
     get_hencky_strain_stack,
@@ -33,17 +35,6 @@ from ..utils.math_helpers import (
 
 def _numpy_tuple_deep(x) -> tuple:
     return tuple(map(tuple, jnp.array(x).tolist()))
-
-
-# dictionary defnitions to lookup some shape functions
-shapefunction_definitions = {
-    "linear": vmap_linear_shapefunction,
-    "cubic": vmap_linear_cubicfunction,
-}
-shapefunction_nodal_positions_1D = {
-    "linear": jnp.arange(2),
-    "cubic": jnp.arange(4) - 1,  # center point in middle
-}
 
 
 class MPMSolver(Base):
@@ -69,23 +60,8 @@ class MPMSolver(Base):
     forces: Tuple[Force, ...] = eqx.field(default=())
     constitutive_laws: Tuple[ConstitutiveLaw, ...] = eqx.field(default=())
     callbacks: Tuple[Callable, ...] = eqx.field(static=True, default=())
-
-    # Node-particle connectivity (interactions, shapefunctions, etc.)
-    _shapefunction_call: Callable = eqx.field(init=False, static=True)
-    _intr_id_stack: TypeUIntScalarAStack = eqx.field(init=False)
-    _intr_hash_stack: TypeUIntScalarAStack = eqx.field(init=False)
-    _intr_shapef_stack: TypeFloatScalarAStack = eqx.field(init=False)
-    _intr_shapef_grad_stack: TypeFloatVector3AStack = eqx.field(init=False)
-    _intr_dist_stack: TypeFloatVector3AStack = eqx.field(init=False)
-    _forward_window: tuple = eqx.field(
-        repr=False, init=False, static=True, converter=lambda x: _numpy_tuple_deep(x)
-    )
-    _backward_window: tuple = eqx.field(
-        repr=False, init=False, static=True, converter=lambda x: _numpy_tuple_deep(x)
-    )
-    _window_size: int = eqx.field(init=False, static=True)
-
     _setup_done: bool = eqx.field(default=False)
+    shape_map: ShapeFunctionMapping = eqx.field(init=False)
 
     def __init__(
         self,
@@ -122,35 +98,14 @@ class MPMSolver(Base):
             else ()
         )
 
-        # Set connectivity and shape function
-        self._shapefunction_call = shapefunction_definitions[self.config.shapefunction]
-        window_1D = shapefunction_nodal_positions_1D[self.config.shapefunction]
-
-        self._forward_window = jnp.array(
-            jnp.meshgrid(*[window_1D] * self.config.dim)
-        ).T.reshape(-1, self.config.dim)
-
-        self._backward_window = self._forward_window[::-1] - 1
-        self._window_size = len(self._backward_window)
-
-        self._intr_shapef_stack = jnp.zeros(
-            self.material_points.num_points * self._window_size
-        )
-        self._intr_shapef_grad_stack = jnp.zeros(
-            (self.material_points.num_points * self._window_size, 3)
+        self.shape_map = ShapeFunctionMapping(
+            shapefunction=config.shapefunction,
+            num_points=self.material_points.num_points,
+            num_cells=self.grid.num_cells,
+            dim=config.dim,
         )
 
-        self._intr_dist_stack = jnp.zeros(
-            (self.material_points.num_points * self._window_size, 3)
-        )  #  needed for APIC / AFLIP
-
-        self._intr_id_stack = jnp.arange(
-            self.material_points.num_points * self._window_size
-        ).astype(jnp.uint32)
-
-        self._intr_hash_stack = jnp.zeros(
-            self.material_points.num_points * self._window_size
-        ).astype(jnp.uint32)
+        super().__init__(**kwargs)
 
     def setup(self: Self, **kwargs) -> Self:
         # we run this once after initialization
@@ -260,154 +215,6 @@ class MPMSolver(Base):
 
         return material_points, tuple(new_materials)
 
-    def _get_particle_grid_interaction(
-        self: Self,
-        intr_id: TypeUInt,
-        material_points: MaterialPoints,
-        grid: Grid,
-        return_point_id=False,
-    ):
-        # Create mapping between material_points and grid nodes.
-        # Shape functions, and connectivity information are calculated here
-
-        point_id = (intr_id / self._window_size).astype(jnp.uint32)
-
-        stencil_id = (intr_id % self._window_size).astype(jnp.uint16)
-
-        # Relative position of the particle to the node.
-        particle_pos = material_points.position_stack.at[point_id].get()
-
-        rel_pos = (particle_pos - jnp.array(grid.origin)) * grid._inv_cell_size
-
-        stencil_pos = jnp.array(self._forward_window).at[stencil_id].get()
-
-        intr_grid_pos = jnp.floor(rel_pos) + stencil_pos
-
-        intr_hash = jnp.ravel_multi_index(
-            intr_grid_pos.astype(jnp.int32), grid.grid_size, mode="wrap"
-        ).astype(jnp.uint32)
-
-        intr_dist = rel_pos - intr_grid_pos
-
-        shapef, shapef_grad_padded = self._shapefunction_call(
-            intr_dist, grid._inv_cell_size, self.config.dim, self.config._padding
-        )
-
-        # is there a more efficient way to do this?
-        intr_dist_padded = jnp.pad(
-            intr_dist,
-            self.config._padding,
-            mode="constant",
-            constant_values=0.0,
-        )
-
-        # transform to grid coordinates
-        intr_dist_padded = -1.0 * intr_dist_padded * grid.cell_size
-
-        if return_point_id:
-            return (
-                intr_dist_padded,
-                intr_hash,
-                shapef,
-                shapef_grad_padded,
-                point_id,
-            )
-        return intr_dist_padded, intr_hash, shapef, shapef_grad_padded
-
-    def _get_particle_grid_interactions_batched(self):
-        """get particle grid interactions / shapefunctions
-        Batched version of get_interaction."""
-        (
-            new_intr_dist_stack,
-            new_intr_hash_stack,
-            new_intr_shapef_stack,
-            new_intr_shapef_grad_stack,
-        ) = jax.vmap(
-            self._get_particle_grid_interaction, in_axes=(0, None, None, None)
-        )(self._intr_id_stack, self.material_points, self.grid, False)
-
-        return eqx.tree_at(
-            lambda state: (
-                state._intr_dist_stack,
-                state._intr_hash_stack,
-                state._intr_shapef_stack,
-                state._intr_shapef_grad_stack,
-            ),
-            self,
-            (
-                new_intr_dist_stack,
-                new_intr_hash_stack,
-                new_intr_shapef_stack,
-                new_intr_shapef_grad_stack,
-            ),
-        )
-
-    # particle to grid, get interactions
-    def vmap_interactions_and_scatter(self, p2g_func: Callable):
-        """Map particle to grid, also gets interaction data"""
-
-        @jax.checkpoint
-        def vmap_intr(intr_id: TypeUInt):
-            intr_dist_padded, intr_hash, shapef, shapef_grad_padded, point_id = (
-                self._get_particle_grid_interaction(
-                    intr_id, self.material_points, self.grid, return_point_id=True
-                )
-            )
-
-            out_stack = p2g_func(point_id, shapef, shapef_grad_padded, intr_dist_padded)
-
-            return intr_dist_padded, intr_hash, shapef, shapef_grad_padded, out_stack
-
-        (
-            new_intr_dist_stack,
-            new_intr_hash_stack,
-            new_intr_shapef_stack,
-            new_intr_shapef_grad_stack,
-            out_stack,
-        ) = jax.vmap(vmap_intr)(self._intr_id_stack)
-
-        return eqx.tree_at(
-            lambda state: (
-                state._intr_dist_stack,
-                state._intr_hash_stack,
-                state._intr_shapef_stack,
-                state._intr_shapef_grad_stack,
-            ),
-            self,
-            (
-                new_intr_dist_stack,
-                new_intr_hash_stack,
-                new_intr_shapef_stack,
-                new_intr_shapef_grad_stack,
-            ),
-        ), out_stack
-
-    def vmap_intr_scatter(self, p2g_func: Callable):
-        """map particle to grid, does not get interaction data with relative distance"""
-
-        def vmap_p2g(intr_id, intr_shapef, intr_shapef_grad, intr_dist):
-            point_id = (intr_id / self._window_size).astype(jnp.uint32)
-            return p2g_func(point_id, intr_shapef, intr_shapef_grad, intr_dist)
-
-        return jax.vmap(vmap_p2g)(
-            self._intr_id_stack,
-            self._intr_shapef_stack,
-            self._intr_shapef_grad_stack,
-            self._intr_dist_stack,  # relative distance node coordinates
-        )
-
-    # Grid to particle
-    def vmap_intr_gather(self, g2p_func: Callable):
-        def vmap_g2p(intr_hash, intr_shapef, intr_shapef_grad, intr_dist):
-            return g2p_func(intr_hash, intr_shapef, intr_shapef_grad, intr_dist)
-
-        return jax.vmap(vmap_g2p)(
-            self._intr_hash_stack,
-            self._intr_shapef_stack,
-            self._intr_shapef_grad_stack,
-            self._intr_dist_stack,
-        )
-
     @jax.jit
     def run(self: Self, unroll=False):
         def main_loop(step, solver):
@@ -423,14 +230,18 @@ class MPMSolver(Base):
             def save_all():
                 # output material points
 
-                solver_arrays, material_point_arrays = self.get_output(new_solver)
+                solver_arrays, material_point_arrays, forces_arrays = self.get_output(
+                    new_solver
+                )
 
                 jax.debug.callback(
                     save_files, step, "material_points", **material_point_arrays
                 )
                 jax.debug.callback(save_files, step, "solver", **solver_arrays)
 
-                jax.debug.print("[{}]  output {}", step, step / self.config.store_every)
+                jax.debug.callback(save_files, step, "forces", **forces_arrays)
+
+                jax.debug.print("[{} / {}]  Saved output", step, self.config.num_steps)
 
             jax.lax.cond(
                 step % self.config.store_every == 0,
@@ -469,7 +280,15 @@ class MPMSolver(Base):
         for key in solver_output:
             solver_arrays[key] = new_solver.__getattribute__(key)
 
-        return solver_arrays, material_point_arrays
+        forces_arrays = {}
+        forces_output = new_solver.config.output.get("forces", ())
+        for key in forces_output:
+            for force in new_solver.forces:
+                key_array = force.__dict__.get(key, None)
+                if key_array is not None:
+                    forces_arrays[key] = key_array
+
+        return solver_arrays, material_point_arrays, forces_arrays
 
     def map_p2g(self, X_stack, return_solver=False):
         """Assumes shapefunctions/interactions have already been generated"""
@@ -484,25 +303,23 @@ class MPMSolver(Base):
             scaled_mass = shapef * intr_mass
             return scaled_X, scaled_mass
 
-        new_self, (scaled_X_stack, scaled_mass_stack) = (
-            self.vmap_interactions_and_scatter(p2g)
-        )
+        scaled_X_stack, scaled_mass_stack = self.shape_map.vmap_intr_scatter(p2g)
 
-        zeros_N_mass_stack = jnp.zeros_like(new_self.grid.mass_stack)
+        zeros_N_mass_stack = jnp.zeros_like(self.grid.mass_stack)
 
         out_shape = X_stack.shape[1:]
-        zero_node_X_stack = jnp.zeros((new_self.grid.num_cells, *out_shape))
+        zero_node_X_stack = jnp.zeros((self.grid.num_cells, *out_shape))
 
-        nodes_mass_stack = zeros_N_mass_stack.at[new_self._intr_hash_stack].add(
+        nodes_mass_stack = zeros_N_mass_stack.at[self.shape_map._intr_hash_stack].add(
             scaled_mass_stack
         )
-        nodes_X_stack = zero_node_X_stack.at[new_self._intr_hash_stack].add(
+        nodes_X_stack = zero_node_X_stack.at[self.shape_map._intr_hash_stack].add(
             scaled_X_stack
         )
 
         def divide(X_generic, mass):
             result = jax.lax.cond(
-                mass > new_self.grid.small_mass_cutoff,
+                mass > self.grid.small_mass_cutoff,
                 lambda x: x / mass,
                 # lambda x: 0.0 * jnp.zeros_like(x),
                 lambda x: jnp.nan * jnp.zeros_like(x),
@@ -511,7 +328,7 @@ class MPMSolver(Base):
             return result
 
         if return_solver:
-            return new_self, jax.vmap(divide)(nodes_X_stack, nodes_mass_stack)
+            return self, jax.vmap(divide)(nodes_X_stack, nodes_mass_stack)
         return jax.vmap(divide)(nodes_X_stack, nodes_mass_stack)
 
     def map_p2g2g(self, X_stack=None, return_solver=False):
@@ -520,7 +337,7 @@ class MPMSolver(Base):
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist_padded):
             return intr_shapef * N_stack.at[intr_hashes].get()
 
-        scaled_N_stack = new_self.vmap_intr_gather(vmap_intr_g2p)
+        scaled_N_stack = new_self.shape_map.vmap_intr_gather(vmap_intr_g2p)
 
         out_shape = N_stack.shape[1:]
 
@@ -530,11 +347,11 @@ class MPMSolver(Base):
 
         if return_solver:
             return new_self, update_P_stack(
-                scaled_N_stack.reshape(-1, self._window_size, *out_shape)
+                scaled_N_stack.reshape(-1, self.shape_map._window_size, *out_shape)
             )
         else:
             return update_P_stack(
-                scaled_N_stack.reshape(-1, self._window_size, *out_shape)
+                scaled_N_stack.reshape(-1, self.shape_map._window_size, *out_shape)
             )
 
     @property

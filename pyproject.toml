@@ -41,7 +41,7 @@ build-backend = "hatchling.build"
 default-groups = ["plot","dev"]
 
 [tool.hatch.build]
-include = ["hydraxmpm/*","analysis/*"]
+include = ["hydraxmpm/*"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["hydraxmpm"]
@@ -65,6 +65,7 @@ dev = [
 ]
 plot = [
     "matplotlib>=3.9.2",
+    "polyscope>=2.3.0",
     "scienceplots>=2.1.1",
 ]
 
