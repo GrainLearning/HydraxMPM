@@ -100,7 +100,10 @@ class MaterialPoints(Base):
         )
         p_stack = kwargs.get("p_stack", None)
         if p_stack is not None:
-            stress_stack = jax.vmap(lambda x: -x * jnp.eye(3))(p_stack)
+            if eqx.is_array(p_stack):
+                stress_stack = jax.vmap(lambda x: -x * jnp.eye(3))(p_stack)
+            else:
+                stress_stack = jnp.tile(jnp.eye(3), (self.num_points, 1, 1)) * -p_stack
 
         self.stress_stack = (
             stress_stack

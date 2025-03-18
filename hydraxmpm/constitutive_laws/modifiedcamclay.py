@@ -250,7 +250,7 @@ class ModifiedCamClay(ConstitutiveLaw):
                     init_val,
                     throw=True,
                     has_aux=True,
-                    max_steps=10000,
+                    max_steps=100,
                     options=dict(
                         lower=jnp.array([0.0, -bound_deps_p_v_max]),
                         upper=jnp.array([bound_pmulti_max, bound_deps_p_v_max]),
