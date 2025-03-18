@@ -50,12 +50,15 @@ def view(config, scalars=None, vminmaxs=None, refresh_rate=0.05):
         )
         load_rigid = True
 
+    print("Polyscope viewer started")
+    print("Press Ctrl+C to exit")
+
     def update():
         global step
         time.sleep(refresh_rate)
         try:
             cfile = config.output_path + f"/material_points.{step}.npz"
-            print("loading", cfile)
+
             input_arrays = np.load(cfile)
             position_stack = input_arrays.get("position_stack", None)
 

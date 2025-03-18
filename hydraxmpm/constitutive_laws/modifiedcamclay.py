@@ -136,6 +136,7 @@ class ModifiedCamClay(ConstitutiveLaw):
         """Update the material state and particle stresses for MPM solver."""
 
         deps_dt_stack = material_points.depsdt_stack
+
         new_stress_stack, new_eps_e_stack, new_px_hat_stack = self.vmap_update_ip(
             deps_dt_stack * dt,
             self.eps_e_stack,
@@ -233,10 +234,11 @@ class ModifiedCamClay(ConstitutiveLaw):
                 # avoiding non-finite values
 
                 init_val = jnp.array([0.0, 0.0])
+
                 # residual of yield function can be large, especially for small pressures
                 solver = optx.Newton(
                     rtol=1e-3,
-                    atol=1e6,  #
+                    atol=1e6,
                 )
 
                 bound_deps_p_v_max = 10.0

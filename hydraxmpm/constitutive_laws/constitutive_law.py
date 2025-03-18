@@ -14,7 +14,7 @@ from ..common.types import (
 )
 from ..material_points.material_points import MaterialPoints
 
-from ..utils.math_helpers import get_double_contraction, get_sym_tensor
+from ..utils.math_helpers import get_double_contraction
 
 
 class ConstitutiveLaw(Base):
@@ -24,8 +24,6 @@ class ConstitutiveLaw(Base):
 
     # for elastoplastic models
     eps_e_stack: Optional[TypeFloatMatrixPStack] = None
-
-    init_by_density: bool = eqx.field(static=True, default=False)
 
     approx_stress_power: bool = eqx.field(static=True, default=False)
 
@@ -38,8 +36,6 @@ class ConstitutiveLaw(Base):
     def __init__(self, **kwargs):
         self.d = kwargs.get("d")
         self.rho_p = kwargs.get("rho_p", 1.0)
-
-        self.init_by_density = kwargs.get("init_by_density", False)
 
         phi_0 = kwargs.get("phi_0")
         ln_v_0 = kwargs.get("ln_v_0")
@@ -108,7 +104,7 @@ class ConstitutiveLaw(Base):
         material_points: MaterialPoints,
         **kwargs,
     ) -> Tuple[Self, MaterialPoints]:
-        return self.post_create(material_points, **kwargs)
+        return self.post_init_state(material_points, **kwargs)
 
     def post_update(self, next_stress_stack, deps_dt_stack, dt, **kwargs):
         """

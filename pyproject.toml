@@ -66,6 +66,7 @@ dev = [
 plot = [
     "matplotlib>=3.9.2",
     "polyscope>=2.3.0",
+    "pyvista>=0.44.2",
     "scienceplots>=2.1.1",
 ]
 
@@ -95,4 +96,4 @@ testpaths = ["tests"]
 
 
 [tool.deptry]
-exclude = ["examples", "not_tested",".venv","test","not_test","integration","hydraxmpm/constitutive_laws/experimental_old","NotInclude"]
+exclude = ["examples", "not_tested",".venv","test","not_test","NotInclude"]

@@ -10,6 +10,20 @@ from pathlib import Path
 import shutil
 
 
+import sys
+from pathlib import Path
+
+
+def get_script_directory() -> Path:
+    """Get the directory of the script that imported this module."""
+    main_module = sys.modules.get("__main__")
+    if hasattr(main_module, "__file__"):
+        script_path = Path(main_module.__file__).resolve()
+        return script_path.parent
+    # Fallback if __main__ lacks __file__ (e.g., interactive shell)
+    return Path.cwd()
+
+
 class Config(eqx.Module):
     """
 
@@ -25,7 +39,6 @@ class Config(eqx.Module):
 
     store_every: Optional[int] = eqx.field(default=0, static=True)
     ppc: Optional[int] = eqx.field(default=1, static=True)
-    file: Optional[str] = eqx.field(default="", static=True)
     project: Optional[str] = eqx.field(default="", static=True)
     dt: Optional[float] = eqx.field(default=0.0, static=True)
     num_steps: Optional[int] = eqx.field(default=0, static=True)
@@ -49,7 +62,6 @@ class Config(eqx.Module):
         num_steps: Optional[int] = None,
         dt: Optional[float] = None,
         store_every: Optional[int] = 0,
-        file: Optional[str] = "",
         project: Optional[str] = "",
         output_path: Optional[str] = None,
         shapefunction: Optional[str] = "cubic",
@@ -73,7 +85,6 @@ class Config(eqx.Module):
             num_steps: Total number of steps. Defaults to None.
             dt: Time increment. Defaults to None.
             store_every: Store at every nth step. Defaults to 0.
-            file: Location of current file. Defaults to "".
             project: Output project location. Defaults to "".
             default_gpu_id: Default GPU ID. Defaults to -1.
             output_path: Output path. Defaults to None.
@@ -109,13 +120,13 @@ class Config(eqx.Module):
         # internal use...
         self._padding = (0, 3 - self.dim)
 
+        # Example usage in your module
+
         if output_path is not None:
             self.output_path = output_path
         else:
-            if file is not None:
-                self.output_path = os.path.dirname(file) + "/output/" + project + "/"
-            else:
-                self.output_path = "./output/" + project + "/"
+            script_dir = get_script_directory()
+            self.output_path = (script_dir / "output" / project).as_posix()
 
         self.override_dir = override_dir
         self.create_dir = create_dir

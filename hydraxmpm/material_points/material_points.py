@@ -292,29 +292,25 @@ class MaterialPoints(Base):
 
     def deps_p_dt_stack(self, dt, eps_e_stack=None, eps_e_stack_prev=None, **kwargs):
         """Plastic strain rate tensor"""
-        jax.debug.print("some issues with this still")
-        pass
 
-        # if eps_e_stack is None:
-        #     eps_e_stack = jnp.zeros((3, 3))
+        if eps_e_stack is None:
+            eps_e_stack = jnp.zeros((3, 3))
 
-        # if eps_e_stack_prev is None:
-        #     eps_e_stack_prev = jnp.zeros((3, 3))
+        if eps_e_stack_prev is None:
+            eps_e_stack_prev = jnp.zeros((3, 3))
 
-        # return (eps_e_stack - eps_e_stack_prev) * dt
+        return (eps_e_stack - eps_e_stack_prev) * dt
 
     def dgamma_p_dt_stack(self, dt, eps_e_stack=None, eps_e_stack_prev=None, **kwargs):
         """Plastic scalar shear strain rate"""
-        jax.debug.print("some issues with this still")
-        pass
-        # return get_scalar_shear_strain_stack(
-        #     self.deps_p_dt_stack(dt, eps_e_stack, eps_e_stack_prev, **kwargs)
-        # )
+
+        return get_scalar_shear_strain_stack(
+            self.deps_p_dt_stack(dt, eps_e_stack, eps_e_stack_prev, **kwargs)
+        )
 
     def deps_p_v_dt_stack(self, dt, eps_e_stack, eps_e_stack_prev=None, **kwargs):
         """Plastic scalar volumetric strain rate"""
-        jax.debug.print("some issues with this still")
-        pass
-        # return get_volumetric_strain_stack(
-        #     self.deps_p_dt_stack(dt, eps_e_stack, eps_e_stack_prev, **kwargs)
-        # )
+
+        return get_volumetric_strain_stack(
+            self.deps_p_dt_stack(dt, eps_e_stack, eps_e_stack_prev, **kwargs)
+        )

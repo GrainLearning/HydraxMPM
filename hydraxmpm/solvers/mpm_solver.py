@@ -75,6 +75,15 @@ class MPMSolver(Base):
         callbacks: Optional[Tuple[Callable, ...] | Callable] = None,
         **kwargs,
     ) -> Self:
+        assert material_points.position_stack.shape[1] == config.dim, (
+            "Dimension mismatch of material points and config, check if dim is set correctly. Either"
+            "the material_points or the config.dim is set incorrectly."
+        )
+        assert len(grid.origin) == config.dim, (
+            "Dimension mismatch of origin and config. Either "
+            "the origin or the config.dim is set incorrectly."
+        )
+
         self.config = config
         self.material_points = material_points
         self.grid = grid
