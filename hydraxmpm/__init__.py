@@ -15,8 +15,8 @@ from .constitutive_laws.linearelastic import LinearIsotropicElastic
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay
 from .constitutive_laws.mu_i_rheology_incompressible import MuI_incompressible
 from .constitutive_laws.newtonfluid import NewtonFluid
-
-from .et_benchmarks.et_benchmarks import TRX_CU, TRX_CD
+from .constitutive_laws.druckerprager import DruckerPrager
+from .et_benchmarks.et_benchmarks import TRX_CU, TRX_CD, S_CD, ISO_C
 
 from .forces.boundary import Boundary
 from .forces.rigidparticles import RigidParticles
@@ -25,13 +25,17 @@ from .forces.gravity import Gravity
 from .grid.grid import Grid
 from .material_points.material_points import MaterialPoints
 from .solvers.config import Config
-from .solvers.et_solver import ETSolver
+from .solvers.et_solver import ETSolver, run_et_solver
 from .solvers.mpm_solver import MPMSolver
 from .solvers.usl import USL
 from .solvers.usl_apic import USL_APIC
 from .solvers.usl_asflip import USL_ASFLIP
+from .solvers.run_solvers import run_mpm
+
+
 from .utils.mpm_callback_helpers import npz_to_vtk
 from .utils.plot import make_plot, plot_set1, plot_set1_short
+
 
 from .plotting import helpers, viewer
 

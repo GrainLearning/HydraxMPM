@@ -40,7 +40,6 @@ class NewtonFluid(ConstitutiveLaw):
         K: TypeFloat = 2.0 * 10**6,
         viscosity: TypeFloat = 0.001,
         alpha: TypeFloat = 7.0,
-        init_by_density: bool = True,
         **kwargs,
     ) -> Self:
         """Initialize the nearly incompressible Newtonian fluid material."""
@@ -48,48 +47,28 @@ class NewtonFluid(ConstitutiveLaw):
         self.K = K
         self.viscosity = viscosity
         self.alpha = alpha
-        self.init_by_density = init_by_density
         super().__init__(**kwargs)
 
     def init_state(self: Self, material_points: MaterialPoints):
-        # There are two ways to initialize via a reference pressure or reference density
-        # these can be given as a scalar or array
+        p_0_stack = material_points.p_stack
+        vmap_give_rho_ref = partial(
+            jax.vmap,
+            in_axes=(None, None, 0, None),
+        )(give_rho)
 
-        p_0 = self.p_0
-        if p_0 is None:
-            p_0 = material_points.p_stack
+        rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack, self.alpha)
+        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0, 0, 0, None))
 
-        rho_0 = self.rho_0
+        new_stress_stack = vmap_update_ip(
+            material_points.stress_stack,
+            material_points.F_stack,
+            material_points.L_stack,
+            material_points.rho_stack,
+            3,
+        )
+        material_points = material_points.replace(stress_stack=new_stress_stack)
 
-        rho = self.rho_0
-
-        if self.init_by_density:
-            if eqx.is_array(rho_0):
-                vmap_give_p_ref = partial(
-                    jax.vmap,
-                    in_axes=(None, 0, None, None),
-                )(give_p)
-            else:
-                vmap_give_p_ref = give_p
-
-            p_0 = vmap_give_p_ref(self.K, rho_0, rho_0, self.alpha)
-        else:
-            if eqx.is_array(p_0):
-                vmap_give_rho_ref = partial(
-                    jax.vmap,
-                    in_axes=(None, None, 0, None),
-                )(give_rho)
-            else:
-                vmap_give_rho_ref = give_rho
-
-                rho = vmap_give_rho_ref(self.K, self.rho_0, p_0, self.alpha)
-
-        material_points = material_points.init_stress_from_p_0(p_0)
-        # if there is pressure, then density is not on reference density
-        material_points = material_points.init_mass_from_rho_0(rho)
-        params = self.__dict__
-        params.update(rho_0=rho_0, p_0=p_0)
-        return self.__class__(**params), material_points
+        return self.post_init_state(material_points, rho=rho, rho_0=self.rho_0)
 
     def update(
         self: Self,

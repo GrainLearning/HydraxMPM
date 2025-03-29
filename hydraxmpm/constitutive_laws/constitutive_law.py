@@ -17,6 +17,16 @@ from ..material_points.material_points import MaterialPoints
 from ..utils.math_helpers import get_double_contraction
 
 
+class ConvergenceControlConfig(eqx.Module):
+    error_check: bool = eqx.field(static=True, default=False)
+    rtol: float = eqx.field(static=True, default=1e-6)
+    atol: float = eqx.field(static=True, default=1e-6)
+    max_iter: int = eqx.field(static=True, default=100)
+    throw: bool = eqx.field(static=True, default=True)
+    lower_bound: tuple = eqx.field(static=True, default=(1e-6, 1e-6))
+    upper_bound: tuple = eqx.field(static=True, default=(1e6, 1e6))
+
+
 class ConstitutiveLaw(Base):
     rho_0: Optional[Union[TypeFloatScalarAStack, TypeFloat]] = None
     d: Optional[float] = eqx.field(static=True, default=1.0)
@@ -79,9 +89,12 @@ class ConstitutiveLaw(Base):
         material_points: MaterialPoints,
         **kwargs,
     ):
+        # this solves cases when rho_0 is not rho,
+        # i.e., current density may be different from reference,
+        # for example Newtonian fluids
         rho_0 = kwargs.get("rho_0", self.rho_0)
-
-        material_points = material_points.init_mass_from_rho_0(rho_0)
+        rho = kwargs.get("rho", rho_0)
+        material_points = material_points.init_mass_from_rho_0(rho)
 
         W_stack = None
         if self.approx_strain_energy_density:
@@ -147,3 +160,7 @@ class ConstitutiveLaw(Base):
     def ln_v_0(self):
         v = 1.0 / self.phi_0
         return jnp.log(v)
+
+    def get_dt_crit(self, material_points, cell_size, alpha=0.5, **kwargs):
+        """Get critical timestep of material poiints for stability."""
+        return kwargs.get("dt", 1e-6)

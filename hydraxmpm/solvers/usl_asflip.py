@@ -62,7 +62,7 @@ class USL_ASFLIP(MPMSolver):
         self.beta_min = beta_min
         self.beta_max = beta_max
 
-        if self.config.shapefunction != "cubic":
+        if self.config.shapefunction not in ["cubic", "quadratic"]:
             raise NotImplementedError("Only cubic shapefunctions supported with ASFLIP")
 
         Dp = kwargs.get("Dp", None)
@@ -70,9 +70,15 @@ class USL_ASFLIP(MPMSolver):
         Bp_stack = kwargs.get("Bp_stack", None)
 
         if Dp is None:
-            self.Dp = (
-                (1.0 / 3.0) * self.grid.cell_size * self.grid.cell_size * jnp.eye(3)
-            )
+            if self.config.shapefunction == "cubic":
+                self.Dp = (
+                    (1.0 / 3.0) * self.grid.cell_size * self.grid.cell_size * jnp.eye(3)
+                )
+            elif self.config.shapefunction == "quadratic":
+                self.Dp = (
+                    (1.0 / 4.0) * self.grid.cell_size * self.grid.cell_size * jnp.eye(3)
+                )
+
         else:
             self.Dp = Dp
 
@@ -86,7 +92,8 @@ class USL_ASFLIP(MPMSolver):
         else:
             self.Bp_stack = Bp_stack
 
-    def update(self: Self, step: TypeInt = 0) -> Self:
+    @jax.checkpoint
+    def update(self: Self, step: TypeInt = 0, dt: TypeFloat = 1e-3) -> Self:
         material_points = self.material_points._refresh()
 
         material_points, forces = self._update_forces_on_points(
@@ -94,20 +101,23 @@ class USL_ASFLIP(MPMSolver):
             grid=self.grid,
             forces=self.forces,
             step=step,
+            dt=dt,
         )
 
-        new_shape_map, grid = self.p2g(material_points=material_points, grid=self.grid)
+        new_shape_map, grid = self.p2g(
+            material_points=material_points, grid=self.grid, dt=dt
+        )
 
         grid, forces = self._update_forces_grid(
-            material_points=material_points, grid=grid, forces=forces, step=step
+            material_points=material_points, grid=grid, forces=forces, step=step, dt=dt
         )
 
         self, material_points = self.g2p(
-            material_points=material_points, grid=grid, shape_map=new_shape_map
+            material_points=material_points, grid=grid, shape_map=new_shape_map, dt=dt
         )
 
         material_points, constitutive_laws = self._update_constitutive_laws(
-            material_points, self.constitutive_laws
+            material_points, self.constitutive_laws, dt=dt
         )
 
         return eqx.tree_at(
@@ -122,7 +132,7 @@ class USL_ASFLIP(MPMSolver):
             (material_points, grid, constitutive_laws, forces, new_shape_map),
         )
 
-    def p2g(self, material_points, grid):
+    def p2g(self, material_points, grid, dt):
         def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = material_points.mass_stack.at[point_id].get()
             intr_volumes = material_points.volume_stack.at[point_id].get()
@@ -181,7 +191,7 @@ class USL_ASFLIP(MPMSolver):
         )
         new_normal_stack = sum_interactions(grid.normal_stack, scaled_normal_stack)
 
-        nodes_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
+        nodes_moment_nt_stack = new_moment_stack + new_force_stack * dt
 
         return new_shape_map, eqx.tree_at(
             lambda state: (
@@ -194,7 +204,7 @@ class USL_ASFLIP(MPMSolver):
             (new_mass_stack, new_moment_stack, nodes_moment_nt_stack, new_normal_stack),
         )
 
-    def g2p(self, material_points, grid, shape_map) -> Tuple[Self, MaterialPoints]:
+    def g2p(self, material_points, grid, shape_map, dt) -> Tuple[Self, MaterialPoints]:
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = grid.mass_stack.at[intr_hashes].get()
             intr_moments = grid.moment_stack.at[intr_hashes].get()
@@ -285,7 +295,7 @@ class USL_ASFLIP(MPMSolver):
             if self.config.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0.0)
 
-            p_F_next = (jnp.eye(3) + p_velgrads_next * self.config.dt) @ p_F
+            p_F_next = (jnp.eye(3) + p_velgrads_next * dt) @ p_F
 
             if self.config.dim == 2:
                 p_F_next = p_F_next.at[2, 2].set(1)
@@ -301,7 +311,7 @@ class USL_ASFLIP(MPMSolver):
 
             vel_update = vels_nt + Beta_p * T
 
-            p_positions_next = p_positions + vel_update * self.config.dt
+            p_positions_next = p_positions + vel_update * dt
 
             return (
                 p_velocities_next,

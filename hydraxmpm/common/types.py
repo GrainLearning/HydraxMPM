@@ -22,6 +22,7 @@ TypeFloatVectorNStack = Float[Array, "num_nodes dim"]
 TypeFloatMatrixNStack = Float[Array, "num_nodes dim dim"]
 TypeFloatMatrix3x3NStack = Float[Array, "num_nodes 3 3"]
 TypeBoolNStack = Bool[Array, "num_nodes"]
+TypeUIntScalarNStack = UInt[Array, "num_nodes"]
 
 # Any
 TypeFloatScalarAStack = Float[Array, "*"]

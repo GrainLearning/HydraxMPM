@@ -459,6 +459,9 @@ def get_hencky_strain(F):
     singular values, left stretch tensor $U$ and right stretch tensor $V^T$. After, take
     the matrix logarithm of the singular values to get the Hencky strain.
 
+    issues with forward mode AD.
+    https://github.com/jax-ml/jax/issues/2011
+
     Args:
         F (chex.Array): deformation gradient
 
@@ -466,7 +469,7 @@ def get_hencky_strain(F):
         Tuple[chex.Array, chex.Array, chex.Array]: strain tensor, left stretch tensor,
         right stretch tensor
     """
-    u, s, vh = jnp.linalg.svd(F)
+    u, s, vh = jnp.linalg.svd(F, full_matrices=False)
 
     eps = jnp.zeros((3, 3)).at[[0, 1, 2], [0, 1, 2]].set(jnp.log(s))
     return eps, u, vh

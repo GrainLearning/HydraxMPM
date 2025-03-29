@@ -7,11 +7,13 @@ import jax.numpy as jnp
 from ..common.types import TypeInt, TypeFloat, TypeFloat3, TypeFloatVector
 
 
-def vmap_linear_cubicfunction(
+def vmap_cubic_shapefunction(
     intr_dist: TypeFloatVector,
     inv_cell_size: TypeFloat,
     dim: TypeInt,
     padding: Tuple[int, int],
+    intr_node_type: TypeInt,
+    **kwargs,
 ) -> Tuple[TypeFloat, TypeFloat3]:
     condlist = [
         (intr_dist >= -2) * (intr_dist < -1),
@@ -24,6 +26,66 @@ def vmap_linear_cubicfunction(
 
     h = inv_cell_size
 
+    # type 1 nodes - left / right boundary
+    def boundary_splines():
+        # checked
+        basis = _piecewise(
+            funclist=[
+                # 1/6 x**3 + x**2 + 2x + 4/3
+                lambda x: ((1.0 / 6.0 * x + 1.0) * x + 2.0) * x + 4.0 / 3.0,
+                # -1/6 x**3 +x + 1
+                lambda x: (-1.0 / 6.0 * x * x + 1.0) * x + 1.0,
+                # 1/6 x**3 - x  + 1
+                lambda x: ((1.0 / 6.0) * x * x - 1.0) * x + 1.0,
+                # -1/6 x**3 + x**2 -2x + 4/3
+                lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0,
+            ]
+        )
+        # checked
+        dbasis = _piecewise(
+            funclist=[
+                # 1/2 x**2 + 2x + 2
+                lambda x: h * ((0.5 * x + 2) * x + 2.0),
+                # -1/2 x**2 +1
+                lambda x: h * (-0.5 * x * x + 1.0),
+                # 1/2 x**2 - 1
+                lambda x: h * (0.5 * x * x - 1.0),
+                # -1/2 x**2 + 2x -2
+                lambda x: h * ((-0.5 * x + 2) * x - 2.0),
+            ]
+        )
+        return basis, dbasis
+
+    # type 2 nodes - left boundary + h
+    def boundary_0_p_h():
+        # checked
+        basis = _piecewise(
+            funclist=[
+                lambda x: jnp.float32(0.0),
+                # -1/3 x**3 -x**2 + 2/3
+                lambda x: (-1.0 / 3.0 * x - 1.0) * x * x + 2.0 / 3.0,
+                # 1/2 x**3 -x**2 + 2/3
+                lambda x: (0.5 * x - 1) * x * x + 2.0 / 3.0,
+                # -1/6 x**3 + x**2 -2x + 4/3
+                lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0,
+            ]
+        )
+        # checked
+        dbasis = _piecewise(
+            funclist=[
+                lambda x: jnp.float32(0.0),
+                # -x**2 -2x
+                lambda x: h * (-x - 2) * x,
+                # 3/2 x**2 -2x
+                lambda x: h * (3.0 / 2.0 * x - 2.0) * x,
+                # -1/2 x**2 + 2x -2
+                lambda x: h * ((-0.5 * x + 2) * x - 2.0),
+            ]
+        )
+        return basis, dbasis
+
+    # type 3 nodes middle
+    # checked
     def middle_splines():
         basis = _piecewise(
             funclist=[
@@ -51,59 +113,9 @@ def vmap_linear_cubicfunction(
         )
         return basis, dbasis
 
-    def boundary_splines():
-        basis = _piecewise(
-            funclist=[
-                # 1/6 x**3 + x**2 + 2x + 4/3
-                lambda x: ((1.0 / 6.0 * x + 1.0) * x + 2.0) * x + 4.0 / 3.0,
-                # -1/6 x**3 +x + 1
-                lambda x: (-1.0 / 6.0 * x * x + 1.0) * x + 1.0,
-                # 1/6 x**3 - x  + 1
-                lambda x: ((1.0 / 6.0) * x * x - 1.0) * x + 1.0,
-                # -1/6 x**3 + x**2 -2x + 4/3
-                lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0,
-            ]
-        )
-        dbasis = _piecewise(
-            funclist=[
-                # 1/2 x**2 + 2x + 2
-                lambda x: h * ((0.5 * x + 2) * x + 2.0),
-                # -1/2 x**2 +1
-                lambda x: h * (-0.5 * x * x + 1.0),
-                # 1/2 x**2 - 1
-                lambda x: h * (0.5 * x * x - 1.0),
-                # -1/2 x**2 + 2x -2
-                lambda x: h * ((-0.5 * x + 2) * x - 2.0),
-            ]
-        )
-        return basis, dbasis
-
-    def boundary_0_p_h():
-        basis = _piecewise(
-            funclist=[
-                lambda x: jnp.float32(0.0),
-                # -1/3 x**3 -x**2 + 2/3
-                lambda x: (-1.0 / 3.0 * x - 1.0) * x * x + 2.0 / 3.0,
-                # 1/2 x**3 -x**2 + 2/3
-                lambda x: (0.5 * x - 1) * x * x + 2.0 / 3.0,
-                # -1/6 x**3 + x**2 -2x + 4/3
-                lambda x: ((-1.0 / 6.0 * x + 1.0) * x - 2.0) * x + 4.0 / 3.0,
-            ]
-        )
-        dbasis = _piecewise(
-            funclist=[
-                lambda x: jnp.float32(0.0),
-                # -x**2 -2x
-                lambda x: h * (-x - 2) * x,
-                # 3/2 x**2 -2x
-                lambda x: h * (3.0 / 2.0 * x - 2.0) * x,
-                # -1/2 x**2 + 2x -2
-                lambda x: h * ((-0.5 * x + 2) * x - 2.0),
-            ]
-        )
-        return basis, dbasis
-
+    # type 4 nodes - right boundary - h
     def boundary_N_m_h():
+        # checked
         basis = _piecewise(
             funclist=[
                 # (1/6) x**3 + x**2 + 2x + 4/3
@@ -115,6 +127,7 @@ def vmap_linear_cubicfunction(
                 lambda x: jnp.float32(0.0),
             ]
         )
+        # checked
         dbasis = _piecewise(
             funclist=[
                 # (1/2) x**2 + 2x + 2
@@ -134,8 +147,8 @@ def vmap_linear_cubicfunction(
     # 4th index is right side of closes boundary N -h
 
     basis, dbasis = jax.lax.switch(
-        # index= intr_node_type,
-        index=0,
+        # index=0,
+        index=intr_node_type,
         branches=[
             middle_splines,
             boundary_splines,

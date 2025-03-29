@@ -1,5 +1,6 @@
 import inspect
 from functools import partial
+from re import X
 from typing import Optional, Self, Tuple
 
 import equinox as eqx
@@ -30,6 +31,103 @@ def stress_update(L_next, material_points_prev, constitutive_law_prev, dt):
     return material_points_next, constitutive_law_next
 
 
+# @partial(jax.jit, static_argnames=("dt", "rtol", "atol", "max_steps"))
+@eqx.filter_jit
+def run_et_solver(
+    solver,
+    dt: float,
+    rtol=1e-10,
+    atol=1e-2,
+    max_steps=100,
+):
+    accumulate_list = []
+    carry_list = []
+
+    for et_benchmark in solver.et_benchmarks:
+        carry, accumulate = mix_control(
+            solver,
+            solver.material_points,
+            solver.constitutive_law,
+            et_benchmark,
+            dt,
+            rtol,
+            atol,
+            max_steps,
+        )
+        accumulate_list.append(accumulate)
+        carry_list.append(carry)
+
+    # ensure that the list of output arrays is "flat"
+    # with respect to number of deformation mode
+    if len(solver.et_benchmarks) == 1:
+        accumulate_list = accumulate_list[0]
+        carry_list = carry_list[0]
+
+    return accumulate_list
+
+
+def mix_control(
+    solver,
+    material_points: MaterialPoints,
+    constitutive_law: ConstitutiveLaw,
+    et_benchmark: ETBenchmark,
+    dt=0.0001,
+    rtol=1e-10,
+    atol=1e-2,
+    max_steps=20,
+):
+    # TODO have X_target become new X_0? or X_guess become X_0?
+    if et_benchmark.X_control_stack is not None:
+        X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
+    else:
+        X_0 = None
+
+    def scan_fn(carry, xs):
+        (
+            constitutive_law_prev,
+            material_points_prev,
+            step,
+        ) = carry
+
+        L_control, x_target = xs
+
+        material_points_next, constitutive_law_next = apply_control(
+            L_control,
+            material_points_prev,
+            constitutive_law_prev,
+            et_benchmark,
+            dt,
+            X_0,
+            x_target,
+            rtol,
+            atol,
+            max_steps,
+        )
+
+        accumulate = solver.get_output(
+            dt,
+            material_points_next,
+            constitutive_law_next,
+            material_points_prev,
+            constitutive_law_prev,
+        )
+        # accumulate = []
+        carry = (constitutive_law_next, material_points_next, step + 1)
+
+        return carry, accumulate
+
+    carry, accumulate = jax.lax.scan(
+        scan_fn,
+        (constitutive_law, material_points, 0),  # carry
+        (
+            et_benchmark.L_control_stack,
+            et_benchmark.X_control_stack,
+        ),  # control
+    )
+
+    return carry, accumulate
+
+
 def apply_control(
     L_control,
     material_points_prev,
@@ -38,11 +136,11 @@ def apply_control(
     dt,
     X_0=None,
     x_target=None,
-    rtol=1e-10,
+    rtol=1e-3,
     atol=1e-2,
     max_steps=20,
 ):
-    def servo_controller(sol, args):
+    def servo_controller(sol, return_aux=True):
         L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
 
         material_points_next, constitutive_law_next = stress_update(
@@ -52,27 +150,38 @@ def apply_control(
         stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
 
         R = et_benchmark.loss_stress(stress_guess, x_target)
-
-        return R, (material_points_next, constitutive_law_next)
+        # jax.debug.print("{}", R)
+        # R = eqx.error_if(R, jnp.isnan(R).any(), "R is nan")
+        if return_aux:
+            return R, (material_points_next, constitutive_law_next)
+        return R
 
     if et_benchmark.X_control_stack is None:
         material_points_next, constitutive_law_next = stress_update(
             L_control, material_points_prev, constitutive_law_prev, dt
         )
+
     else:
-        solver = optx.Newton(rtol=rtol, atol=atol)
 
-        sol = optx.root_find(
-            servo_controller,
-            solver,
-            X_0,
-            throw=False,
-            has_aux=True,
-            max_steps=max_steps,
-        )
+        def find_roots():
+            newton = optx.Newton(rtol=rtol, atol=atol)
 
-        material_points_next, constitutive_law_next = sol.aux
+            sol = optx.root_find(
+                servo_controller,
+                newton,
+                X_0,
+                args=False,
+                throw=True,
+                has_aux=False,
+                max_steps=max_steps,
+            )
+            return sol.value
 
+        X_root = find_roots()
+
+        R, aux = servo_controller(X_root, True)
+        material_points_next, constitutive_law_next = aux
+    # jax.debug.breakpoint()
     return material_points_next, constitutive_law_next
 
 
@@ -92,7 +201,8 @@ class ETSolver(Base):
     rtol: float = eqx.field(default=1e-10, static=True)
     atol: float = eqx.field(default=1e-2, static=True)
     max_steps: int = eqx.field(default=20, static=True)
-    # step: TypeInt
+
+    num_steps: int
 
     def __init__(
         self,
@@ -103,7 +213,7 @@ class ETSolver(Base):
         atol: float = 1e-2,
         max_steps: int = 20,
         et_benchmarks: Optional[Tuple[ETBenchmark, ...] | ETBenchmark] = None,
-        step: TypeInt = 0,
+        num_steps: TypeInt = 4000,
         **kwargs,
     ) -> Self:
         self.config = config
@@ -112,6 +222,7 @@ class ETSolver(Base):
         self.rtol = rtol
         self.atol = atol
         self.max_steps = max_steps
+        self.num_steps = num_steps
         # self.step = step
 
         if material_points is None:
@@ -138,7 +249,7 @@ class ETSolver(Base):
         new_material_points = self.material_points
         for benchmark in self.et_benchmarks:
             new_deformation_mode, new_material_points = benchmark.init_state(
-                self.config, new_material_points
+                self.num_steps, new_material_points
             )
             new_et_benchmarks.append(new_deformation_mode)
 
@@ -199,88 +310,90 @@ class ETSolver(Base):
 
         return new_self, accumulate
 
-    @jax.jit
-    def run_jit(self: Self, return_carry: bool = False):
-        return self.run(return_carry)
+    # @jax.jit
+    # def run_jit(self: Self, return_carry: bool = False):
+    #     return self.run(return_carry)
 
-    def run(self: Self, return_carry: bool = False):
-        accumulate_list = []
-        carry_list = []
+    # def run(self: Self, return_carry: bool = False):
+    #     accumulate_list = []
+    #     carry_list = []
 
-        for et_benchmark in self.et_benchmarks:
-            carry, accumulate = self.mix_control(
-                self.material_points, self.constitutive_law, et_benchmark
-            )
-            accumulate_list.append(accumulate)
-            carry_list.append(carry)
+    #     for et_benchmark in self.et_benchmarks:
+    #         carry, accumulate = self.mix_control(
+    #             self.material_points, self.constitutive_law, et_benchmark
+    #         )
+    #         accumulate_list.append(accumulate)
+    #         carry_list.append(carry)
 
-        # ensure that the list of output arrays is "flat"
-        # with respect to number of deformation mode
-        if len(self.et_benchmarks) == 1:
-            accumulate_list = accumulate_list[0]
-            carry_list = carry_list[0]
+    #     # ensure that the list of output arrays is "flat"
+    #     # with respect to number of deformation mode
+    #     if len(self.et_benchmarks) == 1:
+    #         accumulate_list = accumulate_list[0]
+    #         carry_list = carry_list[0]
 
-        if return_carry:
-            return carry_list, accumulate_list
-        return accumulate_list
+    #     if return_carry:
+    #         return carry_list, accumulate_list
+    #     return accumulate_list
 
-    def mix_control(
-        self: Self,
-        material_points: MaterialPoints,
-        constitutive_law: ConstitutiveLaw,
-        et_benchmark: ETBenchmark,
-    ):
-        # TODO have X_target become new X_0? or X_guess become X_0?
-        if et_benchmark.X_control_stack is not None:
-            X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
-        else:
-            X_0 = None
+    # def mix_control(
+    #     self: Self,
+    #     material_points: MaterialPoints,
+    #     constitutive_law: ConstitutiveLaw,
+    #     et_benchmark: ETBenchmark,
+    # ):
+    #     # TODO have X_target become new X_0? or X_guess become X_0?
+    #     if et_benchmark.X_control_stack is not None:
+    #         X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
+    #     else:
+    #         X_0 = None
 
-        def scan_fn(carry, xs):
-            (
-                constitutive_law_prev,
-                material_points_prev,
-                step,
-            ) = carry
+    #     def scan_fn(carry, xs):
+    #         (
+    #             constitutive_law_prev,
+    #             material_points_prev,
+    #             step,
+    #         ) = carry
 
-            L_control, x_target = xs
+    #         L_control, x_target = xs
 
-            material_points_next, constitutive_law_next = apply_control(
-                L_control,
-                material_points_prev,
-                constitutive_law_prev,
-                et_benchmark,
-                self.config.dt,
-                X_0,
-                x_target,
-                self.rtol,
-                self.atol,
-                self.max_steps,
-            )
+    #         material_points_next, constitutive_law_next = apply_control(
+    #             L_control,
+    #             material_points_prev,
+    #             constitutive_law_prev,
+    #             et_benchmark,
+    #             self.config.dt,
+    #             X_0,
+    #             x_target,
+    #             self.rtol,
+    #             self.atol,
+    #             self.max_steps,
+    #         )
 
-            accumulate = self.get_output(
-                material_points_next,
-                constitutive_law_next,
-                material_points_prev,
-                constitutive_law_prev,
-            )
-            carry = (constitutive_law_next, material_points_next, step + 1)
+    #         accumulate = self.get_output(
+    #             material_points_next,
+    #             constitutive_law_next,
+    #             material_points_prev,
+    #             constitutive_law_prev,
+    #         )
+    #         # accumulate = []
+    #         carry = (constitutive_law_next, material_points_next, step + 1)
 
-            return carry, accumulate
+    #         return carry, accumulate
 
-        carry, accumulate = jax.lax.scan(
-            scan_fn,
-            (constitutive_law, material_points, 0),  # carry
-            (
-                et_benchmark.L_control_stack,
-                et_benchmark.X_control_stack,
-            ),  # control
-        )
+    #     carry, accumulate = jax.lax.scan(
+    #         scan_fn,
+    #         (constitutive_law, material_points, 0),  # carry
+    #         (
+    #             et_benchmark.L_control_stack,
+    #             et_benchmark.X_control_stack,
+    #         ),  # control
+    #     )
 
-        return carry, accumulate
+    #     return carry, accumulate
 
     def get_output(
         self,
+        dt,
         material_points,
         constitutive_law,
         material_points_prev=None,
@@ -297,7 +410,7 @@ class ETSolver(Base):
 
                     if callable(output):
                         output = output(
-                            dt=self.config.dt,
+                            dt=dt,
                             rho_p=constitutive_law.rho_p,
                             d=constitutive_law.d,
                             eps_e_stack=constitutive_law.eps_e_stack,

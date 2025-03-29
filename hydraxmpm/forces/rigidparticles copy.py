@@ -44,7 +44,8 @@ class RigidParticles(Force):
 
     mu: TypeFloat
 
-    gap_factor: TypeFloat
+    alpha: TypeFloat
+    beta: TypeFloat
 
     update_rigid_particles: Optional[Callable] = eqx.field(static=True)
 
@@ -56,7 +57,8 @@ class RigidParticles(Force):
         velocity_stack: TypeFloatVectorAStack = None,
         mu: TypeFloat = 0.0,
         com: Optional[TypeFloatVector] = None,
-        gap_factor: Optional[TypeFloat] = 1.0,
+        alpha: TypeFloat = 0.0001,
+        beta: TypeFloat = 2.0,
         update_rigid_particles: Optional[Callable] = None,
         **kwargs,
     ) -> Self:
@@ -75,7 +77,9 @@ class RigidParticles(Force):
 
         self.com = com
 
-        self.gap_factor = gap_factor
+        self.alpha = alpha
+
+        self.beta = beta
 
         num_points, dim = position_stack.shape
 
@@ -113,7 +117,7 @@ class RigidParticles(Force):
             r_scaled_velocity = intr_shapef * intr_velocities
             return r_scaled_velocity
 
-        new_r_shape_map, r_scaled_velocity_stack = (
+        new_shape_map, r_scaled_velocity_stack = (
             self.shape_map.vmap_interactions_and_scatter(
                 vmap_velocities_p2g_rigid, position_stack=self.position_stack, grid=grid
             )
@@ -121,47 +125,105 @@ class RigidParticles(Force):
 
         r_nodes_vel_stack = (
             jnp.zeros_like(grid.moment_nt_stack)
-            .at[new_r_shape_map._intr_hash_stack]
+            .at[new_shape_map._intr_hash_stack]
             .add(r_scaled_velocity_stack)
         )
 
-        mp_position_intrp_stack = shape_map.map_p2g(
+        mp_position_intrp_stack = self.shape_map.map_p2g(
             X_stack=material_points.position_stack,
             mass_stack=material_points.mass_stack,
             grid=grid,
         )
 
-        rp_position_intrp_stack = new_r_shape_map.map_p2g(
-            self.position_stack, jnp.ones(dim), grid
+        rp_position_intrp_stack = self.shape_map.map_p2g(
+            self.position_stack, jnp.ones(self.position_stack.shape[0]), grid
         )
 
+        # r_nodes_contact_mask_stack = (
+        #     jnp.zeros_like(grid.mass_stack, dtype=jnp.bool_)
+        #     .at[new_shape_map._intr_hash_stack]
+        #     .set(True)
+        # )
+        # r_nodes_min_dist_stack = (
+        #     jnp.zeros_like(grid.mass_stack)
+        #     .at[new_shape_map._intr_hash_stack]
+        #     .min(intr_vec_dist_stack)
+        # )
+
+        # intr_vec_dist_stack = jnp.sqrt(
+        #     jnp.sum(jnp.pow(new_shape_map._intr_dist_stack, 2), axis=1)
+        # )
+
+        # mp_pos_interpolated =
+        # # print(solver.shape_map.p2g_positions_intrp)
+        # shape_map = solver.shape_map._get_particle_grid_interactions_batched(
+        #     solver.material_points, solver.grid
+        # )
+        # p_interop = shape_map.p2g_positions(solver.material_points, solver.grid)
+
         @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0))
-        def vmap_nodes(moment_nt, mass, normal, r_vel, mp_pos, rp_pos):
+        def vmap_nodes(moment_nt, mass, normal, r_vel, r_contact_mask, r_min_dist):
             """Apply the velocities on the grid from the rigid particles."""
             # skip the nodes with small mass, due to numerical instability
 
-            normal = normal / (jnp.linalg.vector_norm(normal) + 1e-10)
-
-            rel_pos = jnp.dot(mp_pos - rp_pos, normal)
-
-            r_contact_mask = rel_pos + self.gap_factor * grid.cell_size <= 0
-
             vel_nt = moment_nt / (mass + 1e-10)
+            # vel_nt = jax.lax.cond(
+            #     mass > grid.small_mass_cutoff,
+            #     lambda x: x / mass,
+            #     lambda x: jnp.zeros_like(x),
+            #     moment_nt,
+            # )
 
+            normal = normal / (jnp.linalg.vector_norm(normal) + 1e-10)
+            # normalize the normals
+            # normal = jax.lax.cond(
+            #     mass > grid.small_mass_cutoff,
+            #     lambda x: x / jnp.linalg.vector_norm(x),
+            #     lambda x: jnp.zeros_like(x),
+            #     normal,
+            # )
+            # normal = jnp.nan_to_num(normal)
+
+            # check if the velocity direction of the normal and apply contact
+            # dot product is 0 when the vectors are orthogonal
+            # and 1 when they are parallel
+            # if othogonal no contact is happening
+            # if parallel the contact is happening
+            # jax.debug.breakpoint()
+
+            delta_vel = vel_nt - r_vel
+            # delta_vel = vel_nt
+
+            # modification
+
+            x = jax.lax.cond(
+                r_min_dist <= 0,
+                lambda x: 1.0 - 2 * (-x * (1.0 / 1.25) ** (0.58)),
+                lambda x: 2 * (x * (1.0 / 1.25) ** (0.58)) - 1.0,
+                r_min_dist,
+            )
+
+            fp = (1.0 - self.alpha * (x**self.beta)) / (
+                1.0 + self.alpha * (x**self.beta)
+            )
+
+            delta_vel *= fp
+
+            # end modification
             delta_vel = vel_nt - r_vel
 
             delta_vel_dot_normal = jnp.dot(delta_vel, normal)
 
             delta_vel_padded = jnp.pad(
                 delta_vel,
-                new_r_shape_map._padding,
+                new_shape_map._padding,
                 mode="constant",
                 constant_values=0,
             )
 
             norm_padded = jnp.pad(
                 normal,
-                new_r_shape_map._padding,
+                new_shape_map._padding,
                 mode="constant",
                 constant_values=0,
             )
@@ -183,7 +245,7 @@ class RigidParticles(Force):
 
             tangent = (
                 (norm_padded + mu_prime * normal_cross_omega)
-                .at[: new_r_shape_map.dim]
+                .at[: new_shape_map.dim]
                 .get()
             )
 
@@ -209,8 +271,8 @@ class RigidParticles(Force):
             grid.mass_stack,
             grid.normal_stack,
             r_nodes_vel_stack,
-            mp_position_intrp_stack,
-            rp_position_intrp_stack,
+            r_nodes_contact_mask_stack,
+            r_nodes_min_dist_stack,
         )
 
         if self.update_rigid_particles:

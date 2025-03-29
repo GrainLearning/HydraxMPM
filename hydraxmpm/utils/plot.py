@@ -32,7 +32,7 @@ def make_plot(
             x[0], y[0], ".", color=line.get_color(), markersize=start_end_markersize
         )
         ax.plot(
-            x[-1], y[-1], "x", color=line.get_color(), markersize=start_end_markersize
+            x[-1], y[-1], "*", color=line.get_color(), markersize=start_end_markersize
         )
 
     ax.set_xlabel(xlabel)

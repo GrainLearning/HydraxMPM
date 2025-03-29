@@ -21,11 +21,11 @@ from ..utils.math_helpers import (
     get_q_vm,
     get_volumetric_strain,
 )
-from .constitutive_law import ConstitutiveLaw
+from .constitutive_law import ConstitutiveLaw, ConvergenceControlConfig
 
 
 def yield_function(p_hat, px_hat, q, M):
-    return (q * q) / (M * M) + p_hat * p_hat - px_hat * p_hat
+    return ((q * q) / (M * M)) + p_hat * p_hat - px_hat * p_hat
 
 
 def get_state_boundary_layer(p_hat, q, M, cp, lam, p_t, ln_N):
@@ -38,14 +38,17 @@ def get_state_boundary_layer(p_hat, q, M, cp, lam, p_t, ln_N):
 
 def get_p_hat(deps_e_v, kap, p_hat_prev):
     """Compute non-linear pressure."""
-    p_hat = p_hat_prev / (1.0 - (1.0 / kap) * deps_e_v)
+    # p_hat = p_hat_prev * jnp.exp(deps_e_v / kap)
+    p_hat = p_hat_prev / (1.0 - (1.0 / kap) * deps_e_v + 1e-10)
     return jnp.clip(p_hat, 1.0, None)
 
 
 def get_px_hat_mcc(px_hat_prev, cp, deps_p_v):
     """Compute non-linear pressure."""
-    px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v)
+    # px_hat = px_hat_prev * jnp.exp(deps_p_v / cp)
+    px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v + 1e-10)
     return jnp.clip(px_hat, 1.0, None)
+    # return
 
 
 def get_s(deps_e_d, G, s_prev):
@@ -54,12 +57,14 @@ def get_s(deps_e_d, G, s_prev):
 
 def get_K(kap, p_hat):
     K = (1.0 / kap) * (p_hat)
-    return jnp.clip(K, 1e-4, None)
+    return jnp.clip(K, 1.0, None)
+    # return K
 
 
 def get_G(nu, K):
     G = (3 * (1 - 2 * nu) / (2 * (1 + nu))) * K
-    return jnp.clip(G, 1e-4, None)
+    return jnp.clip(G, 1, None)
+    # return G
 
 
 class ModifiedCamClay(ConstitutiveLaw):
@@ -71,10 +76,10 @@ class ModifiedCamClay(ConstitutiveLaw):
     p_t: TypeFloat = 0.0
     ln_N: TypeFloat
 
-    _cp: TypeFloat  # ?
-
     px_hat_stack: Optional[TypeFloatScalarPStack] = None
     p_0_stack: Optional[TypeFloatScalarPStack] = None
+
+    settings: ConvergenceControlConfig
 
     def __init__(
         self: Self,
@@ -85,6 +90,7 @@ class ModifiedCamClay(ConstitutiveLaw):
         kap: TypeFloat,
         ln_N: TypeFloat,
         p_t: Optional[TypeFloat] = 0.0,
+        settings: Optional[dict | ConvergenceControlConfig] = None,
         **kwargs,
     ) -> Self:
         self.nu = nu
@@ -101,13 +107,28 @@ class ModifiedCamClay(ConstitutiveLaw):
 
         self.ln_N = ln_N
 
-        self._cp = lam - kap
-
         self.eps_e_stack = kwargs.get("eps_e_stack")
 
         self.px_hat_stack = kwargs.get("px_hat_stack")
 
         self.p_0_stack = kwargs.get("p_0_stack")
+
+        # settings used for convergence control
+        if settings is None:
+            settings = dict()
+        if isinstance(settings, dict):
+            self.settings = ConvergenceControlConfig(
+                rtol=settings.get("rtol", 1e-3),
+                atol=settings.get("atol", 1e5),
+                max_iter=settings.get("max_iter", 100),
+                throw=settings.get("throw", True),
+                # plastic multiplier and volumetric strain, respectively
+                lower_bound=settings.get("lower_bound", (0, -1.0)),
+                upper_bound=settings.get("upper_bound", (1000, 1.0)),
+            )
+        else:
+            self.settings = settings
+        del settings
 
         super().__init__(**kwargs)
 
@@ -135,7 +156,7 @@ class ModifiedCamClay(ConstitutiveLaw):
     ) -> Tuple[MaterialPoints, Self]:
         """Update the material state and particle stresses for MPM solver."""
 
-        deps_dt_stack = material_points.depsdt_stack
+        deps_dt_stack = material_points.deps_dt_stack
 
         new_stress_stack, new_eps_e_stack, new_px_hat_stack = self.vmap_update_ip(
             deps_dt_stack * dt,
@@ -208,7 +229,7 @@ class ModifiedCamClay(ConstitutiveLaw):
 
                 G_next = get_G(self.nu, K_next)
 
-                factor = 1.0 / (1.0 + 6.0 * G_next * pmulti)
+                factor = 1 / (1 + 6.0 * G_next * pmulti)
 
                 s_next = s_tr * factor
 
@@ -216,16 +237,18 @@ class ModifiedCamClay(ConstitutiveLaw):
 
                 px_hat_next = get_px_hat_mcc(px_hat_prev, self._cp, deps_p_v)
 
+                # deps_v_p_fr = pmulti * (2.0 * p_hat_next - px_hat_next) * self.M**2
                 deps_v_p_fr = pmulti * (2.0 * p_hat_next - px_hat_next) * self.M**2
-
                 yf_next = yield_function(p_hat_next, px_hat_next, q_next, self.M)
 
-                yf_next = yf_next / ((p_0 * p_0 * self.M**2) + 1e-10)
+                yf_next = yf_next / ((p_0 * p_0) + 1e-12)
+
+                # yf_next = yf_next / yf
 
                 R = jnp.array([yf_next, deps_v_p_fr - deps_p_v])
+                # jax.debug.print("R {} pmulti {} deps_p_v {} ", R, pmulti, deps_p_v)
 
                 aux = (p_hat_next, s_next, px_hat_next, G_next, K_next)
-
                 return R, aux
 
             def find_roots():
@@ -236,36 +259,34 @@ class ModifiedCamClay(ConstitutiveLaw):
                 init_val = jnp.array([0.0, 0.0])
 
                 # residual of yield function can be large, especially for small pressures
-                solver = optx.Newton(
-                    rtol=1e-3,
-                    atol=1e6,
-                )
 
-                bound_deps_p_v_max = 10.0
-                bound_pmulti_max = 1000.0
+                solver = optx.Newton(
+                    rtol=self.settings.rtol,
+                    # atol=1e6,
+                    atol=self.settings.atol,
+                )
 
                 sol = optx.root_find(
                     residuals,
                     solver,
                     init_val,
-                    throw=True,
+                    throw=self.settings.throw,
                     has_aux=True,
-                    max_steps=100,
+                    max_steps=self.settings.max_iter,
                     options=dict(
-                        lower=jnp.array([0.0, -bound_deps_p_v_max]),
-                        upper=jnp.array([bound_pmulti_max, bound_deps_p_v_max]),
+                        lower=jnp.array(self.settings.lower_bound),
+                        upper=jnp.array(self.settings.upper_bound),
                     ),
                 )
                 return sol.value
 
             pmulti_curr, deps_p_v_next = find_roots()
 
-            # pmulti_curr, deps_p_v_next = jax.lax.stop_gradient(find_roots())
             R, aux = residuals([pmulti_curr, deps_p_v_next], None)
 
             p_hat_next, s_next, px_hat_next, G_next, K_next = aux
 
-            s_next = eqx.error_if(s_next, jnp.isnan(s_next).any(), "s_next is nan")
+            # s_next = eqx.error_if(s_next, jnp.isnan(s_next).any(), "s_next is nan")
 
             p_next = p_hat_next - self.p_t
 
@@ -296,6 +317,10 @@ class ModifiedCamClay(ConstitutiveLaw):
         #"""
 
         return self.ln_N - (self.lam - self.kap) * jnp.log(2)
+
+    @property
+    def _cp(self):
+        return self.lam - self.kap
 
     def CSL(self, p):
         """Equation for critical state line (CSL) in double log specific volume/pressure space (ln v - ln p) space.
@@ -356,3 +381,22 @@ class ModifiedCamClay(ConstitutiveLaw):
 
         dt = alpha * jnp.min(cell_size / cdil)
         return dt
+
+    def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
+        """Get critical timestep of material poiints for stability."""
+
+        def vmap_dt_crit(p, rho, vel):
+            K = get_K(self.kap, p)
+            G = get_G(self.nu, K)
+
+            cdil = jnp.sqrt((K + (4 / 3) * G) / rho)
+
+            c = jnp.abs(vel) + cdil * jnp.ones_like(vel)
+            return c
+
+        c_stack = jax.vmap(vmap_dt_crit)(
+            material_points.p_stack,
+            material_points.rho_stack,
+            material_points.velocity_stack,
+        )
+        return (dt_alpha * cell_size) / jnp.max(c_stack)

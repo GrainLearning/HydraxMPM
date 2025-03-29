@@ -10,11 +10,19 @@ from ..common.types import (
     TypeFloatScalarNStack,
     TypeFloatVectorAStack,
     TypeFloatVectorNStack,
+    TypeUIntScalarAStack,
 )
 
 
 class Grid(eqx.Module):
     """Background grid of the MPM simulation.
+
+
+
+    node types
+    type 1: boundary
+    type 2: neighboring boundary
+    type 3: inside domain
 
     Attributes:
         origin: start point of the domain box
@@ -46,6 +54,8 @@ class Grid(eqx.Module):
     mass_stack: TypeFloatScalarNStack
     moment_stack: TypeFloatVectorNStack
     moment_nt_stack: TypeFloatVectorNStack
+
+    type_stack: TypeUIntScalarAStack
     normal_stack: TypeFloatVectorNStack
 
     _is_padded: bool = eqx.field(static=True)
@@ -83,6 +93,10 @@ class Grid(eqx.Module):
 
         self.moment_nt_stack = jnp.zeros((self.num_cells, self.dim))
 
+        self.type_stack = (
+            jnp.zeros(self.num_cells, dtype=jnp.uint32).at[0].set(3)
+        )  # inside domain
+
         self.normal_stack = jnp.zeros((self.num_cells, self.dim))
 
         self.small_mass_cutoff = small_mass_cutoff
@@ -116,9 +130,10 @@ class Grid(eqx.Module):
         else:
             if shapefunction == "linear":
                 pad = 1
+            elif shapefunction == "quadratic":
+                pad = 1
             elif shapefunction == "cubic":
                 pad = 2
-
             new_origin = (
                 jnp.array(self.origin) - jnp.ones(self.dim) * self.cell_size * pad
             )

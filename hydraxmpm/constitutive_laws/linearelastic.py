@@ -68,7 +68,7 @@ class LinearIsotropicElastic(ConstitutiveLaw):
 
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(None, 0, 0, 0))
 
-        deps_dt_stack = material_points.depsdt_stack
+        deps_dt_stack = material_points.deps_dt_stack
         new_stress_stack = vmap_update_ip(
             dim,
             material_points.stress_stack,

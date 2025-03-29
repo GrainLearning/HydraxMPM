@@ -226,7 +226,7 @@ class MaterialPoints(Base):
         return get_volumetric_strain_stack(self.eps_stack)
 
     @property
-    def depsdt_stack(self):
+    def deps_dt_stack(self):
         return get_strain_rate_from_L_stack(self.L_stack)
 
     @property
@@ -234,12 +234,12 @@ class MaterialPoints(Base):
         return get_scalar_shear_strain_stack(self.eps_stack)
 
     @property
-    def dgammadt_stack(self):
-        return get_scalar_shear_strain_stack(self.depsdt_stack)
+    def dgamma_dt_stack(self):
+        return get_scalar_shear_strain_stack(self.deps_dt_stack)
 
     @property
     def viscosity_stack(self):
-        return (jnp.sqrt(3) * self.q_stack) / self.dgammadt_stack
+        return (jnp.sqrt(3) * self.q_stack) / self.dgamma_dt_stack
 
     # def work_ext_stack(self, dt, **kwargs):
     #     # external work  (e.g., potential energy due to gravity)
@@ -277,7 +277,7 @@ class MaterialPoints(Base):
         return self.KE_stack / self.PE_stack(dt, W_stack)
 
     def deps_stack(self, dt, **kwargs):
-        return self.depsdt_stack * dt
+        return self.deps_dt_stack * dt
 
     def phi_stack(self, rho_p, **kwargs):
         return self.rho_stack / rho_p
@@ -288,7 +288,7 @@ class MaterialPoints(Base):
     def inertial_number_stack(self, d, rho_p, **kwargs):
         return get_inertial_number_stack(
             self.p_stack,
-            self.dgammadt_stack,
+            self.dgamma_dt_stack,
             d,
             rho_p,
         )

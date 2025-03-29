@@ -38,34 +38,69 @@ class Boundary(Force):
         self.id_stack = kwargs.get("id_stack", None)
         self._padding = (0, 3 - self.dim)
 
-    def init_ids(self: Self, grid_size: tuple, dim: int, **kwargs):
-        num_cells = jnp.prod(jnp.array(grid_size))
+    def init_ids(self: Self, grid: Grid, dim: int, **kwargs):
+        # grid.num_cells = jnp.prod(jnp.array(grid_size))
 
-        all_id_stack = jnp.arange(num_cells).reshape(grid_size).astype(jnp.uint32)
+        all_id_stack = (
+            jnp.arange(grid.num_cells).reshape(grid.grid_size).astype(jnp.uint32)
+        )
 
         mask_stack = jnp.zeros_like(all_id_stack).astype(jnp.bool_)
+
+        # for BSMPM shapefunctions
+
+        # 0th index is middle
+        # 1st index is boundary 0 or N
+        # 3rd index is left side of closes boundary 0 + h
+        # 4th index is right side of closes boundary N -h
+        type_stack = grid.type_stack.reshape(grid.grid_size).at[:].set(0)
 
         if dim == 2:
             # boundary layers
             mask_stack = mask_stack.at[0 : self.thickness, :].set(True)  # x0
+
             mask_stack = mask_stack.at[:, 0 : self.thickness].set(True)  # y0
-            mask_stack = mask_stack.at[grid_size[0] - self.thickness :, :].set(
+
+            mask_stack = mask_stack.at[grid.grid_size[0] - self.thickness :, :].set(
                 True
             )  # x1
-            mask_stack = mask_stack.at[:, grid_size[1] - self.thickness :].set(
+
+            mask_stack = mask_stack.at[:, grid.grid_size[1] - self.thickness :].set(
                 True
             )  # y1
+            # left boundary +h
+            type_stack = type_stack.at[self.thickness - 1, :].set(3)
+            type_stack = type_stack.at[:, self.thickness - 1].set(3)
+            # right boundary -h
+            type_stack = type_stack.at[grid.grid_size[0] - self.thickness, :].set(4)
+            type_stack = type_stack.at[:, grid.grid_size[1] - self.thickness].set(4)
+
+            # boundary
+            type_stack = type_stack.at[self.thickness - 2, :].set(1)
+            type_stack = type_stack.at[:, self.thickness - 2].set(1)
+            type_stack = type_stack.at[grid.grid_size[0] - self.thickness + 1, :].set(1)
+            type_stack = type_stack.at[:, grid.grid_size[1] - self.thickness + 1].set(1)
+
+            # # degenerate
+            # type_stack = type_stack.at[:, 0 : self.thickness - 1].set(0)
+            # type_stack = type_stack.at[0 : self.thickness - 1, :].set(0)
+            # type_stack = type_stack.at[grid.grid_size[0] - self.thickness + 1 :, :].set(
+            #     0
+            # )
+            # type_stack = type_stack.at[:, grid.grid_size[1] - self.thickness + 1 :].set(
+            #     0
+            # )
         else:
             mask_stack = mask_stack.at[0 : self.thickness, :, :].set(True)  # x0
             mask_stack = mask_stack.at[:, 0 : self.thickness, :].set(True)  # y0
             mask_stack = mask_stack.at[:, :, 0 : self.thickness].set(True)  # z0
-            mask_stack = mask_stack.at[grid_size[0] - self.thickness :, :, :].set(
+            mask_stack = mask_stack.at[grid.grid_size[0] - self.thickness :, :, :].set(
                 True
             )  # x1
-            mask_stack = mask_stack.at[:, grid_size[1] - self.thickness :, :].set(
+            mask_stack = mask_stack.at[:, grid.grid_size[1] - self.thickness :, :].set(
                 True
             )  # y1
-            mask_stack = mask_stack.at[:, :, grid_size[2] - self.thickness :].set(
+            mask_stack = mask_stack.at[:, :, grid.grid_size[2] - self.thickness :].set(
                 True
             )  # z1
 
@@ -76,11 +111,16 @@ class Boundary(Force):
         new_self = Boundary(
             mu=self.mu,
             thickness=self.thickness,
-            grid_size=grid_size,
             id_stack=id_stack,
             dim=dim,
         )
-        return new_self
+
+        new_grid = eqx.tree_at(
+            lambda state: (state.type_stack,),
+            grid,
+            (type_stack.reshape(-1),),
+        )
+        return new_self, new_grid
 
     def apply_on_grid(
         self: Self,

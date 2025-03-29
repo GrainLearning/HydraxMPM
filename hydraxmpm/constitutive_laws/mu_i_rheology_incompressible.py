@@ -85,41 +85,17 @@ class MuI_incompressible(ConstitutiveLaw):
         super().__init__(**kwargs)
 
     def init_state(self: Self, material_points: MaterialPoints):
-        # There are two ways to initialize via a reference pressure or reference density
-        # these can be given as a scalar or array
+        p_0_stack = material_points.p_stack
 
-        p_0 = self.p_0
-        if p_0 is None:
-            p_0 = material_points.p_stack
+        vmap_give_rho_ref = partial(
+            jax.vmap,
+            in_axes=(None, None, 0),
+        )(give_rho)
 
-        rho_0 = self.rho_0
-
-        rho = self.rho_0
-
-        if self.init_by_density:
-            if eqx.is_array(rho_0):
-                vmap_give_p_ref = partial(
-                    jax.vmap,
-                    in_axes=(None, 0, None),
-                )(give_p)
-            else:
-                vmap_give_p_ref = give_p
-
-            p_0 = vmap_give_p_ref(self.K, rho_0, rho_0)
-        else:
-            p_0_stack = p_0
-            if not eqx.is_array(p_0_stack):
-                p_0_stack = p_0_stack * jnp.ones(material_points.num_points)
-
-            vmap_give_rho_ref = partial(
-                jax.vmap,
-                in_axes=(None, None, 0),
-            )(give_rho)
-
-            rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack)
+        rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack)
 
         rho_rho_0_stack = rho / self.rho_0
-        # print(rho_rho_0_stack)
+
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
 
         new_stress_stack = vmap_update_ip(
@@ -129,26 +105,8 @@ class MuI_incompressible(ConstitutiveLaw):
             rho_rho_0_stack,
         )
         material_points = material_points.replace(stress_stack=new_stress_stack)
-        # material_points = material_points.init_stress_from_p_0(p_0)
-        # if there is pressure, then density is not on reference density
-        material_points = material_points.init_mass_from_rho_0(rho)
 
-        W_stack = None
-        if self.approx_strain_energy_density:
-            W_stack = jnp.zeros(material_points.num_points)
-
-        P_stack = None
-        if self.approx_stress_power:
-            P_stack = jnp.zeros(material_points.num_points)
-
-        params = self.__dict__
-        params.update(
-            rho_0=rho_0,
-            p_0=p_0,
-            W_stack=W_stack,
-            P_stack=P_stack,
-        )
-        return self.__class__(**params), material_points
+        return self.post_init_state(material_points, rho=rho, rho_0=self.rho_0)
 
     def update(
         self: Self,
@@ -161,7 +119,7 @@ class MuI_incompressible(ConstitutiveLaw):
         rho_rho_0_stack = material_points.rho_stack / self.rho_0
         # rho_stack = material_points.rho_stack
 
-        deps_dt_stack = material_points.depsdt_stack
+        deps_dt_stack = material_points.deps_dt_stack
 
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
 
@@ -178,9 +136,9 @@ class MuI_incompressible(ConstitutiveLaw):
             (new_stress_stack),
         )
 
-        new_self = self.post_update(new_stress_stack, deps_dt_stack, dt)
+        # new_self = self.post_update(new_stress_stack, deps_dt_stack, dt)
 
-        return new_material_points, new_self
+        return new_material_points, self
 
     def update_ip(
         self: Self,
@@ -220,9 +178,9 @@ class MuI_incompressible(ConstitutiveLaw):
 
         def stress_update(_):
             # correction for viscosity diverges
-            # r = 1e-10
+
             r = 0.001
-            # r = 0.01
+
             # eq (12) https://www.sciencedirect.com/science/article/pii/S0021999118307290
 
             delta_mu = self.mu_d - self.mu_s
@@ -230,10 +188,9 @@ class MuI_incompressible(ConstitutiveLaw):
             eta_d = (p * delta_mu * self.d) / (
                 self.I_0 * jnp.sqrt(p / self.rho_p) + self.d * dgamma_dt
             )
-            # eta_d = jnp.nanmax(jnp.array([eta_d, 0.0]))
 
             eta_s = (p * self.mu_s) / jnp.sqrt(dgamma_dt * dgamma_dt + r * r)
-            # eta_s = jnp.nanmax(jnp.array([eta_s, 0.0]))
+
             if self.error_check:
                 eta_s = eqx.error_if(eta_s, jnp.isnan(eta_s).any(), "eta_s is nan")
                 eta_d = eqx.error_if(eta_d, jnp.isnan(eta_d).any(), "eta_d is nan")

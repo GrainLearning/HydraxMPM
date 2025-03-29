@@ -37,31 +37,28 @@ class Config(eqx.Module):
 
     """
 
-    store_every: Optional[int] = eqx.field(default=0, static=True)
-    ppc: Optional[int] = eqx.field(default=1, static=True)
-    project: Optional[str] = eqx.field(default="", static=True)
-    dt: Optional[float] = eqx.field(default=0.0, static=True)
-    num_steps: Optional[int] = eqx.field(default=0, static=True)
-    total_time: float = eqx.field(default="", static=True)
-    default_gpu_id: Optional[int] = eqx.field(default=-1, static=True)
-    output_path: str = eqx.field(default="", static=True)
-    shapefunction: Optional[str] = eqx.field(default="cubic", static=True)
-    dim: int = eqx.field(static=True)  # config
+    ppc: Optional[int] = eqx.field(default=1, static=True)  # mpm solver
 
-    output: Dict | Tuple[str, ...] = eqx.field(static=True)
+    project: Optional[str] = eqx.field(default="", static=True)  # basically output path
+
+    output_path: str = eqx.field(default="", static=True)  # run sim
+
+    shapefunction: Optional[str] = eqx.field(default="cubic", static=True)  # MPm solver
+
+    dim: int = eqx.field(static=True)  # mpm
+
+    output: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
 
     # internal variables
-    _padding: tuple = eqx.field(init=False, static=True, repr=False)
+    _padding: tuple = eqx.field(
+        init=False, static=True, repr=False
+    )  # internally for each module
 
-    override_dir: bool = eqx.field(default=False, static=True)
-    create_dir: bool = eqx.field(default=False, static=True)
+    override_dir: bool = eqx.field(default=False, static=True)  # run sim
+    create_dir: bool = eqx.field(default=False, static=True)  # run sim
 
     def __init__(
         self,
-        total_time: Optional[float] = None,
-        num_steps: Optional[int] = None,
-        dt: Optional[float] = None,
-        store_every: Optional[int] = 0,
         project: Optional[str] = "",
         output_path: Optional[str] = None,
         shapefunction: Optional[str] = "cubic",
@@ -86,7 +83,7 @@ class Config(eqx.Module):
             dt: Time increment. Defaults to None.
             store_every: Store at every nth step. Defaults to 0.
             project: Output project location. Defaults to "".
-            default_gpu_id: Default GPU ID. Defaults to -1.
+
             output_path: Output path. Defaults to None.
             shapefunction: Shape function type. Defaults to "cubic".
             ppc: Particles per cell. Defaults to 1.
@@ -102,19 +99,6 @@ class Config(eqx.Module):
         else:
             self.output = output
 
-        if total_time and num_steps:
-            dt = total_time / num_steps
-        elif total_time and dt:
-            num_steps = int(total_time / dt)
-        elif num_steps and dt:
-            total_time = num_steps * dt
-        else:
-            raise ValueError("Please provide either total_time and num_steps or dt.")
-
-        self.total_time = total_time
-        self.num_steps = num_steps
-        self.store_every = store_every
-        self.dt = dt
         self.dim = dim
 
         # internal use...

@@ -10,6 +10,7 @@ def vmap_linear_shapefunction(
     inv_cell_size: TypeFloat,
     dim: TypeInt,
     padding: Tuple[int, int],
+    **kwargs,
 ) -> Tuple[TypeFloat, TypeFloat3]:
     abs_intr_dist = jnp.abs(intr_dist)
 
