@@ -338,7 +338,7 @@ class ShapeFunctionMapping(Base):
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist_padded):
             return intr_shapef * N_stack.at[intr_hashes].get()
 
-        scaled_N_stack = new_self.shape_map.vmap_intr_gather(vmap_intr_g2p)
+        scaled_N_stack = new_self.vmap_intr_gather(vmap_intr_g2p)
 
         out_shape = N_stack.shape[1:]
 

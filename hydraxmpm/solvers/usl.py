@@ -17,7 +17,7 @@ from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..forces.force import Force
 from ..grid.grid import Grid
 from ..material_points.material_points import MaterialPoints
-from ..solvers.config import Config
+
 from .mpm_solver import MPMSolver
 
 
@@ -28,29 +28,34 @@ class USL(MPMSolver):
 
     def __init__(
         self,
-        config: Config,
+        *,
+        dim,
         material_points: MaterialPoints,
         grid: Grid,
         constitutive_laws: Optional[
             Tuple[ConstitutiveLaw, ...] | ConstitutiveLaw
         ] = None,
         forces: Optional[Tuple[Force, ...]] = None,
-        callbacks: Optional[Tuple[Callable, ...] | Callable] = None,
-        alpha: TypeFloat = 0.99,
+        ppc=1,
+        shapefunction="cubic",
+        output_dict: Optional[dict | Tuple[str, ...]] = None,
+        alpha: Optional[TypeFloat] = 1.0,
         **kwargs,
     ):
         super().__init__(
-            config=config,
             material_points=material_points,
             grid=grid,
             constitutive_laws=constitutive_laws,
             forces=forces,
-            callbacks=callbacks,
+            dim=dim,
+            ppc=ppc,
+            shapefunction=shapefunction,
+            output_dict=output_dict,
             **kwargs,
         )
         self.alpha = alpha
 
-    def update(self: Self, step: TypeInt = 0) -> Self:
+    def update(self: Self, step: TypeInt = 0, dt: TypeFloat = 1e-3) -> Self:
         # loading state
         material_points = self.material_points._refresh()
 
@@ -59,24 +64,24 @@ class USL(MPMSolver):
             grid=self.grid,
             forces=self.forces,
             step=step,
+            dt=dt,
         )
 
         # grid quantities are being reset here.
         new_shape_map, grid = self.p2g(
-            material_points,
-            self.grid,
+            material_points=material_points, grid=self.grid, dt=dt
         )
 
         grid, forces = self._update_forces_grid(
-            material_points=material_points, grid=grid, forces=forces, step=step
+            material_points=material_points, grid=grid, forces=forces, step=step, dt=dt
         )
 
         material_points = self.g2p(
-            material_points=material_points, grid=grid, shape_map=new_shape_map
+            material_points=material_points, grid=grid, shape_map=new_shape_map, dt=dt
         )
 
         material_points, constitutive_laws = self._update_constitutive_laws(
-            material_points, self.constitutive_laws
+            material_points, self.constitutive_laws, dt=dt
         )
 
         return eqx.tree_at(
@@ -91,7 +96,7 @@ class USL(MPMSolver):
             (material_points, grid, constitutive_laws, forces, new_shape_map),
         )
 
-    def p2g(self, material_points, grid) -> Tuple[Self, Grid]:
+    def p2g(self, material_points, grid, dt):
         def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = material_points.mass_stack.at[point_id].get()
             intr_volumes = material_points.volume_stack.at[point_id].get()
@@ -104,9 +109,9 @@ class USL(MPMSolver):
             scaled_ext_force = intr_shapef * intr_ext_forces
             scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
 
-            scaled_total_force = scaled_int_force[: self.config.dim] + scaled_ext_force
+            scaled_total_force = scaled_int_force[: self.dim] + scaled_ext_force
 
-            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.config.dim].get()
+            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.dim].get()
 
             return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
@@ -140,7 +145,7 @@ class USL(MPMSolver):
         new_normal_stack = sum_interactions(grid.normal_stack, scaled_normal_stack)
 
         # integrate
-        new_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
+        new_moment_nt_stack = new_moment_stack + new_force_stack * self.dt
 
         return new_shape_map, eqx.tree_at(
             lambda state: (
@@ -153,7 +158,7 @@ class USL(MPMSolver):
             (new_mass_stack, new_moment_stack, new_moment_nt_stack, new_normal_stack),
         )
 
-    def g2p(self, material_points, grid, shape_map):
+    def g2p(self, material_points, grid, shape_map, dt) -> MaterialPoints:
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, _):
             intr_masses = grid.mass_stack.at[intr_hashes].get()
             intr_moments = grid.moment_stack.at[intr_hashes].get()
@@ -182,7 +187,7 @@ class USL(MPMSolver):
             # Pad velocities for plane strain
             intr_vels_nt_padded = jnp.pad(
                 intr_vels_nt,
-                self.config._padding,
+                self._padding,
                 mode="constant",
                 constant_values=0,
             )
@@ -219,14 +224,14 @@ class USL(MPMSolver):
                 p_velocities + delta_vels
             )
 
-            p_positions_next = p_positions + vels_nt * self.config.dt
+            p_positions_next = p_positions + vels_nt * dt
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
 
-            p_F_next = (jnp.eye(3) + p_velgrads_next * self.config.dt) @ p_F
+            p_F_next = (jnp.eye(3) + p_velgrads_next * dt) @ p_F
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_F_next = p_F_next.at[2, 2].set(1)
 
             p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
@@ -246,11 +251,9 @@ class USL(MPMSolver):
             new_L_stack,
         ) = vmap_particles_update(
             new_intr_scaled_delta_vel_stack.reshape(
-                -1, shape_map._window_size, self.config.dim
+                -1, shape_map._window_size, self.dim
             ),
-            new_intr_scaled_vel_nt_stack.reshape(
-                -1, shape_map._window_size, self.config.dim
-            ),
+            new_intr_scaled_vel_nt_stack.reshape(-1, shape_map._window_size, self.dim),
             new_intr_scaled_velgrad_stack.reshape(-1, shape_map._window_size, 3, 3),
             material_points.velocity_stack,
             material_points.position_stack,

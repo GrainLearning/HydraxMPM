@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-jax.config.update("jax_default_device", jax.devices("gpu")[1])
+jax.config.update("jax_default_device", jax.devices("gpu")[2])
 
 import hydraxmpm as hdx
 
@@ -15,8 +15,7 @@ domain_width = 3.2  # [m]
 
 ppc = 2
 
-cell_size = 0.025 / 2  # [m]
-
+cell_size = 0.025 / 4  # [m]
 
 sep = cell_size / ppc
 
@@ -54,7 +53,7 @@ solver = hdx.USL_ASFLIP(
     alpha=0.99,  # 1 energetic but unstable, 0.5 stable but damping
     config=hdx.Config(
         num_steps=40000,
-        store_every=500,
+        store_every=100,
         dt=3 * 10**-5,
         shapefunction="cubic",
         dim=2,
@@ -65,25 +64,25 @@ solver = hdx.USL_ASFLIP(
             material_points=(
                 "position_stack",
                 "KE_stack",
-                # "p_stack",
-                # "eps_v_stack",
-                # "viscosity_stack",
-                # "dgammadt_stack",
-                # "specific_volume_stack",
-                # "gamma_stack",
-                # "inertial_number_stack",
-                # "q_p_stack",
-                # "q_stack",
-                # "rho_stack",
+                "p_stack",
+                "q_stack",
+                "eps_v_stack",
+                "viscosity_stack",
+                "dgammadt_stack",
+                "specific_volume_stack",
+                "gamma_stack",
+                "inertial_number_stack",
+                "q_p_stack",
+                "rho_stack",
             ),
             # output quantities stored in the solver
             # uncomment to save these to ./output
             solver=(
                 "p2g_p_stack",
-                # "p2g_q_p_stack",
-                # "p2g_KE_stack",
-                # "p2g_gamma_stack",
-                # "p2g_position_stack",
+                "p2g_q_p_stack",
+                "p2g_KE_stack",
+                "p2g_gamma_stack",
+                "p2g_position_stack",
             ),
         ),
         override_dir=True,

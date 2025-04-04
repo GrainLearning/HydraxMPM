@@ -1,6 +1,6 @@
 from functools import partial
 from sqlite3 import adapt
-from typing import Callable, Optional, Self, Tuple
+from typing import Callable, Optional, Self, Tuple, Dict
 
 import equinox as eqx
 import jax
@@ -22,9 +22,9 @@ from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..forces.force import Force
 from ..grid.grid import Grid
 from ..forces.boundary import Boundary
+from ..forces.slipstickboundary import SlipStickBoundary
 from ..material_points.material_points import MaterialPoints
 
-from ..solvers.config import Config
 from ..utils.math_helpers import (
     get_hencky_strain_stack,
     get_inertial_number_stack,
@@ -34,9 +34,25 @@ from ..utils.math_helpers import (
     get_strain_rate_from_L_stack,
 )
 
+import os
+import shutil
+
 
 def _numpy_tuple_deep(x) -> tuple:
     return tuple(map(tuple, jnp.array(x).tolist()))
+
+
+def create_dir(directory_path, override=True):
+    if os.path.exists(directory_path) and override:
+        shutil.rmtree(directory_path)
+
+    os.makedirs(directory_path)
+    return directory_path
+
+
+def save_files(step, output_dir, name="", **kwargs):
+    if len(kwargs) > 0:
+        jnp.savez(f"{output_dir}/{name}.{step.astype(int)}", **kwargs)
 
 
 class MPMSolver(Base):
@@ -47,7 +63,6 @@ class MPMSolver(Base):
     to create a solver from a dictionary of options.
 
     Attributes:
-        config: (:class:`Config`) Solver configuration #see #[Config]
         material_points: (:class:`MaterialPoints`) MPM material_points object # MaterialPoints # see #[MaterialPoints]. # TODO
         grid: (:class:`Grid`) Regular background grid see #[Nodes]. # TODO
         constitutive_laws: (:class:`ConstitutiveLaw`) List of constitutive_laws see #[Materials]. # TODO
@@ -55,7 +70,6 @@ class MPMSolver(Base):
     """
 
     # Modules
-    config: Config = eqx.field(static=True)
     material_points: MaterialPoints
     grid: Grid
     forces: Tuple[Force, ...] = eqx.field(default=())
@@ -63,30 +77,47 @@ class MPMSolver(Base):
     callbacks: Tuple[Callable, ...] = eqx.field(static=True, default=())
     _setup_done: bool = eqx.field(default=False)
     shape_map: ShapeFunctionMapping = eqx.field(init=False)
+    shapefunction: str = eqx.field(static=True, default="linear")
 
     dt: TypeFloat = eqx.field(default=1e-3)
 
+    dim: int = eqx.field(static=True)
+    ppc: int = eqx.field(static=True, default=1)
+
+    _padding: tuple = eqx.field(init=False, static=True, repr=False)
+
+    output_dict: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
+
     def __init__(
         self,
-        config: Config,
+        *,
+        dim,
         material_points: MaterialPoints,
         grid: Grid,
         constitutive_laws: Optional[
             Tuple[ConstitutiveLaw, ...] | ConstitutiveLaw
         ] = None,
         forces: Optional[Tuple[Force, ...] | Force] = None,
+        ppc=1,
+        shapefunction="linear",
+        output_dict: Optional[dict | Tuple[str, ...]] = None,
         **kwargs,
     ) -> Self:
-        assert material_points.position_stack.shape[1] == config.dim, (
-            "Dimension mismatch of material points and config, check if dim is set correctly. Either"
-            "the material_points or the config.dim is set incorrectly."
+        assert material_points.position_stack.shape[1] == dim, (
+            "Dimension mismatch of material points, check if dim is set correctly. Either"
+            "the material_points or the dim is set incorrectly."
         )
-        assert len(grid.origin) == config.dim, (
-            "Dimension mismatch of origin and config. Either "
-            "the origin or the config.dim is set incorrectly."
+        assert len(grid.origin) == dim, (
+            "Dimension mismatch of origin. Either "
+            "the origin or the dim is set incorrectly."
         )
 
-        self.config = config
+        self.output_dict = output_dict
+
+        self.dim = dim
+        self.ppc = ppc
+        self.shapefunction = shapefunction
+        self._padding = (0, 3 - self.dim)
 
         self.material_points = material_points
 
@@ -104,10 +135,10 @@ class MPMSolver(Base):
         )
 
         self.shape_map = ShapeFunctionMapping(
-            shapefunction=config.shapefunction,
+            shapefunction=self.shapefunction,
             num_points=self.material_points.num_points,
             num_cells=self.grid.num_cells,
-            dim=config.dim,
+            dim=dim,
         )
 
         super().__init__(**kwargs)
@@ -122,7 +153,7 @@ class MPMSolver(Base):
 
         new_material_points = self.material_points
         new_material_points = new_material_points.init_volume_from_cellsize(
-            self.grid.cell_size, self.config.ppc
+            self.grid.cell_size, self.ppc
         )
 
         for constitutive_law in self.constitutive_laws:
@@ -133,13 +164,14 @@ class MPMSolver(Base):
 
         new_constitutive_laws = tuple(new_constitutive_laws)
 
-        new_grid = self.grid.init_padding(self.config.shapefunction)
+        new_grid = self.grid.init_padding(self.shapefunction)
 
         new_forces = []
 
+        # TODO init stat for forces
         for force in self.forces:
-            if isinstance(force, Boundary):
-                new_force, new_grid = force.init_ids(grid=new_grid, dim=self.config.dim)
+            if isinstance(force, Boundary) or isinstance(force, SlipStickBoundary):
+                new_force, new_grid = force.init_ids(grid=new_grid, dim=self.dim)
             else:
                 new_force = force
             new_forces.append(new_force)
@@ -177,7 +209,7 @@ class MPMSolver(Base):
                 grid=grid,
                 step=step,
                 dt=dt,
-                dim=self.config.dim,
+                dim=self.dim,
             )
             new_forces.append(new_force)
         return material_points, tuple(new_forces)
@@ -198,7 +230,7 @@ class MPMSolver(Base):
                 grid=grid,
                 step=step,
                 dt=dt,
-                dim=self.config.dim,
+                dim=self.dim,
                 shape_map=self.shape_map,
             )
             new_forces.append(new_force)
@@ -217,7 +249,7 @@ class MPMSolver(Base):
             material_points, new_material = material.update(
                 material_points=material_points,
                 dt=dt,
-                dim=self.config.dim,
+                dim=self.dim,
             )
             new_materials.append(new_material)
 
@@ -237,7 +269,7 @@ class MPMSolver(Base):
         return dt
 
     def get_output(self, new_solver, dt):
-        material_points_output = new_solver.config.output.get("material_points", ())
+        material_points_output = self.output_dict.get("material_points", ())
 
         material_point_arrays = {}
         for key in material_points_output:
@@ -258,10 +290,9 @@ class MPMSolver(Base):
             material_point_arrays[key] = output
 
         shape_map_arrays = {}
-        shape_map_output = new_solver.config.output.get("shape_map", ())
+        shape_map_output = self.output_dict.get("shape_map", ())
 
         for key in shape_map_output:
-            # shape_map_arrays[key] = new_solver.shape_map.__getattribute__(key)
             output = new_solver.shape_map.__getattribute__(key)
             if callable(output):
                 output = output(
@@ -272,7 +303,7 @@ class MPMSolver(Base):
             shape_map_arrays[key] = output
 
         forces_arrays = {}
-        forces_output = new_solver.config.output.get("forces", ())
+        forces_output = self.output_dict.get("forces", ())
         for key in forces_output:
             for force in new_solver.forces:
                 key_array = force.__dict__.get(key, None)
@@ -280,3 +311,89 @@ class MPMSolver(Base):
                     forces_arrays[key] = key_array
 
         return shape_map_arrays, material_point_arrays, forces_arrays
+
+    @eqx.filter_jit
+    def run(
+        self: Self,
+        *,
+        total_time: float,
+        store_interval: float,
+        adaptive=True,
+        dt: Optional[float] = 0.0,
+        dt_alpha: Optional[float] = 0.5,
+        dt_max: Optional[float] = None,
+        output_dir: Optional[str] = None,
+        override_dir: Optional[bool] = False,
+    ):
+        if adaptive:
+            _dt = self._get_timestep(dt_alpha)
+        else:
+            _dt = dt
+        if (override_dir) and (output_dir is not None):
+            create_dir(output_dir)
+
+        def save_all(args):
+            step, next_solver, prev_solver, store_interval, output_time, _dt = args
+            shape_map_arrays, material_point_arrays, forces_arrays = (
+                prev_solver.get_output(next_solver, _dt)
+            )
+            jax.debug.callback(
+                save_files, step, output_dir, "material_points", **material_point_arrays
+            )
+            jax.debug.callback(
+                save_files, step, output_dir, "shape_map", **shape_map_arrays
+            )
+            jax.debug.callback(save_files, step, output_dir, "forces", **forces_arrays)
+            jax.debug.print("Saved output at step: {} time: {:.3f} ", step, output_time)
+            return output_time + store_interval
+
+        save_all((0, self, self, store_interval, 0.0, _dt))
+
+        def main_loop(carry):
+            step, prev_sim_time, prev_output_time, _dt, prev_solver = carry
+
+            # if timestep overshoots,
+            # we clip so we can save the state at the correct time
+            if output_dir is not None:
+                _dt = (
+                    jnp.clip(prev_sim_time + _dt, max=prev_output_time) - prev_sim_time
+                )
+
+            next_solver = prev_solver.update(step, _dt)
+
+            next_sim_time = prev_sim_time + _dt
+
+            if output_dir is not None:
+                next_output_time = jax.lax.cond(
+                    abs(next_sim_time - prev_output_time) < 1e-12,
+                    lambda args: save_all(args),
+                    lambda args: prev_output_time,
+                    (
+                        step + 1,
+                        next_solver,
+                        prev_solver,
+                        store_interval,
+                        prev_output_time,
+                        _dt,
+                    ),
+                )
+            else:
+                next_output_time = prev_output_time
+
+            if adaptive:
+                next_dt = next_solver._get_timestep(dt_alpha)
+                next_dt = jnp.clip(next_dt, None, dt_max)
+            else:
+                next_dt = dt
+
+            return (step + 1, next_sim_time, next_output_time, next_dt, next_solver)
+
+        step, sim_time, output_time, dt, new_solver = eqx.internal.while_loop(
+            lambda carry: carry[1] < total_time,
+            main_loop,
+            # step, sim_time, output_time, solver
+            (0, 0.0, store_interval, _dt, self),
+            kind="lax",
+        )
+
+        return new_solver

@@ -12,17 +12,18 @@ def test_create():
 
     position_stack = jnp.array([[0.1, 0.2], [0.1, 0.2]])
     solver = hdx.MPMSolver(
-        config=hdx.Config(total_time=1.0, dt=0.001, dim=2),
+        dim=2,
         material_points=hdx.MaterialPoints(position_stack=position_stack),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1),
     )
+    assert isinstance(solver, hdx.MPMSolver)
 
 
 def test_get_point_grid_interactions():
     position_stack = jnp.array([[0.25, 0.25], [0.25, 0.25], [0.8, 0.4]])
 
     solver = hdx.MPMSolver(
-        config=hdx.Config(total_time=1.0, dt=0.001, shapefunction="linear", dim=2),
+        dim=2,
         material_points=hdx.MaterialPoints(position_stack=position_stack),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.5),
         _setup_done=True,  # to avoid padding the domain on first setup
@@ -65,7 +66,8 @@ def test_vmap_get_interactions_scatter():
     position_stack = jnp.array([[0.25, 0.25], [0.25, 0.25], [0.8, 0.4]])
 
     solver = hdx.MPMSolver(
-        config=hdx.Config(total_time=1.0, dt=0.001, shapefunction="linear", dim=2),
+        shapefunction="linear",
+        dim=2,
         material_points=hdx.MaterialPoints(position_stack=position_stack),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.5),
         _setup_done=True,  # to avoid padding the domain on first setup
@@ -112,7 +114,8 @@ def test_map_p2g():
 
     stress_stack = jnp.array([stress, stress / 3, stress / 2])
     solver = hdx.MPMSolver(
-        config=hdx.Config(total_time=1.0, dt=0.001, shapefunction="linear", dim=2),
+        shapefunction="linear",
+        dim=2,
         material_points=hdx.MaterialPoints(
             position_stack=position_stack, stress_stack=stress_stack, density_ref=10.0
         ),
@@ -122,14 +125,20 @@ def test_map_p2g():
     solver = solver.setup()
 
     p_stack = solver.material_points.p_stack
-    p2g_pressure_stack = solver.map_p2g(p_stack)
+    p2g_pressure_stack = solver.shape_map.map_p2g(
+        p_stack,
+        solver.material_points.mass_stack,
+        solver.grid,
+    )
 
-    p2g2p_pressure_stack = solver.map_p2g2g(p_stack)
+    p2g2p_pressure_stack = solver.shape_map.map_p2g2g(
+        p_stack, solver.material_points.mass_stack, solver.grid
+    )
 
-    p2g_p_stack = solver.p2g_p_stack
-    p2g_q_vm_stack = solver.p2g_q_vm_stack
+    p2g_p_stack = solver.shape_map.p2g_p_stack
+    p2g_q_stack = solver.shape_map.p2g_q_stack
 
-    p2g_q_p_stack = solver.p2g_q_p_stack
+    p2g_q_p_stack = solver.shape_map.p2g_q_p_stack
 
-    p2g_dgamma_dt_stack = solver.p2g_dgamma_dt_stack
-    p2g_gamma_stack = solver.p2g_gamma_stack
+    p2g_dgamma_dt_stack = solver.shape_map.p2g_dgamma_dt_stack
+    p2g_gamma_stack = solver.shape_map.p2g_gamma_stack

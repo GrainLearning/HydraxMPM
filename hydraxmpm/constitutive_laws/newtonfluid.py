@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from ..common.types import TypeFloat, TypeFloatMatrix3x3, TypeInt
 from ..material_points.material_points import MaterialPoints
 from .constitutive_law import ConstitutiveLaw
+from ..utils.math_helpers import get_dev_strain
 
 
 def give_p(K, rho, rho_0, alpha):
@@ -33,8 +34,6 @@ class NewtonFluid(ConstitutiveLaw):
     viscosity: TypeFloat
     alpha: TypeFloat
 
-    init_by_density: bool = True
-
     def __init__(
         self: Self,
         K: TypeFloat = 2.0 * 10**6,
@@ -57,15 +56,13 @@ class NewtonFluid(ConstitutiveLaw):
         )(give_rho)
 
         rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack, self.alpha)
-        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0, 0, 0, None))
 
-        new_stress_stack = vmap_update_ip(
-            material_points.stress_stack,
-            material_points.F_stack,
-            material_points.L_stack,
-            material_points.rho_stack,
-            3,
-        )
+        deps_dt_stack = material_points.deps_dt_stack
+        rho_rho_0_stack = rho / self.rho_0
+
+        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0))
+        new_stress_stack = vmap_update_ip(deps_dt_stack, rho_rho_0_stack)
+
         material_points = material_points.replace(stress_stack=new_stress_stack)
 
         return self.post_init_state(material_points, rho=rho, rho_0=self.rho_0)
@@ -78,15 +75,12 @@ class NewtonFluid(ConstitutiveLaw):
     ) -> Tuple[MaterialPoints, Self]:
         """Update the material state and particle stresses for MPM solver."""
 
-        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0, 0, 0, None))
+        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0))
+        deps_dt_stack = material_points.deps_dt_stack
+        rho_rho_0_stack = material_points.rho_stack / self.rho_0
 
-        new_stress_stack = vmap_update_ip(
-            material_points.stress_stack,
-            material_points.F_stack,
-            material_points.L_stack,
-            material_points.rho_stack,
-            dim,
-        )
+        new_stress_stack = vmap_update_ip(deps_dt_stack, rho_rho_0_stack)
+
         new_particles = eqx.tree_at(
             lambda state: (state.stress_stack),
             material_points,
@@ -97,21 +91,26 @@ class NewtonFluid(ConstitutiveLaw):
 
     def update_ip(
         self: Self,
-        stress_prev: TypeFloatMatrix3x3,
-        F: TypeFloatMatrix3x3,
-        L: TypeFloatMatrix3x3,
-        rho: TypeFloat,
-        dim: TypeInt,
+        deps_dt: TypeFloatMatrix3x3,
+        rho_rho_0: TypeFloat,
     ) -> TypeFloatMatrix3x3:
-        pressure = give_p(self.K, rho, self.rho_0, self.alpha)
+        deps_dev_dt = get_dev_strain(deps_dt)
 
-        deps_dt = 0.5 * (L + L.T)
+        p = self.K * ((rho_rho_0) ** self.alpha - 1.0)
+        p = jnp.clip(p, 0, None)
+        return -p * jnp.eye(3) + self.viscosity * deps_dev_dt
 
-        if dim == 2:
-            deps_dt = deps_dt.at[:, [2, 2]].set(0.0)
+    def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
+        """Get critical timestep of material poiints for stability."""
 
-        deps_v_dt = jnp.trace(deps_dt)
+        def vmap_dt_crit(rho, vel):
+            cdil = jnp.sqrt(self.K / rho)
 
-        deps_dev_dt = deps_dt - (deps_v_dt / 3) * jnp.eye(3)
+            c = jnp.abs(vel) + cdil * jnp.ones_like(vel)
+            return c
 
-        return -pressure * jnp.eye(3) + self.viscosity * deps_dev_dt
+        c_stack = jax.vmap(vmap_dt_crit)(
+            material_points.rho_stack,
+            material_points.velocity_stack,
+        )
+        return (dt_alpha * cell_size) / jnp.max(c_stack)

@@ -47,3 +47,29 @@
 
 ## Unoffical
 - [ ] UH model**
+
+- Fix post update for energies
+- ADD FAQ on how to use CPU GPU os.env flat
+
+
+
+- Add error handler in mpm solver to output data if throws error
+    - After cleanup
+- write some standard checks, unit tests, to see if models are functioning properly
+    - TRX compression
+    - ISO extension
+- Make a list of experimental validation simulations
+- Make file to run all checks
+
+- Open questions
+    - How to organize plots? worth automated way
+
+
+- Add note that large velocity gradients may be due to, a large spatial variation in the materila points velocity..
+    - particles moving opposite direction, or shearing..
+    Excessively large gradients can destabilize simulations (e.g., causing unphysical stresses or grid artifacts)
+
+
+
+
+- [ ] Rename ETSolver, ETBenchmarks to SIP

@@ -12,7 +12,7 @@ def test_create():
     position_stack = jnp.array([[0, 1.0], [0.2, 0.5]])
 
     solver = hdx.USL_APIC(
-        config=hdx.Config(dt=0.001, total_time=1),
+        dim=2,
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.5),
         material_points=hdx.MaterialPoints(position_stack=position_stack),
     )
@@ -31,8 +31,9 @@ def test_create():
 # test 2D p2g with cubic shape functions
 def test_p2g_2d():
     solver = hdx.USL_APIC(
-        config=hdx.Config(total_time=1, dt=0.001, shapefunction="cubic", dim=2),
-        grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=1.0, dim=2),
+        shapefunction="cubic",
+        dim=2,
+        grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
             velocity_stack=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
@@ -46,7 +47,7 @@ def test_p2g_2d():
 
     @jax.jit
     def usl_p2g(solver, material_points, grid):
-        solver, nodes = solver.p2g(material_points, grid)
+        solver, nodes = solver.p2g(material_points, grid, dt=0.001)
         return solver, nodes
 
     solver, grid = usl_p2g(solver, solver.material_points, solver.grid)
@@ -137,7 +138,8 @@ def test_p2g_2d():
 
 def test_g2p_2d():
     solver = hdx.USL_APIC(
-        config=hdx.Config(total_time=1, dt=0.001, shapefunction="cubic", dim=2),
+        shapefunction="cubic",
+        dim=2,
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
@@ -150,8 +152,10 @@ def test_g2p_2d():
 
     @jax.jit
     def usl_p2g_g2p(solver, material_points, grid):
-        new_shape_map, new_grid = solver.p2g(material_points, grid)
-        new_solver, new_particles = solver.g2p(material_points, new_grid, new_shape_map)
+        new_shape_map, new_grid = solver.p2g(material_points, grid, dt=0.001)
+        new_solver, new_particles = solver.g2p(
+            material_points, new_grid, new_shape_map, dt=0.001
+        )
         return new_particles
 
     material_points = usl_p2g_g2p(solver, solver.material_points, solver.grid)
@@ -171,7 +175,8 @@ def test_g2p_2d():
 def test_update():
     # Check if update runs
     solver = hdx.USL_APIC(
-        config=hdx.Config(total_time=1, dt=0.001, shapefunction="cubic", dim=2),
+        shapefunction="cubic",
+        dim=2,
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
@@ -180,4 +185,4 @@ def test_update():
             volume_stack=jnp.array([0.7, 0.4]),
         ),
     )
-    solver = solver.update(0)
+    solver = solver.update(0, 0.001)

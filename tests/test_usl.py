@@ -13,7 +13,7 @@ def test_create():
     position_stack = jnp.array([[0, 1.0], [0.2, 0.5]])
 
     usl = hdx.USL(
-        config=hdx.Config(dt=0.001, total_time=1),
+        dim=2,
         material_points=hdx.MaterialPoints(position_stack=position_stack),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1),
         alpha=0.1,
@@ -26,7 +26,8 @@ def test_p2g_2d():
     """Unit test to perform particle-to-grid transfer for 2D."""
 
     usl = hdx.USL(
-        config=hdx.Config(total_time=1.0, dt=0.001, shapefunction="linear", dim=2),
+        shapefunction="linear",
+        dim=2,
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
@@ -40,7 +41,7 @@ def test_p2g_2d():
 
     @jax.jit
     def usl_p2g(solver, material_points, grid):
-        shape_map, grid = solver.p2g(material_points, grid)
+        shape_map, grid = solver.p2g(material_points, grid, dt=0.001)
         return shape_map, grid
 
     shape_map, grid = usl_p2g(usl, usl.material_points, usl.grid)
@@ -60,7 +61,8 @@ def test_p2g_3d():
     """Unit test to perform particle-to-grid transfer in 3D."""
 
     usl = hdx.USL(
-        config=hdx.Config(total_time=1.0, dt=0.001, shapefunction="linear"),
+        shapefunction="linear",
+        dim=3,
         grid=hdx.Grid(origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25, 0.3], [0.1, 0.25, 0.3]]),
@@ -74,7 +76,7 @@ def test_p2g_3d():
 
     @jax.jit
     def usl_p2g(usl, material_points, grid):
-        usl, nodes = usl.p2g(material_points, grid)
+        usl, nodes = usl.p2g(material_points, grid, dt=0.001)
         return usl, nodes
 
     usl, grid = usl_p2g(usl, usl.material_points, usl.grid)
@@ -85,7 +87,6 @@ def test_p2g_3d():
 
     np.testing.assert_allclose(grid.mass_stack, expected_mass_stack, rtol=1e-3)
 
-    print(grid.moment_stack)
     expected_node_moment_stack = jnp.array(
         [
             [0.189, 0.189, 0.189],
@@ -104,7 +105,8 @@ def test_p2g_3d():
 
 def test_g2p_2d():
     usl = hdx.USL(
-        config=hdx.Config(total_time=1.0, dt=0.1, shapefunction="linear", dim=2),
+        shapefunction="linear",
+        dim=2,
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25], [0.1, 0.25]]),
@@ -119,13 +121,13 @@ def test_g2p_2d():
 
     @jax.jit
     def usl_p2g_g2p(solver, material_points, grid):
-        new_shape_map, new_grid = solver.p2g(material_points, grid)
-        new_particles = solver.g2p(material_points, new_grid, new_shape_map)
+        new_shape_map, new_grid = solver.p2g(material_points, grid, dt=0.1)
+        new_particles = solver.g2p(material_points, new_grid, new_shape_map, dt=0.1)
         return new_particles
 
     material_points = usl_p2g_g2p(usl, usl.material_points, usl.grid)
 
-    expected_volume_stack = jnp.array([0.49855555, 0.2848889])
+    expected_volume_stack = jnp.array([0.697986, 0.398849])
 
     np.testing.assert_allclose(
         material_points.volume_stack, expected_volume_stack, rtol=1e-3
@@ -150,13 +152,13 @@ def test_g2p_2d():
     expected_L_stack = jnp.array(
         [
             [
-                [-1.944444, -1.944444, 0.0],
-                [-0.9333334, -0.9333334, 0.0],
+                [-0.019445, -0.019445, 0.0],
+                [-0.009333334, -0.009333334, 0.0],
                 [0.0, 0.0, 0.0],
             ],
             [
-                [-1.944444, -1.944444, 0.0],
-                [-0.9333334, -0.9333334, 0.0],
+                [-0.019445, -0.019445, 0.0],
+                [-0.009333334, -0.009333334, 0.0],
                 [0.0, 0.0, 0.0],
             ],
         ]
@@ -167,13 +169,13 @@ def test_g2p_2d():
     expected_F_stack = jnp.array(
         [
             [
-                [0.8055556, -0.1944444, 0.0],
-                [-0.09333334, 0.90666664, 0.0],
+                [9.980556e-01, -1.944451e-03, 0.0],
+                [-9.333365e-04, 9.990667e-01, 0.0],
                 [0.0, 0.0, 1.0],
             ],
             [
-                [0.8055556, -0.1944444, 0.0],
-                [-0.09333334, 0.90666664, 0.0],
+                [9.980556e-01, -1.944451e-03, 0.0],
+                [-9.333365e-04, 9.990667e-01, 0.0],
                 [0.0, 0.0, 1.0],
             ],
         ]
@@ -184,7 +186,8 @@ def test_g2p_2d():
 
 def test_g2p_3d():
     usl = hdx.USL(
-        config=hdx.Config(total_time=1.0, dt=0.1, shapefunction="linear"),
+        shapefunction="linear",
+        dim=3,
         grid=hdx.Grid(origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=1.0),
         material_points=hdx.MaterialPoints(
             position_stack=jnp.array([[0.1, 0.25, 0.3], [0.1, 0.25, 0.3]]),
@@ -199,13 +202,13 @@ def test_g2p_3d():
 
     @jax.jit
     def usl_p2g_g2p(solver, material_points, grid):
-        new_shape_map, new_grid = solver.p2g(material_points, grid)
-        new_particles = solver.g2p(material_points, new_grid, new_shape_map)
+        new_shape_map, new_grid = solver.p2g(material_points, grid, dt=0.1)
+        new_particles = solver.g2p(material_points, new_grid, new_shape_map, dt=0.1)
         return new_particles
 
     material_points = usl_p2g_g2p(usl, usl.material_points, usl.grid)
 
-    expected_volume_stack = jnp.array([0.4402222222222, 0.25155553])
+    expected_volume_stack = jnp.array([0.697402, 0.25155553])
 
     np.testing.assert_allclose(
         material_points.volume_stack[:1], expected_volume_stack[:1], rtol=1e-3
@@ -225,14 +228,14 @@ def test_g2p_3d():
     expected_L_stack = jnp.array(
         [
             [
-                [-1.9444444444444446, -1.9444444444444446, -1.9444444444444446],
-                [-0.9333333333333332, -0.9333333333333332, -0.9333333333333332],
-                [-0.8333333333333333, -0.8333333333333333, -0.8333333333333333],
+                [-0.019445, -0.019445, -0.019445],
+                [-0.00933333, -0.00933333, -0.00933333],
+                [-0.00833333, -0.00833333, -0.00833333],
             ],
             [
-                [-1.9444444444444446, -1.9444444444444446, -1.9444444444444446],
-                [-0.9333333333333332, -0.9333333333333332, -0.9333333333333332],
-                [-0.8333333333333333, -0.8333333333333333, -0.8333333333333333],
+                [-0.019445, -0.019445, -0.019445],
+                [-0.00933333, -0.00933333, -0.00933333],
+                [-0.00833333, -0.00833333, -0.00833333],
             ],
         ]
     )
@@ -242,14 +245,14 @@ def test_g2p_3d():
     expected_F_stack = jnp.array(
         [
             [
-                [0.8055556, -0.1944444, -0.1944444],
-                [-0.09333335, 0.90666664, -0.09333335],
-                [-0.08333334, -0.08333334, 0.9166667],
+                [9.980556e-01, -1.944446e-03, -1.944446e-03],
+                [-9.333352e-04, 9.990667e-01, -9.333352e-04],
+                [-8.333346e-04, -8.333346e-04, 9.991667e-01],
             ],
             [
-                [0.8055556, -0.1944444, -0.1944444],
-                [-0.09333335, 0.90666664, -0.09333335],
-                [-0.08333334, -0.08333334, 0.9166667],
+                [9.980556e-01, -1.944446e-03, -1.944446e-03],
+                [-9.333352e-04, 9.990667e-01, -9.333352e-04],
+                [-8.333346e-04, -8.333346e-04, 9.991667e-01],
             ],
         ]
     )
@@ -261,7 +264,7 @@ def test_update():
     """Unit test to update the state of the USL solver."""
 
     usl = hdx.USL(
-        config=hdx.Config(total_time=1, dt=0.001, dim=2),
+        dim=2,
         grid=hdx.Grid(
             origin=[0.0, 0.0],
             end=[1.0, 1.0],
@@ -276,4 +279,4 @@ def test_update():
         alpha=0.9,
     )
     usl = usl.setup()
-    usl = usl.update(1)
+    usl = usl.update(1, dt=0.001)

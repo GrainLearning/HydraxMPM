@@ -38,14 +38,6 @@ from ..common.types import (
 from ..material_points.material_points import MaterialPoints
 
 
-def get_bulk_modulus(E, nu):
-    return E / (3.0 * (1.0 - 2.0 * nu))
-
-
-def get_shear_modulus(E, nu):
-    return E / (2.0 * (1.0 + nu))
-
-
 def yield_function(sqrt_J2_tr, p, mu_1, mu_2, c):
     return sqrt_J2_tr - mu_1 * p - mu_2 * c
 
@@ -118,7 +110,7 @@ class DruckerPrager(ConstitutiveLaw):
 
     def __init__(
         self: Self,
-        E: TypeFloat,
+        K: TypeFloat,
         nu: TypeFloat,
         mu_1: TypeFloat,
         mu_2: TypeFloat = 0.0,
@@ -129,10 +121,9 @@ class DruckerPrager(ConstitutiveLaw):
     ) -> Self:
         """Create a non-associated Drucker-Prager material model."""
 
-        self.K = get_bulk_modulus(E, nu)
-        self.G = get_shear_modulus(E, nu)
-
-        self.E = E
+        self.K = K
+        self.E = 3 * K * (1 - 2 * nu)
+        self.G = self.E / (2.0 * (1.0 + nu))
         self.nu = nu
 
         self.c0 = c0
@@ -182,15 +173,13 @@ class DruckerPrager(ConstitutiveLaw):
 
         deps_dt_stack = material_points.deps_dt_stack
 
-        rho_stack = material_points.mass_stack / material_points.volume_stack
-
         new_stress_stack, new_eps_e_stack, new_eps_p_acc_stack = (
             self.vmap_update_stress(
                 deps_dt_stack * dt,
                 self.p_0_stack,
                 self.eps_e_stack,
                 self.eps_p_acc_stack,
-                rho_stack,
+                material_points.rho_stack,
                 dim,
             )
         )
@@ -323,7 +312,7 @@ class DruckerPrager(ConstitutiveLaw):
                 return R * is_ep * J2_cone_negzero, aux
 
             def find_roots_apex():
-                solver = optx.Newton(rtol=1e-12, atol=1e-10)
+                solver = optx.Newton(rtol=1e-12, atol=1e-5)
 
                 sol = optx.root_find(
                     residuals_apex,
@@ -333,8 +322,8 @@ class DruckerPrager(ConstitutiveLaw):
                     has_aux=True,
                     max_steps=512,
                     options=dict(
-                        lower=-100.0,
-                        upper=100.0,
+                        lower=-1.0,
+                        upper=1.0,
                     ),
                 )
 

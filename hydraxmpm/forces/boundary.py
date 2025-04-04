@@ -39,20 +39,12 @@ class Boundary(Force):
         self._padding = (0, 3 - self.dim)
 
     def init_ids(self: Self, grid: Grid, dim: int, **kwargs):
-        # grid.num_cells = jnp.prod(jnp.array(grid_size))
-
         all_id_stack = (
             jnp.arange(grid.num_cells).reshape(grid.grid_size).astype(jnp.uint32)
         )
 
         mask_stack = jnp.zeros_like(all_id_stack).astype(jnp.bool_)
 
-        # for BSMPM shapefunctions
-
-        # 0th index is middle
-        # 1st index is boundary 0 or N
-        # 3rd index is left side of closes boundary 0 + h
-        # 4th index is right side of closes boundary N -h
         type_stack = grid.type_stack.reshape(grid.grid_size).at[:].set(0)
 
         if dim == 2:

@@ -81,7 +81,6 @@ class MuI_incompressible(ConstitutiveLaw):
 
         self.K = K
 
-        # init d, dim, rho_p, _setup_done
         super().__init__(**kwargs)
 
     def init_state(self: Self, material_points: MaterialPoints):
@@ -104,6 +103,7 @@ class MuI_incompressible(ConstitutiveLaw):
             material_points.L_stack,
             rho_rho_0_stack,
         )
+
         material_points = material_points.replace(stress_stack=new_stress_stack)
 
         return self.post_init_state(material_points, rho=rho, rho_0=self.rho_0)
@@ -117,7 +117,6 @@ class MuI_incompressible(ConstitutiveLaw):
         """Update the material state and particle stresses for MPM solver."""
 
         rho_rho_0_stack = material_points.rho_stack / self.rho_0
-        # rho_stack = material_points.rho_stack
 
         deps_dt_stack = material_points.deps_dt_stack
 
@@ -149,37 +148,19 @@ class MuI_incompressible(ConstitutiveLaw):
     ):
         deps_dev_dt = get_dev_strain(deps_dt)
 
-        if self.error_check:
-            rho_rho_0 = eqx.error_if(
-                rho_rho_0, jnp.isnan(rho_rho_0).any(), "rho_rho_0 is nan"
-            )
-
-            deps_dev_dt = eqx.error_if(
-                deps_dev_dt, jnp.isnan(deps_dev_dt).any(), "deps_dev_dt is nan"
-            )
-
         dgamma_dt = get_scalar_shear_strain(deps_dt)
-        # dgamma_dt = jnp.nanmax(jnp.array([dgamma_dt, 1.0e-6]))
-
-        if self.error_check:
-            dgamma_dt = eqx.error_if(
-                dgamma_dt, jnp.isnan(dgamma_dt).any(), "dgamma_dt is nan"
-            )
 
         # stress free condition...
         # rho_rho_0 = jnp.nanmax(jnp.array([rho_rho_0 - 1.0, 1e-6])) + 1.0
 
         p = self.K * (rho_rho_0 - 1.0)
 
-        if self.error_check:
-            p = eqx.error_if(p, jnp.isnan(p).any(), "p is nan")
+        is_comp = rho_rho_0 > 1.0
 
-        p = jnp.nanmax(jnp.array([p, 1e-12]))
-
-        def stress_update(_):
+        def stress_update():
             # correction for viscosity diverges
 
-            r = 0.001
+            r = 0.0001
 
             # eq (12) https://www.sciencedirect.com/science/article/pii/S0021999118307290
 
@@ -205,11 +186,19 @@ class MuI_incompressible(ConstitutiveLaw):
 
             return stress_next
 
-        return stress_update(None)
-        # def stress_free_assump(_):
-        #     # adding a very small number such that inertial numbers are not infinite
-        #     return jnp.eye(3) * -1e-12
+        return jax.lax.cond(is_comp, stress_update, lambda: jnp.zeros((3, 3)))
 
-        # return jax.lax.cond(
-        #     (rho_rho_0 - 1.0 > 1e-12), stress_update, stress_free_assump, operand=False
-        # )
+    def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
+        """Get critical timestep of material poiints for stability."""
+
+        def vmap_dt_crit(rho, vel):
+            cdil = jnp.sqrt(self.K / rho)
+
+            c = jnp.abs(vel) + cdil * jnp.ones_like(vel)
+            return c
+
+        c_stack = jax.vmap(vmap_dt_crit)(
+            material_points.rho_stack,
+            material_points.velocity_stack,
+        )
+        return (dt_alpha * cell_size) / jnp.max(c_stack)

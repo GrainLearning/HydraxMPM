@@ -5,15 +5,14 @@ import jax
 import jax.numpy as jnp
 
 from ..common.base import Base
-from ..common.types import TypeFloat, TypeFloatMatrix3x3AStack, TypeInt
+from ..common.types import TypeFloat, TypeFloatMatrix3x3AStack
 from ..material_points.material_points import MaterialPoints
-from ..solvers.config import Config
-from ..utils.math_helpers import get_pressure, get_q_vm
+
+from ..utils.math_helpers import get_pressure
 from typing import Tuple
-import optimistix as optx
 
 
-class ETBenchmark(Base):
+class SIPBenchmark(Base):
     L_control_stack: Optional[TypeFloatMatrix3x3AStack] = None
     X_control_stack: Optional[Any] = None
     L_unknown_indices: Optional[Any] = None
@@ -23,7 +22,7 @@ class ETBenchmark(Base):
         return stress_guest - stress_target
 
 
-class TRX_CU(ETBenchmark):
+class TRX_CU(SIPBenchmark):
     """
     Triaxial consolidated undrained test
 
@@ -51,7 +50,7 @@ class TRX_CU(ETBenchmark):
 
     deps_zz_dt: TypeFloat
 
-    num_steps: Optional[TypeInt]
+    num_steps: int
 
     p0: TypeFloat = None
 
@@ -60,7 +59,7 @@ class TRX_CU(ETBenchmark):
     def __init__(
         self,
         deps_zz_dt: TypeFloat,
-        num_steps: Optional[TypeInt] = None,
+        num_steps: int,
         p0: TypeFloat = None,
         init_material_points: Optional[bool] = False,
         **kwargs,
@@ -77,8 +76,8 @@ class TRX_CU(ETBenchmark):
         self.L_unknown_indices = None
         super().__init__(**kwargs)
 
-    def init_state(self, num_steps, material_points: MaterialPoints, **kwargs):
-        deps_zz_dt_stack = jnp.ones(num_steps) * self.deps_zz_dt
+    def init_state(self, material_points: MaterialPoints, **kwargs):
+        deps_zz_dt_stack = jnp.ones(self.num_steps) * self.deps_zz_dt
 
         def get_L(deps_zz_dt):
             deps_r_dt = -1 / 2 * deps_zz_dt
@@ -106,12 +105,12 @@ class TRX_CU(ETBenchmark):
         return TRX_CU(
             deps_zz_dt=self.deps_zz_dt,
             p0=self.p0,
-            num_steps=num_steps,
+            num_steps=self.num_steps,
             L_control_stack=L_control_stack,
         ), new_material_points
 
 
-class TRX_CD(ETBenchmark):
+class TRX_CD(SIPBenchmark):
     """
     Triaxial consolidated udrained test
 
@@ -150,7 +149,7 @@ class TRX_CD(ETBenchmark):
 
     deps_zz_dt: TypeFloat
 
-    num_steps: Optional[TypeInt]
+    num_steps: int
 
     p0: TypeFloat
 
@@ -159,8 +158,8 @@ class TRX_CD(ETBenchmark):
     def __init__(
         self,
         deps_zz_dt: TypeFloat,
+        num_steps: int,
         p0: TypeFloat = None,
-        num_steps: Optional[TypeInt] = None,
         init_material_points: Optional[bool] = False,
         **kwargs,
     ):
@@ -176,10 +175,10 @@ class TRX_CD(ETBenchmark):
         self.L_unknown_indices = [0, 1], [0, 1]
         super().__init__(**kwargs)
 
-    def init_state(self, num_steps, material_points: MaterialPoints, **kwargs):
-        deps_zz_dt_stack = jnp.ones(num_steps) * self.deps_zz_dt
+    def init_state(self, material_points: MaterialPoints, **kwargs):
+        deps_zz_dt_stack = jnp.ones(self.num_steps) * self.deps_zz_dt
 
-        p_stack = jnp.ones(num_steps) * self.p0  # confining pressure
+        p_stack = jnp.ones(self.num_steps) * self.p0  # confining pressure
 
         def get_L(deps_zz_dt):
             L = jnp.zeros((3, 3))
@@ -205,7 +204,7 @@ class TRX_CD(ETBenchmark):
         return TRX_CD(
             deps_zz_dt=self.deps_zz_dt,
             p0=self.p0,
-            num_steps=num_steps,
+            num_steps=self.num_steps,
             L_control_stack=L_control_stack,
             X_control_stack=p_stack,
         ), new_material_points
@@ -218,22 +217,23 @@ class TRX_CD(ETBenchmark):
         return R_norm**2
 
 
-class S_CD(ETBenchmark):
+class S_CD(SIPBenchmark):
     """
-    Drained simple shear
 
-        Strain rate control
-        >>> [?,x/2,0]
-        >>> [',?,0]
-        >>> [',',?]
+    Pressure controlled shear or drained shear
 
-        Pressure control
+
+    Strain rate control
+    >>> [?,x/2,0]
+    >>> [',?,0]
+    >>> [',',?]
+
 
     """
 
     deps_xy_dt: TypeFloat | Tuple[TypeFloat, ...]
     p0: TypeFloat
-    num_steps: Optional[TypeInt]
+    num_steps: int
 
     init_material_points: bool = False
 
@@ -241,7 +241,7 @@ class S_CD(ETBenchmark):
         self,
         deps_xy_dt: TypeFloat | Tuple[TypeFloat, ...],
         p0: TypeFloat,
-        num_steps: Optional[TypeInt] = None,
+        num_steps: int,
         init_material_points: Optional[bool] = False,
         **kwargs,
     ):
@@ -257,16 +257,16 @@ class S_CD(ETBenchmark):
 
         super().__init__(**kwargs)
 
-    def init_state(self, num_steps, material_points: MaterialPoints, **kwargs):
-        p_stack = jnp.ones(num_steps) * self.p0
+    def init_state(self, material_points: MaterialPoints, **kwargs):
+        p_stack = jnp.ones(self.num_steps) * self.p0
 
         if eqx.is_array(self.deps_xy_dt):
             if len(self.deps_xy_dt.shape) > 2:
                 deps_xy_dt_stack = self.deps_xy_dt
             else:
-                deps_xy_dt_stack = jnp.ones(num_steps) * self.deps_xy_dt
+                deps_xy_dt_stack = jnp.ones(self.num_steps) * self.deps_xy_dt
         else:
-            deps_xy_dt_stack = jnp.ones(num_steps) * self.deps_xy_dt
+            deps_xy_dt_stack = jnp.ones(self.num_steps) * self.deps_xy_dt
 
         def get_L(deps_xy_dt):
             L = jnp.zeros((3, 3))
@@ -289,7 +289,7 @@ class S_CD(ETBenchmark):
         return S_CD(
             deps_xy_dt=self.deps_xy_dt,
             p0=self.p0,
-            num_steps=num_steps,
+            num_steps=self.num_steps,
             L_control_stack=L_control_stack,
             X_control_stack=p_stack,
         ), new_material_points
@@ -298,7 +298,7 @@ class S_CD(ETBenchmark):
         return get_pressure(stress_guest) - X_target
 
 
-class ISO_C(ETBenchmark):
+class ISO_C(SIPBenchmark):
     """
     Isotropic compression
 
@@ -315,7 +315,7 @@ class ISO_C(ETBenchmark):
 
     deps_xx_yy_zz_dt: TypeFloat | Tuple[TypeFloat, ...]
     p0: TypeFloat
-    num_steps: Optional[TypeInt]
+    num_steps: int
 
     init_material_points: bool = False
 
@@ -323,7 +323,7 @@ class ISO_C(ETBenchmark):
         self,
         deps_xx_yy_zz_dt: TypeFloat | Tuple[TypeFloat, ...],
         p0: TypeFloat,
-        num_steps: Optional[TypeInt] = None,
+        num_steps: int,
         init_material_points: Optional[bool] = False,
         **kwargs,
     ):
@@ -339,16 +339,16 @@ class ISO_C(ETBenchmark):
 
         super().__init__(**kwargs)
 
-    def init_state(self, num_steps, material_points: MaterialPoints, **kwargs):
-        p_stack = jnp.ones(num_steps) * self.p0
+    def init_state(self, material_points: MaterialPoints, **kwargs):
+        p_stack = jnp.ones(self.num_steps) * self.p0
 
         if eqx.is_array(self.deps_xx_yy_zz_dt):
             if len(self.deps_xx_yy_zz_dt.shape) > 2:
                 deps_xx_yy_zz_dt = self.deps_xx_yy_zz_dt
             else:
-                deps_xx_yy_zz_dt = jnp.ones(num_steps) * self.deps_xx_yy_zz_dt
+                deps_xx_yy_zz_dt = jnp.ones(self.num_steps) * self.deps_xx_yy_zz_dt
         else:
-            deps_xx_yy_zz_dt = jnp.ones(num_steps) * self.deps_xx_yy_zz_dt
+            deps_xx_yy_zz_dt = jnp.ones(self.num_steps) * self.deps_xx_yy_zz_dt
 
         def get_L(deps_xx_yy_zz_dt):
             L = jnp.zeros((3, 3))
@@ -373,127 +373,6 @@ class ISO_C(ETBenchmark):
         return S_CD(
             deps_xy_dt=deps_xx_yy_zz_dt,
             p0=self.p0,
-            num_steps=num_steps,
+            num_steps=self.num_steps,
             L_control_stack=L_control_stack,
         ), new_material_points
-
-
-# class ConstantVolumeSimpleShear(ETBenchmark):
-#     """
-#     Drained simple shear
-
-#         Strain rate control
-#         >>> [-y,x,0]
-#         >>> [',-y,0]
-#         >>> [',',-y]
-
-#         Stress control
-#         >>> [?,?,?]
-#         >>> [',?,?]
-#         >>> [',',?]
-#     """
-
-#     x: TypeFloat | Tuple[TypeFloat, ...]
-#     num_steps: Optional[TypeInt]
-
-#     def __init__(
-#         self,
-#         x: TypeFloat | Tuple[TypeFloat, ...],
-#         num_steps: Optional[TypeInt] = None,
-#         init_material_points: Optional[bool] = False,
-#         **kwargs,
-#     ):
-#         self.x = x
-
-#         self.num_steps = num_steps
-
-#         self.init_material_points = init_material_points
-#         self.L_control_stack = kwargs.get("L_control_stack", None)
-#         self.L_unknown_indices = None
-#         self.X_control_stack = None
-
-#         super().__init__(**kwargs)
-
-#     def init_state(self, config: Config, material_points: MaterialPoints, **kwargs):
-#         num_steps = self.num_steps
-#         if num_steps is None:
-#             num_steps = config.num_steps
-
-#         if isinstance(self.x, tuple):
-#             x_stack = jnp.linspace(self.x[0], self.x[1], num_steps)
-#         else:
-#             x_stack = jnp.ones(num_steps) * self.x
-
-#         def get_L(x):
-#             L = jnp.zeros((3, 3))
-#             L = L.at[0, 1].set(x)
-#             return L
-
-#         L_control_stack = jax.vmap(get_L)(x_stack)
-
-#         new_material_points = material_points
-#         if self.init_material_points:
-#             L_stack = L_control_stack.at[0].get()
-#             new_material_points = material_points.replace(
-#                 L_stack=jnp.tile(L_stack, (material_points.num_points, 1, 1))
-#             )
-#         return ConstantVolumeSimpleShear(
-#             x=self.x,
-#             num_steps=num_steps,
-#             L_control_stack=L_control_stack,
-#         ), new_material_points
-
-
-# class IsotropicCompression(ETBenchmark):
-#     """
-#     Strain rate control
-#     >>> [-x,0,0]
-#     >>> [',-x,0]
-#     >>> [',',-x]
-
-#     Stress control
-#     >>> [?,?,?]
-#     >>> [',?,?]
-#     >>> [',',?]
-#     """
-
-#     x_range: tuple[TypeFloat, TypeFloat]
-
-#     num_steps: Optional[TypeInt]
-
-#     def __init__(
-#         self,
-#         x_range: tuple[TypeFloat, TypeFloat],
-#         num_steps: Optional[TypeInt] = None,
-#         **kwargs,
-#     ):
-#         self.x_range = x_range
-
-#         self.num_steps = num_steps
-
-#         self.L_control_stack = kwargs.get("L_control_stack", None)
-
-#         super().__init__(**kwargs)
-
-#     def init_state(self, config: Config, material_points: MaterialPoints, **kwargs):
-#         num_steps = self.num_steps
-#         if num_steps is None:
-#             num_steps = config.num_steps
-
-#         x_stack = jnp.linspace(self.x_range[0], self.x_range[1], num_steps)
-
-#         def get_L(x):
-#             L = jnp.zeros((3, 3))
-#             L = L.at[[0, 1, 2], [0, 1, 2]].set(-x)
-#             return L
-
-#         L_control_stack = jax.vmap(get_L)(x_stack)
-
-#         return self.__class__(
-#             x_range=self.x_range,
-#             num_steps=num_steps,
-#             L_control_stack=L_control_stack,
-#             stress_control_stack=None,
-#             stress_mask_indices=None,
-#             _setup_done=True,
-#         ), material_points

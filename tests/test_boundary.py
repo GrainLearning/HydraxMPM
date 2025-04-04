@@ -12,7 +12,7 @@ def test_init():
 
     box = hdx.Boundary()
 
-    new_box = box.init_ids(grid_size=grid.grid_size, dim=2)
+    new_box, new_grid = box.init_ids(grid=grid, dim=2)
 
     print(new_box.id_stack.shape)
 
@@ -32,7 +32,6 @@ def test_call_2d():
         (new_moment_nt_stack),
     )
 
-    box = box.init_ids(grid_size=grid.grid_size, dim=2)
+    new_box, new_grid = box.init_ids(grid=grid, dim=2)
 
-    # grid, box =
-    box.apply_on_grid(material_points=None, grid=new_grid)
+    new_box.apply_on_grid(material_points=None, grid=new_grid)

@@ -14,13 +14,8 @@ def test_create():
             position_stack=jnp.array([[0.1, 0.2], [0.1, 0.2]])
         ),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1),
-        config=hdx.Config(
-            shapefunction="cubic",
-            total_time=1.0,
-            dt=0.001,
-            _setup_done=True,  # to avoid padding the domain on first setup
-            dim=2,
-        ),
+        shapefunction="cubic",
+        dim=2,
     )
 
     np.testing.assert_allclose(solver.shape_map._intr_shapef_stack, jnp.zeros((2 * 16)))
@@ -39,13 +34,8 @@ def test_calc_shp_2d():
             position_stack=jnp.array([[0.45, 0.21], [0.3, 0.4]])
         ),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1),
-        config=hdx.Config(
-            shapefunction="cubic",
-            total_time=1.0,
-            dt=0.001,
-            dim=2,
-            _setup_done=True,  # to avoid padding the domain on first setup
-        ),
+        shapefunction="cubic",
+        dim=2,
     )
 
     shape_map = solver.shape_map._get_particle_grid_interactions_batched(
@@ -144,13 +134,8 @@ def test_calc_shp_3d():
             position_stack=jnp.array([[0.45, 0.21, 0.1]])
         ),
         grid=hdx.Grid(origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=0.1),
-        config=hdx.Config(
-            shapefunction="cubic",
-            total_time=1.0,
-            dt=0.001,
-            dim=3,
-            _setup_done=True,  # to avoid padding the domain on first setup
-        ),
+        shapefunction="cubic",
+        dim=3,
     )
 
     shape_map = solver.shape_map._get_particle_grid_interactions_batched(

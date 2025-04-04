@@ -1,14 +1,9 @@
-from cProfile import label
 import os
-from turtle import color
-
-from matplotlib import lines
-
 
 os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Hide GPUs from all libraries (including JAX)
 os.environ["JAX_PLATFORMS"] = "cpu"
 
-import jax
+
 import jax.numpy as jnp
 
 import hydraxmpm as hdx
@@ -16,23 +11,9 @@ import hydraxmpm as hdx
 import matplotlib.pyplot as plt
 
 
-import matplotlib.pyplot as plt
-
-
 import scienceplots
 
-import sys
-from pathlib import Path
 
-# Add the `utils` directory to the path
-utils_path = Path(__file__).parent.parent / "utils/"
-
-print(utils_path)
-sys.path.append(str(utils_path))
-
-from plots import plot_q_vs_p, make_subplots, plot_q_vs_p_M
-
-import equinox as eqx
 import os
 
 plt.style.use(["science", "no-latex"])
@@ -73,48 +54,49 @@ models = (
 )
 
 
-et_benchmarks = (
+sip_benchmarks = (
     hdx.TRX_CU(
         deps_zz_dt=4.0,
         p0=p_0,
+        num_steps=10000,
         init_material_points=True,
         other=dict(type="TRX_CU"),
     ),
     hdx.TRX_CD(
         deps_zz_dt=4.0,
         p0=p_0,
+        num_steps=10000,
         init_material_points=True,
         other=dict(type="TRX_CD"),
     ),
-    hdx.ISO_C(  # tension
+    hdx.ISO_C(
         deps_xx_yy_zz_dt=-1.0,
         p0=p_0,
+        num_steps=10000,
         init_material_points=True,
         other=dict(type="ISO_C"),
     ),
 )
 
-
-fig, ax = make_subplots()
+fig, ax = plt.subplots(
+    figsize=(4, 3),
+    dpi=300,
+    layout="constrained",
+)
 for model in models:
-    for et_benchmark in et_benchmarks:
-        solver = hdx.ETSolver(
+    for sip_benchmark in sip_benchmarks:
+        solver = hdx.SIPSolver(
             material_points=hdx.MaterialPoints(
                 p_stack=jnp.array([p_0]),
             ),
-            config=hdx.Config(
-                num_steps=1000,
-                dt=0.0001,
-                output=(
-                    "p_stack",
-                    "q_stack",
-                    "specific_volume_stack",
-                ),
+            output_dict=(
+                "p_stack",
+                "q_stack",
+                "specific_volume_stack",
             ),
             constitutive_law=model,
-            et_benchmarks=et_benchmark,
+            sip_benchmarks=sip_benchmark,
         )
-        t_stack = jnp.arange(0, solver.config.num_steps) * solver.config.dt
 
         solver = solver.setup()
 
@@ -122,26 +104,29 @@ for model in models:
             p_stack,
             q_stack,
             specific_volume_stack,
-        ) = solver.run_jit()
+        ) = solver.run(0.00001)
 
-        plot_q_vs_p(
-            ax.flat[0],
-            p_stack=p_stack,
-            q_stack=q_stack,
-            xlim=(-1.0, 20.0),
-            ylim=(-1.0, 30.0),
+        hdx.make_plot(
+            ax,
+            p_stack,
+            q_stack,
+            xlim=(-1.0, 40.0),
+            ylim=(-1.0, 40.0),
             color=model.other["color"],
             linestyle=model.other["ls"],
         )
 
-plot_q_vs_p_M(
-    ax.flat[0],
-    models[0],
-    (0, 100.0),
-    color="red",
-    xlim=(-1.0, 20.0),
-)
 
-fig.suptitle("TRX CU CD for MCC OCR=1 and OCR=3")
+hdx.make_plot(
+    ax,
+    (0, 100),
+    (0, 100 * models[0].M),
+    color="red",
+    xlim=(0, 40),
+    ylim=(0, 40),
+    start_end_markers=False,
+)
+ax.grid(True)
+
 print("plotting..")
 plt.show()

@@ -3,31 +3,16 @@ import os
 from hydraxmpm.material_points import material_points
 import itertools
 
-
-def get_files(output_dr, prefix):
-    all_files = [
-        f for f in os.listdir(output_dr) if os.path.isfile(os.path.join(output_dr, f))
-    ]
-
-    selected_files = [x for x in all_files if prefix in x]
-
-    selected_files = [x for x in selected_files if ".npz" in x]
-
-    selected_files_sorted = sorted(selected_files, key=lambda x: int(x.split(".")[1]))
-
-    return [output_dr + "/" + x for x in selected_files_sorted]
+from ..utils.mpm_callback_helpers import get_files
 
 
-# input_arrays = np.load(p2g_files_sorted[0])
-
-
-def view(config, scalars=None, vminmaxs=None, refresh_rate=0.05):
+def view(output_dir, scalars=None, vminmaxs=None, refresh_rate=0.05):
     import polyscope as ps
     import numpy as np
     import time
     from pathlib import Path
 
-    material_points_files = get_files(config.output_path, "material_points")
+    material_points_files = get_files(output_dir, "material_points")
 
     if len(material_points_files) == 0:
         print("No material_points files found")
@@ -65,7 +50,7 @@ def view(config, scalars=None, vminmaxs=None, refresh_rate=0.05):
                 # vminmax=vminmaxs[si]
             )
 
-    forces_files = get_files(config.output_path, "forces")
+    forces_files = get_files(output_dir, "forces")
     global rp_cycler
     rp_cycler = itertools.cycle(forces_files)
 
@@ -78,12 +63,10 @@ def view(config, scalars=None, vminmaxs=None, refresh_rate=0.05):
 
         binary_mask = np.arange(r_position_stack.shape[0])
 
-        # binary_mask[::2] = 0
         r_point_cloud.add_scalar_quantity(
             "binary",
             binary_mask,
             enabled=True,
-            #     # vminmax=vminmaxs[si]
         )
 
     print("Polyscope viewer started")
@@ -108,95 +91,12 @@ def view(config, scalars=None, vminmaxs=None, refresh_rate=0.05):
                 )
         point_cloud.update_point_positions(position_stack)
         if len(forces_files) > 0:
-            forces_file = get_files(config.output_path, "forces")
+            forces_file = get_files(output_dir, "forces")
 
             if len(forces_file) > 0:
                 input_arrays = np.load(next(rp_cycler))
                 r_position_stack = input_arrays.get("position_stack", None)
                 r_point_cloud.update_point_positions(r_position_stack)
 
-        #     if load_rigid:
-        #         input_arrays = np.load(config.output_path + f"/forces.{step}.npz")
-        #         r_point_cloud.update_point_positions(input_arrays.get("position_stack"))
-
-        #     if step >= config.num_steps:
-        #         step = 0
-        #     else:
-        #         step += config.store_every
-        # except Exception as e:
-        #     step = 0
-
     ps.set_user_callback(update)
     ps.show()
-
-
-# def view_interpolated(config, scalars=None, vminmaxs=None, refresh_rate=0.05):
-#     import polyscope as ps
-#     import numpy as np
-#     import time
-#     from pathlib import Path
-
-#     ps.init()
-
-#     while True:
-#         time.sleep(2)
-#         try:
-#             print("trying to load..")
-#             input_arrays = np.load(config.output_path + "/solver.0.npz")
-#             break
-#         except Exception:
-#             pass
-#     print("Loaded")
-#     position_stack = input_arrays.get("p2g_position_stack", None)
-
-#     ps.set_navigation_style("planar")
-#     ps.init()
-#     point_cloud = ps.register_point_cloud("grid", position_stack, enabled=True)
-
-#     if scalars is None:
-#         scalars = []
-#     if vminmaxs is None:
-#         vminmaxs = []
-
-#     for si, scalar in enumerate(scalars):
-#         data = input_arrays.get(scalar)
-#         if data is not None:
-#             point_cloud.add_scalar_quantity(
-#                 scalar,
-#                 data,
-#                 # vminmax=vminmaxs[si]
-#             )
-
-#     step = 0
-
-#     print("Polyscope viewer started")
-#     print("Press Ctrl+C to exit")
-
-#     def update():
-#         global step
-#         time.sleep(refresh_rate)
-#         try:
-#             cfile = config.output_path + f"/solver.{step}.npz"
-
-#             input_arrays = np.load(cfile)
-#             # position_stack = input_arrays.get("position_stack", None)
-
-#             for scalar in scalars:
-#                 data = input_arrays.get(scalar)
-#                 if data is not None:
-#                     point_cloud.add_scalar_quantity(
-#                         scalar,
-#                         data,
-#                         # vminmax=vminmaxs[si]
-#                     )
-#             # point_cloud.update_point_positions(position_stack)
-
-#             if step >= config.num_steps:
-#                 step = 0
-#             else:
-#                 step += config.store_every
-#         except Exception as e:
-#             step = 0
-
-#     ps.set_user_callback(update)
-#     ps.show()

@@ -14,16 +14,12 @@ def test_create():
 def test_update_stress_3d():
     constitutive_laws = hdx.NewtonFluid(K=2.0 * 10**6, viscosity=0.001, rho_0=1400)
 
-    rho = 1399  # volume0/volume
+    rho_rho_0 = 1400 / 1390  # volume0/volume
 
     stress = constitutive_laws.update_ip(
-        stress_prev=jnp.zeros((3, 3)),
-        F=jnp.eye(3),
-        L=jnp.eye(3) * 0.1,
-        rho=jnp.ones(1) * rho,
-        dim=3,
+        deps_dt=jnp.eye(3), rho_rho_0=jnp.ones(1) * rho_rho_0
     )
 
-    expected_stress_stack = jnp.eye(3) * 9978.771
+    expected_stress_stack = jnp.eye(3) * -102920.055
 
     np.testing.assert_allclose(stress, expected_stress_stack, rtol=1e-3)

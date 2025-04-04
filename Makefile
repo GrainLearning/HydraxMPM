@@ -20,6 +20,33 @@ test: ## Test the code with pytest
 	@echo "🚀 Testing code: Running pytest"
 	@uv run python -m pytest --cov --cov-config=pyproject.toml --cov-report=xml
 
+
+# EXAMPLES
+.PHONY: examples 
+examples:  ## run all examples
+	@uv run examples/bvp/two_sphere_impact/two_sphere_impact.py
+
+
+.PHONY: verification 
+verification:  ## run all examples
+	@echo "📈 Plotting verification tests"
+	@echo "MCC TRX CD CU '"
+	@uv run verification/mcc/trx_cu_cd.py
+
+
+
+
+.PHONY: help
+help:
+	@uv run python -c "import re; \
+	[[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
+
+
+.DEFAULT_GOAL := help
+
+
+
+
 # .PHONY: build
 # build: clean-build ## Build wheel file
 # 	@echo "🚀 Creating wheel file"
@@ -45,10 +72,3 @@ test: ## Test the code with pytest
 # .PHONY: docs
 # docs: ## Build and serve the documentation
 # 	@uv run mkdocs serve
-
-.PHONY: help
-help:
-	@uv run python -c "import re; \
-	[[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
-
-.DEFAULT_GOAL := help

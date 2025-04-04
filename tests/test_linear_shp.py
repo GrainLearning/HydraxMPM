@@ -14,13 +14,9 @@ def test_create():
             position_stack=jnp.array([[0.1, 0.2], [0.1, 0.2]])
         ),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1),
-        config=hdx.Config(
-            shapefunction="linear",
-            total_time=1.0,
-            dt=0.001,
-            _setup_done=True,  # to avoid padding the domain on first setup
-            dim=2,
-        ),
+        shapefunction="linear",
+        dt=0.001,
+        dim=2,
     )
 
     np.testing.assert_allclose(solver.shape_map._intr_shapef_stack, jnp.zeros((2 * 4)))
@@ -37,13 +33,9 @@ def test_calc_shp_2d():
     solver = hdx.MPMSolver(
         material_points=hdx.MaterialPoints(jnp.array([[0.45, 0.21], [0.8, 0.4]])),
         grid=hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1),
-        config=hdx.Config(
-            shapefunction="linear",
-            total_time=1.0,
-            dt=0.001,
-            dim=2,
-            _setup_done=True,  # to avoid padding the domain on first setup
-        ),
+        shapefunction="linear",
+        dt=0.001,
+        dim=2,
     )
 
     shape_map = solver.shape_map._get_particle_grid_interactions_batched(
@@ -88,13 +80,8 @@ def test_calc_shp_3d():
             jnp.array([[0.45, 0.21, 0.1], [0.8, 0.4, 0.1]])
         ),
         grid=hdx.Grid(origin=[0.0, 0.0, 0.0], end=[1.0, 1.0, 1.0], cell_size=0.1),
-        config=hdx.Config(
-            shapefunction="linear",
-            total_time=1.0,
-            dt=0.001,
-            dim=3,
-            _setup_done=True,  # to avoid padding the domain on first setup
-        ),
+        shapefunction="linear",
+        dim=3,
     )
 
     shape_map = solver.shape_map._get_particle_grid_interactions_batched(

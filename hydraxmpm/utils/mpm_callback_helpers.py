@@ -8,6 +8,20 @@ import os
 import warnings
 
 
+def get_files(output_dr, prefix):
+    all_files = [
+        f for f in os.listdir(output_dr) if os.path.isfile(os.path.join(output_dr, f))
+    ]
+
+    selected_files = [x for x in all_files if prefix in x]
+
+    selected_files = [x for x in selected_files if ".npz" in x]
+
+    selected_files_sorted = sorted(selected_files, key=lambda x: int(x.split(".")[1]))
+
+    return [output_dr + "/" + x for x in selected_files_sorted]
+
+
 def give_3d(position_stack):
     _, dim = position_stack.shape
     return np.pad(
@@ -19,36 +33,42 @@ def give_3d(position_stack):
 
 
 def npz_to_vtk(
-    input_folder, output_folder=None, remove_word_stack=False, verbose=False
+    input_folder,
+    output_folder=None,
+    remove_word_stack=False,
+    verbose=False,
+    kind="material_points",
 ):
-    files = [
-        f
-        for f in os.listdir(input_folder)
-        if os.path.isfile(os.path.join(input_folder, f))
-    ]
-    files = [f for f in files if ".npz" in f]
-    if output_folder is None:
-        output_folder = input_folder
+    if type(kind) == str:
+        kind = [kind]
 
-    for f in files:
-        input_arrays = np.load(input_folder + "/" + f)
+    for k in kind:
+        type_files = get_files(input_folder, k)
 
-        position_stack = input_arrays.get("position_stack", None)
-        if position_stack is None:
-            position_stack = input_arrays.get("p2g_position_stack", None)
+        for f in type_files:
+            input_arrays = np.load(f)
 
-        if position_stack is None:
-            warnings.warn(f"No position_stack found in {f}, skipping")
-            continue
+            position_stack = input_arrays.get("position_stack", None)
+            if position_stack is None:
+                position_stack = input_arrays.get("grid_position_stack", None)
 
-        position_stack = give_3d(position_stack)
+            if position_stack is None:
+                warnings.warn(f"No position_stack found in {f}, skipping")
+                continue
 
-        cloud = pv.PolyData(position_stack)
-        for arr in input_arrays.files:
-            if (remove_word_stack) and ("_stack" in arr):
-                arr = arr.split("_stack")[0]
-            cloud[arr] = input_arrays[arr]
+            position_stack = give_3d(position_stack)
 
-        new_f = ".".join(f.split(".")[:2]) + ".vtk"
+            cloud = pv.PolyData(position_stack)
+            print(f"Loaded {f} with {cloud.n_points} points")
+            for arr in input_arrays.files:
+                if arr == "grid_mesh":
+                    continue
+                if (remove_word_stack) and ("_stack" in arr):
+                    arr = arr.split("_stack")[0]
+                cloud[arr] = input_arrays[arr]
 
-        cloud.save(output_folder + new_f)
+            head, tail = os.path.split(f)
+
+            new_tail = ".".join(tail.split(".")[:2]) + ".vtk"
+            outfile = os.path.join(output_folder, new_tail)
+            cloud.save(outfile)

@@ -3,7 +3,7 @@ from functools import partial
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from typing_extensions import Callable, Optional, Self, Tuple
+from typing_extensions import Optional, Self, Tuple
 
 from ..common.types import (
     TypeFloat,
@@ -15,7 +15,6 @@ from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..forces.force import Force
 from ..grid.grid import Grid
 from ..material_points.material_points import MaterialPoints
-from ..solvers.config import Config
 from .mpm_solver import MPMSolver
 
 
@@ -33,14 +32,17 @@ class USL_ASFLIP(MPMSolver):
 
     def __init__(
         self,
-        config: Config,
+        *,
+        dim,
         material_points: MaterialPoints,
         grid: Grid,
         constitutive_laws: Optional[
             Tuple[ConstitutiveLaw, ...] | ConstitutiveLaw
         ] = None,
         forces: Optional[Tuple[Force, ...]] = None,
-        callbacks: Optional[Tuple[Callable, ...] | Callable] = None,
+        ppc=1,
+        shapefunction="cubic",
+        output_dict: Optional[dict | Tuple[str, ...]] = None,
         alpha: Optional[TypeFloat] = 1.0,
         phi_c: TypeFloat = 0.5,
         beta_min: TypeFloat = 0.0,
@@ -48,12 +50,14 @@ class USL_ASFLIP(MPMSolver):
         **kwargs,
     ):
         super().__init__(
-            config=config,
             material_points=material_points,
             grid=grid,
             constitutive_laws=constitutive_laws,
             forces=forces,
-            callbacks=callbacks,
+            dim=dim,
+            ppc=ppc,
+            shapefunction=shapefunction,
+            output_dict=output_dict,
             **kwargs,
         )
 
@@ -62,7 +66,7 @@ class USL_ASFLIP(MPMSolver):
         self.beta_min = beta_min
         self.beta_max = beta_max
 
-        if self.config.shapefunction not in ["cubic", "quadratic"]:
+        if self.shapefunction not in ["cubic", "quadratic"]:
             raise NotImplementedError("Only cubic shapefunctions supported with ASFLIP")
 
         Dp = kwargs.get("Dp", None)
@@ -70,11 +74,11 @@ class USL_ASFLIP(MPMSolver):
         Bp_stack = kwargs.get("Bp_stack", None)
 
         if Dp is None:
-            if self.config.shapefunction == "cubic":
+            if self.shapefunction == "cubic":
                 self.Dp = (
                     (1.0 / 3.0) * self.grid.cell_size * self.grid.cell_size * jnp.eye(3)
                 )
-            elif self.config.shapefunction == "quadratic":
+            elif self.shapefunction == "quadratic":
                 self.Dp = (
                     (1.0 / 4.0) * self.grid.cell_size * self.grid.cell_size * jnp.eye(3)
                 )
@@ -148,17 +152,17 @@ class USL_ASFLIP(MPMSolver):
 
             scaled_mass = intr_shapef * intr_masses
             scaled_moments = scaled_mass * (
-                intr_velocities + affine_velocity.at[: self.config.dim].get()
+                intr_velocities + affine_velocity.at[: self.dim].get()
             )
 
             scaled_ext_force = intr_shapef * intr_ext_forces
             scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
 
             scaled_total_force = (
-                scaled_int_force.at[: self.config.dim].get() + scaled_ext_force
+                scaled_int_force.at[: self.dim].get() + scaled_ext_force
             )
 
-            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.config.dim].get()
+            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.dim].get()
 
             return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
@@ -233,7 +237,7 @@ class USL_ASFLIP(MPMSolver):
             # Pad velocities for plane strain
             intr_vels_nt_padded = jnp.pad(
                 intr_vels_nt,
-                self.config._padding,
+                self._padding,
                 mode="constant",
                 constant_values=0,
             )
@@ -280,7 +284,7 @@ class USL_ASFLIP(MPMSolver):
 
             p_Bp_next = jnp.sum(intr_Bp, axis=0)
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_Bp_next = p_Bp_next.at[2, 2].set(0.0)
 
             T = self.alpha * (p_velocities + delta_vels - vels_nt)
@@ -292,12 +296,12 @@ class USL_ASFLIP(MPMSolver):
                     jnp.isnan(p_velocities_next).any(),
                     "p_velocities_next is nan",
                 )
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0.0)
 
             p_F_next = (jnp.eye(3) + p_velgrads_next * dt) @ p_F
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_F_next = p_F_next.at[2, 2].set(1)
 
             p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
@@ -331,11 +335,9 @@ class USL_ASFLIP(MPMSolver):
             new_Bp_stack,
         ) = vmap_particles_update(
             new_intr_scaled_delta_vel_stack.reshape(
-                -1, shape_map._window_size, self.config.dim
+                -1, shape_map._window_size, self.dim
             ),
-            new_intr_scaled_vel_nt_stack.reshape(
-                -1, shape_map._window_size, self.config.dim
-            ),
+            new_intr_scaled_vel_nt_stack.reshape(-1, shape_map._window_size, self.dim),
             new_intr_scaled_velgrad_stack.reshape(-1, shape_map._window_size, 3, 3),
             new_intr_Bp_stack.reshape(-1, shape_map._window_size, 3, 3),
             material_points.velocity_stack,

@@ -1,7 +1,6 @@
 import inspect
-from functools import partial
-from re import X
-from typing import Optional, Self, Tuple
+
+from typing import Optional, Self, Tuple, Dict
 
 import equinox as eqx
 import jax
@@ -11,9 +10,8 @@ import equinox as eqx
 
 from ..common.base import Base
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
-from ..et_benchmarks.et_benchmarks import ETBenchmark
+from ..sip_benchmarks.sip_benchmarks import SIPBenchmark
 from ..material_points.material_points import MaterialPoints
-from .config import Config
 
 from ..common.types import TypeInt
 
@@ -31,8 +29,6 @@ def stress_update(L_next, material_points_prev, constitutive_law_prev, dt):
     return material_points_next, constitutive_law_next
 
 
-# @partial(jax.jit, static_argnames=("dt", "rtol", "atol", "max_steps"))
-@eqx.filter_jit
 def run_et_solver(
     solver,
     dt: float,
@@ -43,7 +39,7 @@ def run_et_solver(
     accumulate_list = []
     carry_list = []
 
-    for et_benchmark in solver.et_benchmarks:
+    for et_benchmark in solver.sip_benchmarks:
         carry, accumulate = mix_control(
             solver,
             solver.material_points,
@@ -59,7 +55,7 @@ def run_et_solver(
 
     # ensure that the list of output arrays is "flat"
     # with respect to number of deformation mode
-    if len(solver.et_benchmarks) == 1:
+    if len(solver.sip_benchmarks) == 1:
         accumulate_list = accumulate_list[0]
         carry_list = carry_list[0]
 
@@ -70,11 +66,11 @@ def mix_control(
     solver,
     material_points: MaterialPoints,
     constitutive_law: ConstitutiveLaw,
-    et_benchmark: ETBenchmark,
-    dt=0.0001,
-    rtol=1e-10,
-    atol=1e-2,
-    max_steps=20,
+    et_benchmark: SIPBenchmark,
+    dt,
+    rtol,
+    atol,
+    max_steps,
 ):
     # TODO have X_target become new X_0? or X_guess become X_0?
     if et_benchmark.X_control_stack is not None:
@@ -138,7 +134,7 @@ def apply_control(
     x_target=None,
     rtol=1e-3,
     atol=1e-2,
-    max_steps=20,
+    max_steps=100,
 ):
     def servo_controller(sol, return_aux=True):
         L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
@@ -181,60 +177,56 @@ def apply_control(
 
         R, aux = servo_controller(X_root, True)
         material_points_next, constitutive_law_next = aux
-    # jax.debug.breakpoint()
+
     return material_points_next, constitutive_law_next
 
 
-class ETSolver(Base):
+class SIPSolver(Base):
     """Element Test (ET) Solver. Applies element test loading conditions
     on one (or many) constitutive_law points."""
 
-    config: Config = eqx.field(static=True)
     material_points: MaterialPoints
 
     constitutive_law: ConstitutiveLaw
 
-    et_benchmarks: Tuple[ETBenchmark, ...]
+    sip_benchmarks: Tuple[SIPBenchmark, ...]
 
     _setup_done: bool = eqx.field(default=False)
 
     rtol: float = eqx.field(default=1e-10, static=True)
     atol: float = eqx.field(default=1e-2, static=True)
     max_steps: int = eqx.field(default=20, static=True)
-
-    num_steps: int
+    output_dict: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
 
     def __init__(
         self,
-        config: Config,
         constitutive_law: ConstitutiveLaw,
         material_points: MaterialPoints = None,
         rtol: float = 1e-10,
         atol: float = 1e-2,
         max_steps: int = 20,
-        et_benchmarks: Optional[Tuple[ETBenchmark, ...] | ETBenchmark] = None,
-        num_steps: TypeInt = 4000,
+        sip_benchmarks: Optional[Tuple[SIPBenchmark, ...] | SIPBenchmark] = None,
+        output_dict: Optional[dict | Tuple[str, ...]] = None,
         **kwargs,
     ) -> Self:
-        self.config = config
+        self.output_dict = output_dict
+
         self.constitutive_law = constitutive_law
 
         self.rtol = rtol
         self.atol = atol
         self.max_steps = max_steps
-        self.num_steps = num_steps
-        # self.step = step
 
         if material_points is None:
             material_points = MaterialPoints()
 
         self.material_points = material_points
 
-        self.et_benchmarks = (
-            et_benchmarks
-            if isinstance(et_benchmarks, tuple)
-            else (et_benchmarks,)
-            if et_benchmarks
+        self.sip_benchmarks = (
+            sip_benchmarks
+            if isinstance(sip_benchmarks, tuple)
+            else (sip_benchmarks,)
+            if sip_benchmarks
             else ()
         )
         super().__init__(**kwargs)
@@ -245,15 +237,15 @@ class ETSolver(Base):
             return self
 
         # setup deformation modes
-        new_et_benchmarks = []
+        new_sip_benchmarks = []
         new_material_points = self.material_points
-        for benchmark in self.et_benchmarks:
+        for benchmark in self.sip_benchmarks:
             new_deformation_mode, new_material_points = benchmark.init_state(
-                self.num_steps, new_material_points
+                new_material_points
             )
-            new_et_benchmarks.append(new_deformation_mode)
+            new_sip_benchmarks.append(new_deformation_mode)
 
-        new_et_benchmarks = tuple(new_et_benchmarks)
+        new_sip_benchmarks = tuple(new_sip_benchmarks)
 
         new_constitutive_law, new_material_points = self.constitutive_law.init_state(
             new_material_points
@@ -262,7 +254,7 @@ class ETSolver(Base):
         params = self.__dict__
 
         params.update(
-            et_benchmarks=new_et_benchmarks,
+            sip_benchmarks=new_sip_benchmarks,
             material_points=new_material_points,
             constitutive_law=new_constitutive_law,
             _setup_done=True,
@@ -270,126 +262,33 @@ class ETSolver(Base):
 
         return self.__class__(**params)
 
-    def run_once_update(self: Self):
-        assert len(self.et_benchmarks) == 1, "Only one deformation mode is supported"
+    @eqx.filter_jit
+    def run(self, dt: float):
+        accumulate_list = []
 
-        et_benchmark = self.et_benchmarks[0]
+        carry_list = []
 
-        if et_benchmark.X_control_stack is not None:
-            X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
-            x_target = et_benchmark.X_control_stack.at[self.step].get()
-        else:
-            X_0 = None
-            x_target = None
+        for et_benchmark in self.sip_benchmarks:
+            carry, accumulate = mix_control(
+                self,
+                self.material_points,
+                self.constitutive_law,
+                et_benchmark,
+                dt,
+                self.rtol,
+                self.atol,
+                self.max_steps,
+            )
+            accumulate_list.append(accumulate)
+            carry_list.append(carry)
 
-        material_points_next, constitutive_law_next = apply_control(
-            et_benchmark.L_control_stack.at[self.step].get(),
-            self.material_points,
-            self.constitutive_law,
-            et_benchmark,
-            self.config.dt,
-            X_0,
-            x_target,
-            self.rtol,
-            self.atol,
-            self.max_steps,
-        )
+        # ensure that the list of output arrays is "flat"
+        # with respect to number of deformation mode
+        if len(self.sip_benchmarks) == 1:
+            accumulate_list = accumulate_list[0]
+            carry_list = carry_list[0]
 
-        accumulate = self.get_output(
-            material_points_next,
-            constitutive_law_next,
-            self.material_points,
-            self.constitutive_law,
-        )
-
-        new_self = eqx.tree_at(
-            lambda state: (state.material_points, state.constitutive_law, state.step),
-            self,
-            (material_points_next, constitutive_law_next, self.step + 1),
-        )
-
-        return new_self, accumulate
-
-    # @jax.jit
-    # def run_jit(self: Self, return_carry: bool = False):
-    #     return self.run(return_carry)
-
-    # def run(self: Self, return_carry: bool = False):
-    #     accumulate_list = []
-    #     carry_list = []
-
-    #     for et_benchmark in self.et_benchmarks:
-    #         carry, accumulate = self.mix_control(
-    #             self.material_points, self.constitutive_law, et_benchmark
-    #         )
-    #         accumulate_list.append(accumulate)
-    #         carry_list.append(carry)
-
-    #     # ensure that the list of output arrays is "flat"
-    #     # with respect to number of deformation mode
-    #     if len(self.et_benchmarks) == 1:
-    #         accumulate_list = accumulate_list[0]
-    #         carry_list = carry_list[0]
-
-    #     if return_carry:
-    #         return carry_list, accumulate_list
-    #     return accumulate_list
-
-    # def mix_control(
-    #     self: Self,
-    #     material_points: MaterialPoints,
-    #     constitutive_law: ConstitutiveLaw,
-    #     et_benchmark: ETBenchmark,
-    # ):
-    #     # TODO have X_target become new X_0? or X_guess become X_0?
-    #     if et_benchmark.X_control_stack is not None:
-    #         X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
-    #     else:
-    #         X_0 = None
-
-    #     def scan_fn(carry, xs):
-    #         (
-    #             constitutive_law_prev,
-    #             material_points_prev,
-    #             step,
-    #         ) = carry
-
-    #         L_control, x_target = xs
-
-    #         material_points_next, constitutive_law_next = apply_control(
-    #             L_control,
-    #             material_points_prev,
-    #             constitutive_law_prev,
-    #             et_benchmark,
-    #             self.config.dt,
-    #             X_0,
-    #             x_target,
-    #             self.rtol,
-    #             self.atol,
-    #             self.max_steps,
-    #         )
-
-    #         accumulate = self.get_output(
-    #             material_points_next,
-    #             constitutive_law_next,
-    #             material_points_prev,
-    #             constitutive_law_prev,
-    #         )
-    #         # accumulate = []
-    #         carry = (constitutive_law_next, material_points_next, step + 1)
-
-    #         return carry, accumulate
-
-    #     carry, accumulate = jax.lax.scan(
-    #         scan_fn,
-    #         (constitutive_law, material_points, 0),  # carry
-    #         (
-    #             et_benchmark.L_control_stack,
-    #             et_benchmark.X_control_stack,
-    #         ),  # control
-    #     )
-
-    #     return carry, accumulate
+        return accumulate_list
 
     def get_output(
         self,
@@ -400,7 +299,7 @@ class ETSolver(Base):
         constitutive_law_prev=None,
     ):
         accumulate = []
-        for key in self.config.output:
+        for key in self.output_dict:
             output = None
             # workaround around
             # properties of one class depend on properties of another

@@ -3,14 +3,18 @@ from functools import partial
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from typing_extensions import Callable, Optional, Self, Tuple
+from typing_extensions import Optional, Self, Tuple
 
-from ..common.types import TypeFloatMatrix3x3, TypeFloatMatrix3x3PStack, TypeInt
+from ..common.types import (
+    TypeFloat,
+    TypeFloatMatrix3x3,
+    TypeFloatMatrix3x3PStack,
+    TypeInt,
+)
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..forces.force import Force
 from ..grid.grid import Grid
 from ..material_points.material_points import MaterialPoints
-from ..solvers.config import Config
 from .mpm_solver import MPMSolver
 
 
@@ -35,27 +39,32 @@ class USL_APIC(MPMSolver):
 
     def __init__(
         self,
-        config: Config,
+        *,
+        dim,
         material_points: MaterialPoints,
         grid: Grid,
         constitutive_laws: Optional[
             Tuple[ConstitutiveLaw, ...] | ConstitutiveLaw
         ] = None,
         forces: Optional[Tuple[Force, ...]] = None,
-        callbacks: Optional[Tuple[Callable, ...] | Callable] = None,
+        ppc=1,
+        shapefunction="cubic",
+        output_dict: Optional[dict | Tuple[str, ...]] = None,
         **kwargs,
     ):
         super().__init__(
-            config=config,
             material_points=material_points,
             grid=grid,
             constitutive_laws=constitutive_laws,
             forces=forces,
-            callbacks=callbacks,
+            dim=dim,
+            ppc=ppc,
+            shapefunction=shapefunction,
+            output_dict=output_dict,
             **kwargs,
         )
 
-        if self.config.shapefunction != "cubic":
+        if self.shapefunction != "cubic":
             raise NotImplementedError("Only cubic shapefunctions supported with APIC")
 
         Dp = kwargs.get("Dp", None)
@@ -79,7 +88,7 @@ class USL_APIC(MPMSolver):
         else:
             self.Bp_stack = Bp_stack
 
-    def update(self: Self, step: TypeInt = 0) -> Self:
+    def update(self: Self, step: TypeInt = 0, dt: TypeFloat = 1e-3) -> Self:
         material_points = self.material_points._refresh()
 
         material_points, forces = self._update_forces_on_points(
@@ -87,20 +96,22 @@ class USL_APIC(MPMSolver):
             grid=self.grid,
             forces=self.forces,
             step=step,
+            dt=dt,
         )
 
-        new_shape_map, grid = self.p2g(material_points=material_points, grid=self.grid)
-
+        new_shape_map, grid = self.p2g(
+            material_points=material_points, grid=self.grid, dt=dt
+        )
         grid, forces = self._update_forces_grid(
-            material_points=material_points, grid=grid, forces=forces, step=step
+            material_points=material_points, grid=grid, forces=forces, step=step, dt=dt
         )
 
         self, material_points = self.g2p(
-            material_points=material_points, grid=grid, shape_map=new_shape_map
+            material_points=material_points, grid=grid, shape_map=new_shape_map, dt=dt
         )
 
         material_points, constitutive_laws = self._update_constitutive_laws(
-            material_points, self.constitutive_laws
+            material_points, self.constitutive_laws, dt=dt
         )
 
         return eqx.tree_at(
@@ -115,7 +126,7 @@ class USL_APIC(MPMSolver):
             (material_points, grid, constitutive_laws, forces, new_shape_map),
         )
 
-    def p2g(self, material_points, grid):
+    def p2g(self, material_points, grid, dt):
         def vmap_intr_p2g(point_id, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = material_points.mass_stack.at[point_id].get()
             intr_volumes = material_points.volume_stack.at[point_id].get()
@@ -131,16 +142,16 @@ class USL_APIC(MPMSolver):
 
             scaled_mass = intr_shapef * intr_masses
             scaled_moments = scaled_mass * (
-                intr_velocities + affine_velocity.at[: self.config.dim].get()
+                intr_velocities + affine_velocity.at[: self.dim].get()
             )
             scaled_ext_force = intr_shapef * intr_ext_forces
             scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
 
             scaled_total_force = (
-                scaled_int_force.at[: self.config.dim].get() + scaled_ext_force
+                scaled_int_force.at[: self.dim].get() + scaled_ext_force
             )
 
-            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.config.dim].get()
+            scaled_normal = (intr_shapef_grad * intr_masses).at[: self.dim].get()
 
             return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
 
@@ -173,7 +184,7 @@ class USL_APIC(MPMSolver):
         )
         new_normal_stack = sum_interactions(grid.normal_stack, scaled_normal_stack)
 
-        nodes_moment_nt_stack = new_moment_stack + new_force_stack * self.config.dt
+        nodes_moment_nt_stack = new_moment_stack + new_force_stack * dt
 
         return new_shape_map, eqx.tree_at(
             lambda state: (
@@ -186,7 +197,7 @@ class USL_APIC(MPMSolver):
             (new_mass_stack, new_moment_stack, nodes_moment_nt_stack, new_normal_stack),
         )
 
-    def g2p(self, material_points, grid, shape_map) -> Tuple[Self, MaterialPoints]:
+    def g2p(self, material_points, grid, shape_map, dt) -> Tuple[Self, MaterialPoints]:
         def vmap_intr_g2p(intr_hashes, intr_shapef, intr_shapef_grad, intr_dist):
             intr_masses = grid.mass_stack.at[intr_hashes].get()
             intr_moments_nt = grid.moment_nt_stack.at[intr_hashes].get()
@@ -203,7 +214,7 @@ class USL_APIC(MPMSolver):
             # Pad velocities for plane strain
             intr_vels_nt_padded = jnp.pad(
                 intr_vels_nt,
-                self.config._padding,
+                self._padding,
                 mode="constant",
                 constant_values=0,
             )
@@ -241,19 +252,19 @@ class USL_APIC(MPMSolver):
 
             p_Bp_next = jnp.sum(intr_Bp, axis=0)
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_Bp_next = p_Bp_next.at[2, 2].set(0)
 
             p_velocities_next = vels_nt
 
-            p_positions_next = p_positions + vels_nt * self.config.dt
+            p_positions_next = p_positions + vels_nt * dt
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0)
 
-            p_F_next = (jnp.eye(3) + p_velgrads_next * self.config.dt) @ p_F
+            p_F_next = (jnp.eye(3) + p_velgrads_next * dt) @ p_F
 
-            if self.config.dim == 2:
+            if self.dim == 2:
                 p_F_next = p_F_next.at[2, 2].set(1)
 
             p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
@@ -275,7 +286,7 @@ class USL_APIC(MPMSolver):
             new_Bp_stack,
         ) = vmap_particles_update(
             new_intr_scaled_vel_nt_stack.reshape(
-                -1, self.shape_map._window_size, self.config.dim
+                -1, self.shape_map._window_size, self.dim
             ),
             new_intr_scaled_velgrad_stack.reshape(
                 -1, self.shape_map._window_size, 3, 3

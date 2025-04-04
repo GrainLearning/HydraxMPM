@@ -66,6 +66,7 @@ dev = [
 plot = [
     "matplotlib>=3.9.2",
     "polyscope>=2.3.0",
+    "pyqt5>=5.15.11",
     "pyvista>=0.44.2",
     "scienceplots>=2.1.1",
 ]
