@@ -11,6 +11,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+uv.lock
+imgui.ini
+polyscope.ini
+settings.json
+
 flowdex/
 
 # C extensions
