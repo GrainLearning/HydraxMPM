@@ -60,9 +60,9 @@ surface = np.loadtxt(dir_path + "/surface.csv", delimiter=",")
 sim_outputs = get_files(sim_dir, "material_points")
 times = np.linspace(0, 1.0, len(sim_outputs))
 
-# Create figure with 3 vertical subplots
+
 fig, ax = plt.subplots(
-    nrows=3, figsize=(4, 4), dpi=300, layout="constrained", sharex=True
+    ncols=3, figsize=(8, 4), dpi=200, layout="constrained", sharey=True
 )
 # Plot experimental data in bottom subplot
 ax.flat[2].plot(
@@ -128,12 +128,11 @@ for i, index in enumerate(selected_indices):
     ax.flat[i].set_xlim((0, 0.52))
     ax.flat[i].set_ylim((0, 0.15))
     ax.flat[i].grid(True, linestyle="--")
-    ax.flat[i].set_ylabel("y [m]")
     ax.flat[i].set_title(f"t={times[index]:.2f} s")
 
+    ax.flat[i].set_xlabel("x [m] ")
 
-ax.flat[i].set_xlabel("x [m]")  # Shared xlabel for all subplots
-
+ax.flat[0].set_ylabel("y [m] ")  # Shared ylabel for all subplots
 
 # Custom legend creation with adjusted marker sizes
 # two reasons why custom legend is needed:
@@ -162,6 +161,9 @@ fig.legend(
     labels,
     ncols=3,
     loc="outside lower center",
+    bbox_to_anchor=(0.5, 0.2),
+    fancybox=True,
+    shadow=True,
     columnspacing=0.4,
     markerscale=1,  # Disable automatic scaling since we set sizes manually
 )

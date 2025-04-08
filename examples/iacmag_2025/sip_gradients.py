@@ -1,6 +1,8 @@
 import os
 from re import L
 
+from matplotlib import markers
+
 
 os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Hide GPUs from all libraries (including JAX)
 os.environ["JAX_PLATFORMS"] = "cpu"
@@ -214,7 +216,7 @@ for mi, model in enumerate(models):
     fig, ax = plt.subplots(
         ncols=3,
         figsize=(8, 3),
-        dpi=300,
+        dpi=200,
         layout="constrained",
     )
 
@@ -223,6 +225,9 @@ for mi, model in enumerate(models):
         target_q_p_stack,
         color=cycle[0],
         label="target",
+        marker="X",
+        markersize=8,
+        markevery=[len(t_stack) - 1],
     )
 
     ax.flat[0].plot(
@@ -233,6 +238,9 @@ for mi, model in enumerate(models):
         + "$\\lambda$"
         + f"={p2_example:.2f} )",
         color=cycle[5],
+        marker="^",
+        markersize=8,
+        markevery=[len(t_stack) - 1],
     )
 
     ax.flat[0].grid(True, linestyle="--", alpha=0.5)  # add grid.

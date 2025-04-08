@@ -72,4 +72,12 @@
 
 
 
-- [ ] Rename ETSolver, ETBenchmarks to SIP
+
+- Add detailed table of models in documentation[]
+<!-- 
+| Model                   | Description                                                                                                | Type          |
+| :---------------------- | :--------------------------------------------------------------------------------------------------------- | :------------ |
+| Non-associated Drucker-Prager | Standard model for frictional materials (soil, rock) with optional cohesion.                              | Elasto-plastic |
+| Modified Cam-Clay     | Critical state soil mechanics model for clays/silts, based on double-logarithmic formulation.                  | Elasto-plastic |
+| Newtonian Fluid         | Basic viscous fluid model.                                                                                   | Viscous Fluid |
+| μ(I) Rheology           | Viscoplastic model tailored for dense granular flows, incorporating pressure-dependent compression.           | Visco-plastic | -->

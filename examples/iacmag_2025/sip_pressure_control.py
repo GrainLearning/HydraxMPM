@@ -126,7 +126,7 @@ sip_benchmarks = (
 fig, axes = plt.subplots(
     ncols=3,
     figsize=(8, 3),
-    dpi=300,
+    dpi=200,
     layout="constrained",
 )
 dt = 0.00001
