@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 
 print(jax.devices("gpu"))
-jax.config.update("jax_default_device", jax.devices("gpu")[1])
+jax.config.update("jax_default_device", jax.devices("gpu")[0])
 
 import hydraxmpm as hdx
 
@@ -16,12 +16,13 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 column_width = 0.2  # [m]
 column_height = 0.1  # [m]
 
-domain_width = 0.6
-domain_height = 0.11
+domain_width = 0.6  # [m]
+domain_height = 0.11  # [m]
 
-ppc = 2
+cell_size = 0.0025  # [m]
 
-cell_size = 0.0025
+ppc = 2  # particles per cell
+
 
 sep = cell_size / ppc
 
@@ -35,17 +36,17 @@ xv, yv = jnp.meshgrid(x, y)
 position_stack = jnp.array(list(zip(xv.flatten(), yv.flatten())))
 
 
-fric_angle = 19.8
-fric_angle_rad = jnp.deg2rad(fric_angle)
-rho_0 = 2650.0
+fric_angle = 19.8  # [degrees]
+rho_0 = 2650.0  # [kg/m^3]
 K = 7e5  # [Pa]
 
 # matching Mohr-Coulomb criterion under triaxial extension conditions
+fric_angle_rad = jnp.deg2rad(fric_angle)
 mu = (
     6 * jnp.sin(fric_angle_rad) / (jnp.sqrt(3) * (3 + jnp.sin(jnp.deg2rad(fric_angle))))
 )
 
-
+# select model here
 model_index = 0
 
 models = (
@@ -107,7 +108,7 @@ solver = hdx.USL_ASFLIP(
         hdx.SlipStickBoundary(x0="slip", x1="slip", y0="stick", y1="slip"),
         hdx.Gravity(gravity=jnp.array([0.0, -9.8])),
     ),
-    output_dict=dict(
+    output_vars=dict(
         material_points=(
             "p_stack",
             "position_stack",

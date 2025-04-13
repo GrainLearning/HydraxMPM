@@ -1,5 +1,10 @@
-from functools import partial
-from sqlite3 import adapt
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 from typing import Callable, Optional, Self, Tuple, Dict
 
 import equinox as eqx
@@ -86,7 +91,7 @@ class MPMSolver(Base):
 
     _padding: tuple = eqx.field(init=False, static=True, repr=False)
 
-    output_dict: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
+    output_vars: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
 
     def __init__(
         self,
@@ -100,7 +105,7 @@ class MPMSolver(Base):
         forces: Optional[Tuple[Force, ...] | Force] = None,
         ppc=1,
         shapefunction="linear",
-        output_dict: Optional[dict | Tuple[str, ...]] = None,
+        output_vars: Optional[dict | Tuple[str, ...]] = None,
         **kwargs,
     ) -> Self:
         assert material_points.position_stack.shape[1] == dim, (
@@ -112,7 +117,7 @@ class MPMSolver(Base):
             "the origin or the dim is set incorrectly."
         )
 
-        self.output_dict = output_dict
+        self.output_vars = output_vars
 
         self.dim = dim
         self.ppc = ppc
@@ -269,7 +274,7 @@ class MPMSolver(Base):
         return dt
 
     def get_output(self, new_solver, dt):
-        material_points_output = self.output_dict.get("material_points", ())
+        material_points_output = self.output_vars.get("material_points", ())
 
         material_point_arrays = {}
         for key in material_points_output:
@@ -290,7 +295,7 @@ class MPMSolver(Base):
             material_point_arrays[key] = output
 
         shape_map_arrays = {}
-        shape_map_output = self.output_dict.get("shape_map", ())
+        shape_map_output = self.output_vars.get("shape_map", ())
 
         for key in shape_map_output:
             output = new_solver.shape_map.__getattribute__(key)
@@ -303,7 +308,7 @@ class MPMSolver(Base):
             shape_map_arrays[key] = output
 
         forces_arrays = {}
-        forces_output = self.output_dict.get("forces", ())
+        forces_output = self.output_vars.get("forces", ())
         for key in forces_output:
             for force in new_solver.forces:
                 key_array = force.__dict__.get(key, None)
@@ -318,7 +323,7 @@ class MPMSolver(Base):
         *,
         total_time: float,
         store_interval: float,
-        adaptive=True,
+        adaptive=False,
         dt: Optional[float] = 0.0,
         dt_alpha: Optional[float] = 0.5,
         dt_max: Optional[float] = None,

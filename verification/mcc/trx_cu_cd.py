@@ -56,17 +56,17 @@ models = (
 
 
 sip_benchmarks = (
-    hdx.TRX_CU(
-        deps_zz_dt=4.0,
+    hdx.TriaxialConsolidatedUndrained(
+        deps_zz_dt=-4.0,
         p0=p_0,
-        num_steps=4000,
+        num_steps=40000,
         init_material_points=True,
         other=dict(type="TRX_CU"),
     ),
-    hdx.TRX_CD(
-        deps_zz_dt=4.0,
+    hdx.TriaxialConsolidatedDrained(
+        deps_zz_dt=-4.0,
         p0=p_0,
-        num_steps=4000,
+        num_steps=40000,
         init_material_points=True,
         other=dict(type="TRX_CD"),
     ),
@@ -84,7 +84,7 @@ for model in models:
             material_points=hdx.MaterialPoints(
                 p_stack=jnp.array([p_0]),
             ),
-            output_dict=(
+            output_vars=(
                 "p_stack",
                 "q_stack",
                 "specific_volume_stack",
@@ -99,9 +99,9 @@ for model in models:
             p_stack,
             q_stack,
             specific_volume_stack,
-        ) = solver.run(0.0001)
+        ) = solver.run(0.00001)
 
-        t_stack = jnp.arange(0, sip_benchmark.num_steps) * 0.0001
+        t_stack = jnp.arange(0, sip_benchmark.num_steps) * 0.00001
 
         hdx.make_plot(
             ax,

@@ -1,3 +1,11 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
+
 def make_plot(
     ax,
     x,
@@ -13,6 +21,7 @@ def make_plot(
     ymargin=None,
     label=None,
     start_end_markersize=None,
+    return_start_end_markers=False,
     **kwargs,
 ):
     import matplotlib.pyplot as plt
@@ -24,10 +33,10 @@ def make_plot(
     out = ax.plot(x, y, label=label, **kwargs)
     (line,) = out
     if start_end_markers:
-        ax.plot(
+        out_ms = ax.plot(
             x[0], y[0], ".", color=line.get_color(), markersize=start_end_markersize
         )
-        ax.plot(
+        out_me = ax.plot(
             x[-1], y[-1], "x", color=line.get_color(), markersize=start_end_markersize
         )
 
@@ -58,4 +67,8 @@ def make_plot(
         ax.margins(x=xmargin)
     if ymargin:
         ax.margins(y=ymargin)
-    return out
+
+    if return_start_end_markers:
+        return out, out_ms, out_me
+    else:
+        return out

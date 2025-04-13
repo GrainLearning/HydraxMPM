@@ -57,7 +57,7 @@ def run_mcc(M, lam, solver: hdx.SIPSolver):
     )
 
     ln_v_stack = new_solver1.constitutive_law.get_ln_v0(
-        new_solver1.material_points.p_stack
+        new_solver1.material_points.stress_stack.at[0].get()
     )
 
     # current density and slope of icl is coupled
@@ -123,19 +123,19 @@ models = (
 dgamma_dt_start = 0.5
 
 
-x_slow = dgamma_dt_start * 2
+x_slow = dgamma_dt_start
 
 
 num_steps = 2500
 x1_stack = jnp.ones(num_steps) * x_slow
 
 
-sip_benchmark = hdx.S_CD(
+sip_benchmark = hdx.ConstantPressureShear(
     deps_xy_dt=x1_stack,
     num_steps=num_steps,
     p0=p_0,
     init_material_points=True,
-    other=dict(type="S_CD"),
+    other=dict(type="ConstantPressureShear"),
 )
 
 
@@ -154,7 +154,7 @@ for mi, model in enumerate(models):
         material_points=hdx.MaterialPoints(
             p_stack=jnp.array([p_0]),
         ),
-        output_dict=("q_p_stack",),
+        output_vars=("q_p_stack",),
         constitutive_law=model,
         sip_benchmarks=sip_benchmark,
     )

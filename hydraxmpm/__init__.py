@@ -1,3 +1,11 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
+
 """HydraxMPM library.
 
 Built with JAX.
@@ -16,8 +24,13 @@ from .constitutive_laws.modifiedcamclay import ModifiedCamClay
 from .constitutive_laws.mu_i_rheology_incompressible import MuI_incompressible
 from .constitutive_laws.newtonfluid import NewtonFluid
 from .constitutive_laws.druckerprager import DruckerPrager
-from .constitutive_laws.uh import UH
-from .sip_benchmarks.sip_benchmarks import TRX_CU, TRX_CD, S_CD, ISO_C
+
+from .sip_benchmarks.sip_benchmarks import (
+    TriaxialConsolidatedUndrained,
+    TriaxialConsolidatedDrained,
+    ConstantPressureShear,
+    IsotropicCompression,
+)
 
 from .forces.boundary import Boundary
 from .forces.slipstickboundary import SlipStickBoundary
@@ -43,10 +56,12 @@ from .plotting import helpers, viewer
 from .utils.math_helpers import (
     get_sym_tensor_stack,
     get_pressure,
+    get_pressure_stack,
     get_dev_stress,
     get_volumetric_strain,
     get_dev_strain,
     get_q_vm,
+    get_q_vm_stack,
 )
 
 from .common.types import TypeFloat, TypeFloatMatrix3x3, TypeInt, TypeFloatScalarPStack

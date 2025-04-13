@@ -13,6 +13,7 @@ dependencies = [
     "jax[cuda12]>=0.4.35",
     "jaxtyping>=0.2.37",
     "typeguard==2.13.3",
+    "polyscope>=2.3.0",
 
 ]
 authors = [
@@ -32,21 +33,6 @@ classifiers = [
 ]
 urls = {repository = "https://github.com/GrainLearning/HydraxMPM" }
 
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.uv]
-default-groups = ["plot","dev"]
-
-[tool.hatch.build]
-include = ["hydraxmpm/*"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["hydraxmpm"]
-
-
 [dependency-groups]
 dev = [
     "mkdocs>=1.6.1",
@@ -65,11 +51,29 @@ dev = [
 ]
 plot = [
     "matplotlib>=3.9.2",
-    "polyscope>=2.3.0",
+
     "pyqt5>=5.15.11",
     "pyvista>=0.44.2",
     "scienceplots>=2.1.1",
+    "seaborn>=0.13.2",
+    "pillow>=11.1.0",
 ]
+
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+default-groups = ["plot","dev"]
+
+[tool.hatch.build]
+include = ["hydraxmpm/*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["hydraxmpm"]
+
 
 
 

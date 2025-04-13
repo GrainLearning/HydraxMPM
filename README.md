@@ -24,6 +24,7 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
 <p align="center"> 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/_static/sip_animation_dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="docs/_static/sip_animation_light.gif">
     <img alt="Animation demonstrating HydraxMPM simulation (light/dark mode versions)" src="docs/_static/sip_animation_light.gif">
   </picture>
 </p>
@@ -34,15 +35,14 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
 <table style="margin: 0px auto;" align="center" >
   <tr>
     <td align="center" valign="top"  padding="0 15px 0 0">
-      <!-- First Image (SS): Light and Dark versions -->
-<!--       <img src="docs/_static/mpm_models_ss_dark,.png#gh-light-mode-only" alt="MPM simulation SS (light mode)" width="300"> -->
-      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_light.png">
-      <img src="docs/_static/mpm_models_ss_dark.png" alt="MPM simulation SS (light mode)" height="300">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/_static/mpm_models_ss_light.png">
+      <img src="docs/_static/mpm_models_ss_light.png" alt="MPM simulation SS (light mode)" height="300">
     </td>
     <td align="center" valign="top"  padding="0 15px 0 0">
-      <!-- Second Image (KE): Light and Dark versions -->
-      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_light.png">
-      <img src="docs/_static/mpm_models_ke_dark.png" alt="MPM simulation KE (light mode)" height="300">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/_static/mpm_models_ke_light.png">
+      <img src="docs/_static/mpm_models_ke_light.png" alt="MPM simulation KE (light mode)" height="300">
     </td>
   </tr>
 </table>
@@ -76,14 +76,14 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
 1.  **Install uv:** Follow instructions [here](https://docs.astral.sh/uv/getting-started/installation/).
 2.  **Clone & Install Dependencies:**
     ```bash
-    git clone git@github.com:GrainLearning/HydraxMPM.git && cd HydraxMPM
+    git clone https://github.com/GrainLearning/HydraxMPM.git && cd HydraxMPM
     uv sync
     ```
 3.  **Run Example:**
     ```bash
-    uv run examples/bvp/dambreak/dambreak.py
+    uv run ./examples/dambreak/dambreak.py
     ```
-    *(Output in `./examples/dambreak/`)*
+    *(Output in `./examples/dambreak/output`)*
 
 
 

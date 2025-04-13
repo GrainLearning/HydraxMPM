@@ -1,3 +1,10 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 from functools import partial
 from typing import Callable, Optional, Self, Tuple
 

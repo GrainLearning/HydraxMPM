@@ -41,7 +41,7 @@ models = (
 
 
 sip_benchmarks = (
-    hdx.ISO_C(  # tension
+    hdx.IsotropicCompression(  # tension
         deps_xx_yy_zz_dt=-1.0,
         p0=p_0,
         num_steps=1000,
@@ -61,7 +61,7 @@ for model in models:
             material_points=hdx.MaterialPoints(
                 p_stack=jnp.array([p_0]),
             ),
-            output_dict=(
+            output_vars=(
                 "p_stack",
                 "q_stack",
                 "specific_volume_stack",

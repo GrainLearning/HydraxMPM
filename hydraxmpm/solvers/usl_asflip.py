@@ -1,3 +1,10 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 from functools import partial
 
 import equinox as eqx
@@ -150,13 +157,27 @@ class USL_ASFLIP(MPMSolver):
                 intr_Bp @ jnp.linalg.inv(self.Dp)
             ) @ intr_dist  # intr_dist is 3D
 
+            if self.dim == 2:
+                affine_velocity = eqx.error_if(
+                    affine_velocity,
+                    jnp.abs(affine_velocity.at[2].get()) > 1e-12,
+                    "error out of plane affine velocity detected for plane strain",
+                )
             scaled_mass = intr_shapef * intr_masses
             scaled_moments = scaled_mass * (
                 intr_velocities + affine_velocity.at[: self.dim].get()
             )
 
             scaled_ext_force = intr_shapef * intr_ext_forces
+
             scaled_int_force = -1.0 * intr_volumes * intr_stresses @ intr_shapef_grad
+
+            if self.dim == 2:
+                scaled_int_force = eqx.error_if(
+                    scaled_int_force,
+                    jnp.abs(scaled_int_force.at[2].get()) > 1e-12,
+                    "error out of plane forces detected for plane strain",
+                )
 
             scaled_total_force = (
                 scaled_int_force.at[: self.dim].get() + scaled_ext_force

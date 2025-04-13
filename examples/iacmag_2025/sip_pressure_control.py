@@ -29,7 +29,7 @@ jax.config.update("jax_enable_x64", True)
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
-mpl.rcParams["lines.linewidth"] = 2
+mpl.rcParams["lines.linewidth"] = 2.0
 
 cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
@@ -94,8 +94,8 @@ dgamma_dt_end = 50.0
 
 print(dgamma_dt_start, dgamma_dt_end)
 
-x_slow = dgamma_dt_start * 2
-x_fast = dgamma_dt_end * 2
+x_slow = dgamma_dt_start
+x_fast = dgamma_dt_end
 
 num_steps_s1 = 25000
 x1_stack = jnp.ones(num_steps_s1) * x_slow
@@ -112,13 +112,13 @@ x3_stack = jnp.ones(num_steps_s3) * x_fast
 x_total_stack = jnp.concat((x1_stack, x2_stack, x3_stack))
 
 sip_benchmarks = (
-    hdx.S_CD(
+    hdx.ConstantPressureShear(
         deps_xy_dt=jnp.concat((x1_stack, x2_stack, x3_stack)),
         # deps_xy_dt=4.0,
         num_steps=x_total_stack.shape[0],
         p0=p_0,
         init_material_points=True,
-        other=dict(type="S_CD"),
+        other=dict(type="ConstantPressureShear"),
     ),
 )
 
@@ -134,10 +134,8 @@ dt = 0.00001
 for mi, model in enumerate(models):
     for ie, sip_benchmark in enumerate(sip_benchmarks):
         solver = hdx.SIPSolver(
-            material_points=hdx.MaterialPoints(
-                p_stack=jnp.array([p_0]),
-            ),
-            output_dict=("p_stack", "q_stack", "eps_v_stack", "specific_volume_stack"),
+            material_points=hdx.MaterialPoints(p_stack=jnp.array([p_0])),
+            output_vars=("p_stack", "q_stack", "eps_v_stack", "specific_volume_stack"),
             constitutive_law=model,
             sip_benchmarks=sip_benchmark,
         )

@@ -1,3 +1,10 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 from typing import Any, Optional
 
 import equinox as eqx
@@ -22,7 +29,7 @@ class SIPBenchmark(Base):
         return stress_guest - stress_target
 
 
-class TRX_CU(SIPBenchmark):
+class TriaxialConsolidatedUndrained(SIPBenchmark):
     """
     Triaxial consolidated undrained test
 
@@ -83,9 +90,9 @@ class TRX_CU(SIPBenchmark):
             deps_r_dt = -1 / 2 * deps_zz_dt
 
             L = jnp.zeros((3, 3))
-            L = L.at[0, 0].set(-(0.5) * deps_r_dt)
-            L = L.at[1, 1].set(-(0.5) * deps_r_dt)
-            L = L.at[2, 2].set(-(0.5) * deps_zz_dt)
+            L = L.at[0, 0].set(deps_r_dt)
+            L = L.at[1, 1].set(deps_r_dt)
+            L = L.at[2, 2].set(deps_zz_dt)
             return L
 
         L_control_stack = jax.vmap(get_L)(deps_zz_dt_stack)
@@ -102,7 +109,7 @@ class TRX_CU(SIPBenchmark):
                     jnp.array(self.p0)
                 )
 
-        return TRX_CU(
+        return TriaxialConsolidatedUndrained(
             deps_zz_dt=self.deps_zz_dt,
             p0=self.p0,
             num_steps=self.num_steps,
@@ -110,9 +117,9 @@ class TRX_CU(SIPBenchmark):
         ), new_material_points
 
 
-class TRX_CD(SIPBenchmark):
+class TriaxialConsolidatedDrained(SIPBenchmark):
     """
-    Triaxial consolidated udrained test
+    Triaxial consolidated drained test
 
     # in this test the stress ratio is kept constant
 
@@ -131,7 +138,7 @@ class TRX_CD(SIPBenchmark):
     >>> L =
     >>> [?,0,0]
     >>> [',?,0]
-    >>> [',',-(0.5)*deps_zz_dt]
+    >>> [',',-deps_zz_dt]
 
     with
     >>> sigma =
@@ -184,7 +191,7 @@ class TRX_CD(SIPBenchmark):
             L = jnp.zeros((3, 3))
             # L = L.at[0, 0].set(-(0.5) * deps_r_dt)
             # L = L.at[1, 1].set(-(0.5) * deps_r_dt)
-            L = L.at[2, 2].set(-(0.5) * deps_zz_dt)
+            L = L.at[2, 2].set(deps_zz_dt)
             return L
 
         L_control_stack = jax.vmap(get_L)(deps_zz_dt_stack)
@@ -201,7 +208,7 @@ class TRX_CD(SIPBenchmark):
                     jnp.array(self.p0)
                 )
 
-        return TRX_CD(
+        return TriaxialConsolidatedDrained(
             deps_zz_dt=self.deps_zz_dt,
             p0=self.p0,
             num_steps=self.num_steps,
@@ -217,7 +224,7 @@ class TRX_CD(SIPBenchmark):
         return R_norm**2
 
 
-class S_CD(SIPBenchmark):
+class ConstantPressureShear(SIPBenchmark):
     """
 
     Pressure controlled shear or drained shear
@@ -270,7 +277,7 @@ class S_CD(SIPBenchmark):
 
         def get_L(deps_xy_dt):
             L = jnp.zeros((3, 3))
-            L = L.at[0, 1].set(deps_xy_dt / 2)
+            L = L.at[0, 1].set(deps_xy_dt)
             return L
 
         L_control_stack = jax.vmap(get_L)(deps_xy_dt_stack)
@@ -286,7 +293,7 @@ class S_CD(SIPBenchmark):
                 p_stack.at[0].get()
             )
 
-        return S_CD(
+        return ConstantPressureShear(
             deps_xy_dt=self.deps_xy_dt,
             p0=self.p0,
             num_steps=self.num_steps,
@@ -298,7 +305,7 @@ class S_CD(SIPBenchmark):
         return get_pressure(stress_guest) - X_target
 
 
-class ISO_C(SIPBenchmark):
+class IsotropicCompression(SIPBenchmark):
     """
     Isotropic compression
 
@@ -352,9 +359,9 @@ class ISO_C(SIPBenchmark):
 
         def get_L(deps_xx_yy_zz_dt):
             L = jnp.zeros((3, 3))
-            L = L.at[0, 0].set(-deps_xx_yy_zz_dt / 2)
-            L = L.at[1, 1].set(-deps_xx_yy_zz_dt / 2)
-            L = L.at[2, 2].set(-deps_xx_yy_zz_dt / 2)
+            L = L.at[0, 0].set(-deps_xx_yy_zz_dt)
+            L = L.at[1, 1].set(-deps_xx_yy_zz_dt)
+            L = L.at[2, 2].set(-deps_xx_yy_zz_dt)
             return L
 
         L_control_stack = jax.vmap(get_L)(deps_xx_yy_zz_dt)
@@ -370,8 +377,8 @@ class ISO_C(SIPBenchmark):
                 p_stack.at[0].get()
             )
 
-        return S_CD(
-            deps_xy_dt=deps_xx_yy_zz_dt,
+        return IsotropicCompression(
+            deps_xx_yy_zz_dt=deps_xx_yy_zz_dt,
             p0=self.p0,
             num_steps=self.num_steps,
             L_control_stack=L_control_stack,

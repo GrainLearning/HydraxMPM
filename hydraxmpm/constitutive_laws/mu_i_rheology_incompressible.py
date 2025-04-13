@@ -1,3 +1,10 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 """Implementation, state and functions for isotropic linear elastic material."""
 
 from functools import partial
@@ -96,11 +103,12 @@ class MuI_incompressible(ConstitutiveLaw):
         rho_rho_0_stack = rho / self.rho_0
 
         vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
+        deps_dt_stack = material_points.deps_dt_stack
 
         new_stress_stack = vmap_update_ip(
             material_points.stress_stack,
             material_points.F_stack,
-            material_points.L_stack,
+            deps_dt_stack,
             rho_rho_0_stack,
         )
 
@@ -149,9 +157,6 @@ class MuI_incompressible(ConstitutiveLaw):
         deps_dev_dt = get_dev_strain(deps_dt)
 
         dgamma_dt = get_scalar_shear_strain(deps_dt)
-
-        # stress free condition...
-        # rho_rho_0 = jnp.nanmax(jnp.array([rho_rho_0 - 1.0, 1e-6])) + 1.0
 
         p = self.K * (rho_rho_0 - 1.0)
 

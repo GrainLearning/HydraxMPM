@@ -1,3 +1,10 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 """Constitutive model for a nearly incompressible Newtonian fluid."""
 
 from functools import partial
@@ -13,12 +20,12 @@ from .constitutive_law import ConstitutiveLaw
 from ..utils.math_helpers import get_dev_strain
 
 
-def give_p(K, rho, rho_0, alpha):
-    return K * ((rho / rho_0) ** alpha - 1.0)
+def give_p(K, rho, rho_0, beta):
+    return K * ((rho / rho_0) ** beta - 1.0)
 
 
-def give_rho(K, rho_0, p, alpha):
-    return rho_0 * ((p / K) + 1) ** (1.0 / alpha)
+def give_rho(K, rho_0, p, beta):
+    return rho_0 * ((p / K) + 1) ** (1.0 / beta)
 
 
 class NewtonFluid(ConstitutiveLaw):
@@ -32,20 +39,20 @@ class NewtonFluid(ConstitutiveLaw):
 
     K: TypeFloat
     viscosity: TypeFloat
-    alpha: TypeFloat
+    beta: TypeFloat
 
     def __init__(
         self: Self,
         K: TypeFloat = 2.0 * 10**6,
         viscosity: TypeFloat = 0.001,
-        alpha: TypeFloat = 7.0,
+        beta: TypeFloat = 7.0,
         **kwargs,
     ) -> Self:
         """Initialize the nearly incompressible Newtonian fluid material."""
 
         self.K = K
         self.viscosity = viscosity
-        self.alpha = alpha
+        self.beta = beta
         super().__init__(**kwargs)
 
     def init_state(self: Self, material_points: MaterialPoints):
@@ -55,7 +62,7 @@ class NewtonFluid(ConstitutiveLaw):
             in_axes=(None, None, 0, None),
         )(give_rho)
 
-        rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack, self.alpha)
+        rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack, self.beta)
 
         deps_dt_stack = material_points.deps_dt_stack
         rho_rho_0_stack = rho / self.rho_0
@@ -96,7 +103,7 @@ class NewtonFluid(ConstitutiveLaw):
     ) -> TypeFloatMatrix3x3:
         deps_dev_dt = get_dev_strain(deps_dt)
 
-        p = self.K * ((rho_rho_0) ** self.alpha - 1.0)
+        p = self.K * ((rho_rho_0) ** self.beta - 1.0)
         p = jnp.clip(p, 0, None)
         return -p * jnp.eye(3) + self.viscosity * deps_dev_dt
 

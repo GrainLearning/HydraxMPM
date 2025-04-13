@@ -1,4 +1,9 @@
-"""Math helper functions for the pymudokon package."""
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
 
 import jax
 import jax.numpy as jnp

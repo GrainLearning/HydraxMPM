@@ -1,3 +1,10 @@
+# Copyright (c) 2024, Retiefasuarus
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+
+# -*- coding: utf-8 -*-
+
 import inspect
 
 from typing import Optional, Self, Tuple, Dict
@@ -196,7 +203,7 @@ class SIPSolver(Base):
     rtol: float = eqx.field(default=1e-10, static=True)
     atol: float = eqx.field(default=1e-2, static=True)
     max_steps: int = eqx.field(default=20, static=True)
-    output_dict: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
+    output_vars: Dict | Tuple[str, ...] = eqx.field(static=True)  # run sim
 
     def __init__(
         self,
@@ -206,10 +213,10 @@ class SIPSolver(Base):
         atol: float = 1e-2,
         max_steps: int = 20,
         sip_benchmarks: Optional[Tuple[SIPBenchmark, ...] | SIPBenchmark] = None,
-        output_dict: Optional[dict | Tuple[str, ...]] = None,
+        output_vars: Optional[dict | Tuple[str, ...]] = None,
         **kwargs,
     ) -> Self:
-        self.output_dict = output_dict
+        self.output_vars = output_vars
 
         self.constitutive_law = constitutive_law
 
@@ -299,7 +306,7 @@ class SIPSolver(Base):
         constitutive_law_prev=None,
     ):
         accumulate = []
-        for key in self.output_dict:
+        for key in self.output_vars:
             output = None
             # workaround around
             # properties of one class depend on properties of another
