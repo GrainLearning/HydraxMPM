@@ -71,9 +71,27 @@
 
 
 
+- [ ] Add gifs
+    - [ ] SIP test moving 4 models
+    - [ ] MPM column collapse (4 models)
+
+- [ ] Badges
+    - [ ] license
+    - [ ] build
+    - [ ] docs
 
 
-- Add detailed table of models in documentation[]
+
+- ADD License in files  
+- Later
+-[ ] Add detailed table of models in documentation[]
+- Mention the code realizies on Equionox
+- Prelimnary is knowledge of jax
+
+
+
+
+- MCC change R to OCR
 <!-- 
 | Model                   | Description                                                                                                | Type          |
 | :---------------------- | :--------------------------------------------------------------------------------------------------------- | :------------ |

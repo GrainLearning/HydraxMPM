@@ -11,7 +11,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-
+core.*
 uv.lock
 imgui.ini
 polyscope.ini
