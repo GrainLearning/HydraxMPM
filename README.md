@@ -66,13 +66,3 @@ This research is part of the project TUSAIL [Training in Upscaling Particle Syst
 
 > [!WARNING]  
 > This is a research software under active development (pre-alpha). APIs and functionality are subject to change without notice.
-
-
-
-<!-- 
-## 🧠 Key Benefits
-
-* **Unify local and global views:** Test, compare and validate constitutive models at a SIP-level, and directly apply them to large-scale MPM simulations – all within the same framework. 
-* **Cutting-Edge performance** Built on JAX, leveraging Just-In-Time (JIT) for high-performance array-based operations on the CPU, GPU, and TPU.
-* **Solve inverse problems with ease:** All internals are automatically differentiable, enabling model diagnosis and gradient-based optimization (e.g., reducing the need to solve the tangential stiffness tensor).
-* **Modular & Extendable:** The modular structure, coupled with batched and parallelized continuum mechanics operations, will enable modification and extension of existing components, while also enabling rapid prototyping. -->
