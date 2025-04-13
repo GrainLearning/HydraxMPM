@@ -13,7 +13,7 @@
   Develop · Diagnose · Simulate
 </p>
 <p align="center">
-  📖 <a href="LINK_TO_YOUR_DOCUMENTATION_SITE"><strong>Documentation</strong></a> | ⚙️ <a href="#installation">Installation</a> | 🤝 <a href="LINK_TO_CONTRIBUTING.MD">Contributing</a>
+  📖 <a href="LINK_TO_YOUR_DOCUMENTATION_SITE"><strong>Documentation (coming Soon)</strong></a> | ⚙️ <a href="#installation">Installation</a> | 🤝 <a href="LINK_TO_CONTRIBUTING.MD">Contributing (coming Soon)</a>
   <!-- Add badges here if you have them: e.g., build status, license -->
 </p>
 
@@ -28,8 +28,28 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
   </picture>
 </p>
 
-    
+      
+<div style="display: flex; justify-content: center; align-items: center; gap: 20px;"> 
+  <!-- First Image -->
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_dark.png">
+    <img alt="MPM simulation SS (light/dark mode versions)" 
+         src="docs/_static/mpm_models_ss_light.png" 
+         style="max-height: 175px; width: auto; display: block;"> 
+         <!-- Adjust max-width as needed -->
+  </picture>
+  
+  <!-- Second Image -->
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_dark.png">
+    <img alt="MPM simulation KE (light/dark mode versions)" 
+         src="docs/_static/mpm_models_ke_light.png" 
+         style="max-height: 175px; width: auto; display: block;"> 
+         <!-- Adjust max-width as needed -->
+  </picture>
 
+</div>
+    
 ## Capabilities
 
 *   🔬 **Diagnose Constitutive Models:** Perform controlled SIP tests (triaxial, shear, and compression) for advanced constitutive model analysis.
