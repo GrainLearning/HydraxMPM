@@ -28,30 +28,26 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
   </picture>
 </p>
 
-      
-<div style="display: flex; justify-content: center; align-items: center; gap: 20px;"> 
 
-  <!-- First Image -->
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_dark.png">
-    <!-- Style is now ONLY on the img tag -->
-    <img alt="MPM simulation SS (light/dark mode versions)" 
-         src="docs/_static/mpm_models_ss_light.png" 
-         style="max-width: 200px; height: auto; display: block;"> 
-         <!-- Use max-width for better control, adjust value as needed -->
-  </picture>
-  
-  <!-- Second Image -->
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_dark.png">
-     <!-- Style is now ONLY on the img tag -->
-    <img alt="MPM simulation KE (light/dark mode versions)" 
-         src="docs/_static/mpm_models_ke_light.png" 
-         style="max-width: 200px; height: auto; display: block;"> 
-         <!-- Use max-width for better control, adjust value as needed -->
-  </picture>
 
-</div>
+
+<table style="margin: 0px auto;" align="center" >
+  <tr>
+    <td align="center" valign="top"  padding="0 15px 0 0">
+      <!-- First Image (SS): Light and Dark versions -->
+<!--       <img src="docs/_static/mpm_models_ss_dark,.png#gh-light-mode-only" alt="MPM simulation SS (light mode)" width="300"> -->
+      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_light.png">
+      <img src="docs/_static/mpm_models_ss_dark.png" alt="MPM simulation SS (light mode)" height="300">
+    </td>
+    <td align="center" valign="top"  padding="0 15px 0 0">
+      <!-- Second Image (KE): Light and Dark versions -->
+      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_light.png">
+      <img src="docs/_static/mpm_models_ke_dark.png" alt="MPM simulation KE (light mode)" height="300">
+    </td>
+  </tr>
+</table>
+
+    
 
     
     
