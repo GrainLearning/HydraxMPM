@@ -20,17 +20,21 @@
 
 HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale granular dynamics simulations and **Single Integration Point (SIP)** testing <!--for detailed constitutive **model creation and diagnosis**-->, within one environment. Built on JAX, it leverages automatic differentiation and hardware acceleration (CPU/GPU/TPU) for research and development of numerical models capturing solid-like and fluid-like behavior of granular materials.
 
-<picture>
- <source media="(prefers-color-scheme: dark)" srcset="docs/_static/sip_animation_light.gif">
- <img alt="Shows an illustrated sun in light color mode and a moon with stars in dark color mode." src="docs/_static/sip_animation_dark.gif">
-</picture>
 
+<p align="center"> 
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/sip_animation_dark.gif">
+    <img alt="Animation demonstrating HydraxMPM simulation (light/dark mode versions)" src="docs/_static/sip_animation_light.gif">
+  </picture>
+</p>
+
+    
 
 ## Capabilities
 
 *   🔬 **Diagnose Constitutive Models:** Perform controlled SIP tests (triaxial, shear, and compression) for advanced constitutive model analysis.
 *   ⛰️ **Simulate Large-Scale Processes:** Model complex, large-deformation granular processes (e.g., landslides) using MPM.
-*   ⚖️ **Validate Across Scales:** Compare solid-like and fluid-like model behavior at both element (SIP) and system (MPM) levels.
+*   ⚖️ **Validate Across Scales:** Compare solid-l  ike and fluid-like model behavior at both element (SIP) and system (MPM) levels.
 *   ∇ **Gradient-Aware:** Utilize automatic differentiation for sensitivity analysis, inverse problems, and optimization.
 
 ## Key Features
