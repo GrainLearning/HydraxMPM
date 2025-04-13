@@ -23,9 +23,9 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
 
 <p align="center"> 
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/sip_animation_dark.gif">
-    <source media="(prefers-color-scheme: light)" srcset="docs/_static/sip_animation_light.gif">
-    <img alt="Animation demonstrating HydraxMPM simulation (light/dark mode versions)" src="docs/_static/sip_animation_light.gif">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/_static/sip_animation_light.gif">
+    <source media="(prefers-color-scheme: light)" srcset="docs/_static/sip_animation_dark.gif">
+    <img alt="Animation demonstrating HydraxMPM simulation (light/dark mode versions)" src="docs/_static/sip_animation_dark.gif">
   </picture>
 </p>
 
@@ -35,14 +35,14 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
 <table style="margin: 0px auto;" align="center" >
   <tr>
     <td align="center" valign="top"  padding="0 15px 0 0">
-      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_dark.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/_static/mpm_models_ss_light.png">
-      <img src="docs/_static/mpm_models_ss_light.png" alt="MPM simulation SS (light mode)" height="300">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ss_light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/_static/mpm_models_ss_dark.png">
+      <img src="docs/_static/mpm_models_ss_dark.png" alt="MPM simulation SS (light mode)" height="300">
     </td>
     <td align="center" valign="top"  padding="0 15px 0 0">
-      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_dark.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/_static/mpm_models_ke_light.png">
-      <img src="docs/_static/mpm_models_ke_light.png" alt="MPM simulation KE (light mode)" height="300">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/_static/mpm_models_ke_light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/_static/mpm_models_ke_dark.png">
+      <img src="docs/_static/mpm_models_ke_dark.png" alt="MPM simulation KE (light mode)" height="300">
     </td>
   </tr>
 </table>
