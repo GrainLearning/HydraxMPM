@@ -37,7 +37,7 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
     <!-- Style is now ONLY on the img tag -->
     <img alt="MPM simulation SS (light/dark mode versions)" 
          src="docs/_static/mpm_models_ss_light.png" 
-         style="max-width: 150px; height: auto; display: block;"> 
+         style="max-width: 200px; height: auto; display: block;"> 
          <!-- Use max-width for better control, adjust value as needed -->
   </picture>
   
@@ -47,7 +47,7 @@ HydraxMPM integrates the **Material Point Method (MPM)** solver for large-scale 
      <!-- Style is now ONLY on the img tag -->
     <img alt="MPM simulation KE (light/dark mode versions)" 
          src="docs/_static/mpm_models_ke_light.png" 
-         style="max-width: 150px; height: auto; display: block;"> 
+         style="max-width: 200px; height: auto; display: block;"> 
          <!-- Use max-width for better control, adjust value as needed -->
   </picture>
 
