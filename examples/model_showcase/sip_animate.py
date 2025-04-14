@@ -217,8 +217,8 @@ axes[1].set(
     yticks=[0.0, 0.1, 0.2, 0.3, 0.4],
 )
 axes[2].set(
-    xlabel="q [Pa]",
-    ylabel="$p$ [Pa]",
+    xlabel="$q$ [Pa]",
+    ylabel="$q$ [Pa]",
     xlim=(0, 2000),
     ylim=(-50, 2000),
     xticks=[0, 500, 1000, 1500, 2000],
@@ -307,7 +307,7 @@ def animate(i):
 def set_plot_colors(fig, axes, legend, color):
     """Sets color for text elements: labels, ticks, legend."""
     print(f"Setting plot element colors to: {color}")
-
+    fig.suptitle('Constant Pressure Shear', fontsize=14,color=color)
     # Set legend text color
     if legend:
         for text in legend.get_texts():
@@ -330,7 +330,6 @@ def set_plot_colors(fig, axes, legend, color):
         # Optional: Axis title if exists
         # ax.title.set_color(color)
 
-
 # Create animation
 ani = FuncAnimation(
     fig,
@@ -339,7 +338,6 @@ ani = FuncAnimation(
     interval=50,
     repeat=True,
 )
-
 
 # Save or show animation
 set_plot_colors(fig, axes, legend, "black")

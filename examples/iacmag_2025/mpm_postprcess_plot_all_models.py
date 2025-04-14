@@ -28,7 +28,7 @@ plot_dir = os.path.join(dir_path, "plots")  # plot directory
 
 plt.style.use(["science", "no-latex"])
 
-is_tranparent = False
+is_tranparent = True
 
 COLOR = "black"
 mpl.rcParams["text.color"] = COLOR
@@ -101,7 +101,7 @@ models = [
     "Newtonian Fluid",
 ]
 
-plot_scalar = "KE"
+plot_scalar = "shear_strain"
 if plot_scalar == "KE":
     leg_label = "Nodal Kinetic Energy (log-scale) [J]"
     file_suffix = "KE"
@@ -170,7 +170,6 @@ cax = fig.add_axes(
 )
 
 # Create colorbar
-
 if logscale:
     cbar = fig.colorbar(
         cp,
@@ -187,6 +186,8 @@ else:
     )
 cbar.ax.set_ylabel(leg_label)
 
+
+fig.suptitle('Column Collapse (t=1.0 s)', fontsize=8)
 plt.savefig(
     plot_dir + f"/mpm_plot_contour_{file_suffix}.png", transparent=is_tranparent
 )
