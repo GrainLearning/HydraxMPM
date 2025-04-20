@@ -74,7 +74,7 @@ I_0 = 0.279
 
 # --- Define Constitutive Models ---
 # Select which model to use by index (0, 1, or 2)
-model_index = 0
+model_index = 1
 # A tuple containing instances of the different models to test.
 # 'other' dictionary is used to add metadata, like project name for output folders.
 model = (
@@ -97,6 +97,7 @@ model = (
         rho_0=rho_g,
         rho_p=rho_p,
         other=dict(project="mcc_ocr4"),
+        settings=dict(throw=False),
     ),
     hdx.MuI_incompressible(
         mu_s=mu_0,

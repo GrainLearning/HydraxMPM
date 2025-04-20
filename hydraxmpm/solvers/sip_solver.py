@@ -141,7 +141,7 @@ def apply_control(
     x_target=None,
     rtol=1e-3,
     atol=1e-2,
-    max_steps=100,
+    max_steps=20,
 ):
     def servo_controller(sol, return_aux=True):
         L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
@@ -174,7 +174,7 @@ def apply_control(
                 newton,
                 X_0,
                 args=False,
-                throw=True,
+                throw=False,
                 has_aux=False,
                 max_steps=max_steps,
             )

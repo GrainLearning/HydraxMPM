@@ -38,17 +38,16 @@ def yield_function(p_hat, px_hat, q, M):
 
 def get_p_hat(deps_e_v, kap, p_hat_prev):
     """Compute non-linear pressure."""
-    # p_hat = p_hat_prev * jnp.exp(deps_e_v / kap)
+
     p_hat = p_hat_prev / (1.0 - (1.0 / kap) * deps_e_v + 1e-12)
     return jnp.clip(p_hat, 1.0, None)
 
 
 def get_px_hat_mcc(px_hat_prev, cp, deps_p_v):
     """Compute non-linear pressure."""
-    # px_hat = px_hat_prev * jnp.exp(deps_p_v / cp)
+
     px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v + 1e-12)
     return jnp.clip(px_hat, 1.0, None)
-    # return
 
 
 def get_s(deps_e_d, G, s_prev):
@@ -376,8 +375,6 @@ class ModifiedCamClay(ConstitutiveLaw):
         """
         return jnp.exp(self.ln_N - self.lam * jnp.log(p))
 
-    # def SL(p):
-
     def get_p_0(self, ln_v0):
         return self.px_hat_stack * jnp.exp(
             (ln_v0, self.ln_N + self.lam * self.px_hat_stack) / self.kap
@@ -386,31 +383,12 @@ class ModifiedCamClay(ConstitutiveLaw):
     def get_ln_v0(self, stress, ln_N=None):
         p = get_pressure(stress)
 
-        q = get_q_vm(stress)
-
         if ln_N is None:
             ln_N = self.ln_N
 
-        xi = (self.lam - self.kap) * jnp.log(self.R)
-
-        ln_v_eta = (
-            ln_N
-            - self.lam * jnp.log(p)
-            - (self.lam - self.kap) * jnp.log(1 + q**2 / self.M**2)
-        )
-
-        ln_v = ln_v_eta - xi
+        ln_v = ln_N - self.lam * jnp.log(p) - (self.lam - self.kap) * jnp.log(self.R)
 
         return ln_v
-
-        # return ln_N - self.lam * jnp.log(pc0) + self.kap * jnp.log(self.R)
-
-    # def ln_Vk(self, ln_v, p_0):
-    #     """Reference (natural) logarithmic specific volume of swelling line (SL) at 1kPa
-    #     (input current specific volume/ pressure)
-    #     Returns ln_GAMMA
-    #     """
-    # return ln_v + self.kap * jnp.log(p_0 / self.R)
 
     def SL(self, p, ln_v0, p_0, return_ln=False):
         ln_v_sl = ln_v0 + self.kap * jnp.log(p_0)
