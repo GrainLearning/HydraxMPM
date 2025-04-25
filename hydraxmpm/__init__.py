@@ -65,10 +65,16 @@ from .utils.math_helpers import (
     get_dev_strain,
     get_scalar_shear_strain,
     get_inertial_number,
-    get_inertial_number_stack
+    get_inertial_number_stack,
 )
 
-from .common.types import TypeFloat, TypeFloatMatrix3x3, TypeInt, TypeFloatScalarPStack
+from .common.types import (
+    TypeFloat,
+    TypeFloatMatrix3x3,
+    TypeInt,
+    TypeFloatScalarPStack,
+    TypeFloatMatrixPStack,
+)
 
 hook.uninstall()
 del hook

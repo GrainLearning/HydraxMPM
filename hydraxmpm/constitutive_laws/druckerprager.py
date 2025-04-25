@@ -251,6 +251,7 @@ class DruckerPrager(ConstitutiveLaw):
 
                 # Trail isotropic linear elastic law
                 p_next = p_tr - self.K * deps_p_v
+
                 s_next = s_tr * (1.0 - (pmulti * self.G) / sqrt_J2_tr)
 
                 sqrt_J2_next = sqrt_J2_tr - self.G * pmulti
