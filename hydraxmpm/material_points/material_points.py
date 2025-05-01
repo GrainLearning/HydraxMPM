@@ -182,7 +182,7 @@ class MaterialPoints(Base):
         )
 
     def update_L_and_F_stack(self, L_stack_next, dt):
-        # TODO a better name for this function?
+        """Update the velocity gradient and deformation gradient tensors."""
         def update_F_volume(L_next, F_prev, volume0):
             F_next = (jnp.eye(3) + L_next * dt) @ F_prev
             volume_next = jnp.linalg.det(F_next) * volume0

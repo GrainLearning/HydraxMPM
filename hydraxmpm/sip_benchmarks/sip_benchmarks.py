@@ -302,7 +302,9 @@ class ConstantPressureShear(SIPBenchmark):
         ), new_material_points
 
     def loss_stress(self, stress_guest, X_target):
-        return get_pressure(stress_guest) - X_target
+        
+        p = get_pressure(stress_guest)
+        return p - X_target
 
 
 class IsotropicCompression(SIPBenchmark):

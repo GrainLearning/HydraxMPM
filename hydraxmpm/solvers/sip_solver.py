@@ -9,7 +9,7 @@ import inspect
 
 from typing import Optional, Self, Tuple, Dict
 
-import equinox as eqx
+
 import jax
 import jax.numpy as jnp
 import optimistix as optx
@@ -20,54 +20,92 @@ from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..sip_benchmarks.sip_benchmarks import SIPBenchmark
 from ..material_points.material_points import MaterialPoints
 
-from ..common.types import TypeInt
-
 
 def stress_update(L_next, material_points_prev, constitutive_law_prev, dt):
-    """Call the update function"""
+    """Performs a stress update step for a single material point."""
+    
+    # Pad dimensions
     L_next_padded = jnp.expand_dims(L_next, axis=0)
+    
+    # Advance velocity gradient and deformation gradient over a timestep
     material_points_next = material_points_prev.update_L_and_F_stack(
         L_stack_next=L_next_padded, dt=dt
     )
 
+    # Call the constitutive law to update the stress
     material_points_next, constitutive_law_next = constitutive_law_prev.update(
         material_points=material_points_next, dt=dt
     )
     return material_points_next, constitutive_law_next
 
-
-def run_et_solver(
-    solver,
-    dt: float,
-    rtol=1e-10,
+def apply_control(
+    L_control,
+    material_points_prev,
+    constitutive_law_prev,
+    et_benchmark,
+    dt,
+    X_0=None,
+    x_target=None,
+    rtol=1e-3,
     atol=1e-2,
-    max_steps=100,
+    max_steps=20,
 ):
-    accumulate_list = []
-    carry_list = []
+    """Applies a single control step, solving for unknowns if needed (mixed control)."""
+ 
+    def servo_controller(sol, return_aux=False):
+        
+        # sol = jnp.nan_to_num(sol)
+        L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
 
-    for et_benchmark in solver.sip_benchmarks:
-        carry, accumulate = mix_control(
-            solver,
-            solver.material_points,
-            solver.constitutive_law,
-            et_benchmark,
-            dt,
-            rtol,
-            atol,
-            max_steps,
+        material_points_next, constitutive_law_next = stress_update(
+            L_next, material_points_prev, constitutive_law_prev, dt
         )
-        accumulate_list.append(accumulate)
-        carry_list.append(carry)
 
-    # ensure that the list of output arrays is "flat"
-    # with respect to number of deformation mode
-    if len(solver.sip_benchmarks) == 1:
-        accumulate_list = accumulate_list[0]
-        carry_list = carry_list[0]
+        stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
 
-    return accumulate_list
+        R = et_benchmark.loss_stress(stress_guess, x_target)
+        
+        # R = jnp.nan_to_num(R)
+        
+        # jax.debug.print("mixed control: sol {} R {}",sol,R)
 
+        # jax.debug.breakpoint()
+        
+        if return_aux:
+            return R, (material_points_next, constitutive_law_next)
+        return R
+
+    if et_benchmark.X_control_stack is None:
+        material_points_next, constitutive_law_next = stress_update(
+            L_control, material_points_prev, constitutive_law_prev, dt
+        )
+
+    else:
+
+        def find_roots():
+            newton = optx.Newton(rtol=rtol, atol=atol)
+            # jax.debug.print("X_0 {}",X_0)
+            sol = optx.root_find(
+                servo_controller,
+                newton,
+                X_0,
+                args=False,
+                throw=False,
+                has_aux=False,
+                options = dict(
+                    lower = -100,
+                    upper = 100
+                ),
+                max_steps=max_steps,
+            )
+            return sol.value
+
+        X_root = find_roots()
+
+        R, aux = servo_controller(X_root, True)
+        material_points_next, constitutive_law_next = aux
+
+    return material_points_next, constitutive_law_next
 
 def mix_control(
     solver,
@@ -79,6 +117,7 @@ def mix_control(
     atol,
     max_steps,
 ):
+    """Scans through the control sequence of a single SIP benchmark."""
     # TODO have X_target become new X_0? or X_guess become X_0?
     if et_benchmark.X_control_stack is not None:
         X_0 = jnp.zeros_like(et_benchmark.X_control_stack.at[0].get())
@@ -91,7 +130,7 @@ def mix_control(
             material_points_prev,
             step,
         ) = carry
-
+        # jax.debug.print("{} \r",step)
         L_control, x_target = xs
 
         material_points_next, constitutive_law_next = apply_control(
@@ -114,7 +153,7 @@ def mix_control(
             material_points_prev,
             constitutive_law_prev,
         )
-        # accumulate = []
+
         carry = (constitutive_law_next, material_points_next, step + 1)
 
         return carry, accumulate
@@ -129,63 +168,6 @@ def mix_control(
     )
 
     return carry, accumulate
-
-
-def apply_control(
-    L_control,
-    material_points_prev,
-    constitutive_law_prev,
-    et_benchmark,
-    dt,
-    X_0=None,
-    x_target=None,
-    rtol=1e-3,
-    atol=1e-2,
-    max_steps=20,
-):
-    def servo_controller(sol, return_aux=True):
-        L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
-
-        material_points_next, constitutive_law_next = stress_update(
-            L_next, material_points_prev, constitutive_law_prev, dt
-        )
-
-        stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
-
-        R = et_benchmark.loss_stress(stress_guess, x_target)
-        # jax.debug.print("{}", R)
-        # R = eqx.error_if(R, jnp.isnan(R).any(), "R is nan")
-        if return_aux:
-            return R, (material_points_next, constitutive_law_next)
-        return R
-
-    if et_benchmark.X_control_stack is None:
-        material_points_next, constitutive_law_next = stress_update(
-            L_control, material_points_prev, constitutive_law_prev, dt
-        )
-
-    else:
-
-        def find_roots():
-            newton = optx.Newton(rtol=rtol, atol=atol)
-
-            sol = optx.root_find(
-                servo_controller,
-                newton,
-                X_0,
-                args=False,
-                throw=False,
-                has_aux=False,
-                max_steps=max_steps,
-            )
-            return sol.value
-
-        X_root = find_roots()
-
-        R, aux = servo_controller(X_root, True)
-        material_points_next, constitutive_law_next = aux
-
-    return material_points_next, constitutive_law_next
 
 
 class SIPSolver(Base):

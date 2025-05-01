@@ -231,7 +231,7 @@ class DruckerPrager(ConstitutiveLaw):
 
         # is_compression = p_tr > 0.0
         is_ep = yf > 0.0
-
+        J2_non_zero = sqrt_J2_tr > 0.0
         def elastic_update():
             """If yield function is negative, return elastic solution."""
             stress = s_tr - p_tr * jnp.eye(3)
@@ -239,8 +239,14 @@ class DruckerPrager(ConstitutiveLaw):
 
         def pull_to_ys():
             """If yield function is negative, return elastic solution."""
-            J2_non_zer0 = sqrt_J2_tr > 0.0
+            sqrt_J2_tr_ = jnp.where(
+                    ~(is_ep*J2_non_zero),
+                    self.mu_1 * p_tr + self.mu_2 * c,
+                    sqrt_J2_tr
+            )
 
+            
+            # nonsensical = 
             def residuals_cone(sol, args):
                 """Reduced system for non-associated flow rule."""
                 pmulti = sol
@@ -252,9 +258,9 @@ class DruckerPrager(ConstitutiveLaw):
                 # Trail isotropic linear elastic law
                 p_next = p_tr - self.K * deps_p_v
 
-                s_next = s_tr * (1.0 - (pmulti * self.G) / sqrt_J2_tr)
+                s_next = s_tr * (1.0 - (pmulti * self.G) / sqrt_J2_tr_)
 
-                sqrt_J2_next = sqrt_J2_tr - self.G * pmulti
+                sqrt_J2_next = sqrt_J2_tr_ - self.G * pmulti
 
                 eps_p_acc_next = eps_p_acc_prev + self.mu_2 * pmulti
 
@@ -262,16 +268,12 @@ class DruckerPrager(ConstitutiveLaw):
 
                 aux = p_next, s_next, eps_p_acc_next, sqrt_J2_next
 
-                R = (
-                    yield_function(sqrt_J2_next, p_next, self.mu_1, self.mu_2, c_next)
-                    * is_ep
-                    * J2_non_zer0
-                )
+                R = yield_function(sqrt_J2_next, p_next, self.mu_1, self.mu_2, c_next)
 
                 return R, aux
 
             def find_roots_cone():
-                solver = optx.Newton(rtol=1e-1, atol=1e3)
+                solver = optx.Newton(rtol=1e-1, atol=1e-3)
 
                 sol = optx.root_find(
                     residuals_cone,
@@ -280,10 +282,7 @@ class DruckerPrager(ConstitutiveLaw):
                     throw=True,
                     has_aux=True,
                     max_steps=256,
-                    options=dict(
-                        lower=0.0,
-                        upper=1000.0,
-                    ),
+                    options=dict(lower=0.0,upper=1000.),
                 )
 
                 return sol.value

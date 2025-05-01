@@ -17,6 +17,8 @@ from jaxtyping import install_import_hook
 
 hook = install_import_hook("hydraxmpm", "typeguard.typechecked")
 
+
+from .constitutive_laws.constitutive_law import ConvergenceControlConfig # remove?
 from .constitutive_laws.constitutive_law import ConstitutiveLaw
 from .common.base import Base
 from .constitutive_laws.linearelastic import LinearIsotropicElastic
