@@ -302,7 +302,6 @@ class ConstantPressureShear(SIPBenchmark):
         ), new_material_points
 
     def loss_stress(self, stress_guest, X_target):
-        
         p = get_pressure(stress_guest)
         return p - X_target
 
@@ -381,6 +380,76 @@ class IsotropicCompression(SIPBenchmark):
 
         return IsotropicCompression(
             deps_xx_yy_zz_dt=deps_xx_yy_zz_dt,
+            p0=self.p0,
+            num_steps=self.num_steps,
+            L_control_stack=L_control_stack,
+        ), new_material_points
+
+
+class ConstantVolumeShear(SIPBenchmark):
+    """
+
+    Volume controlled shear or drained shear
+
+    """
+
+    deps_xy_dt: TypeFloat | Tuple[TypeFloat, ...]
+    p0: TypeFloat
+    num_steps: int
+
+    init_material_points: bool = False
+
+    def __init__(
+        self,
+        deps_xy_dt: TypeFloat | Tuple[TypeFloat, ...],
+        p0: TypeFloat,
+        num_steps: int,
+        init_material_points: Optional[bool] = False,
+        **kwargs,
+    ):
+        self.deps_xy_dt = deps_xy_dt
+        self.p0 = p0
+
+        self.num_steps = num_steps
+
+        self.init_material_points = init_material_points
+        self.L_control_stack = kwargs.get("L_control_stack", None)
+        self.X_control_stack = None
+
+        self.L_unknown_indices = None
+        super().__init__(**kwargs)
+
+    def init_state(self, material_points: MaterialPoints, **kwargs):
+        p_stack = jnp.ones(self.num_steps) * self.p0
+
+        if eqx.is_array(self.deps_xy_dt):
+            if len(self.deps_xy_dt.shape) > 2:
+                deps_xy_dt_stack = self.deps_xy_dt
+            else:
+                deps_xy_dt_stack = jnp.ones(self.num_steps) * self.deps_xy_dt
+        else:
+            deps_xy_dt_stack = jnp.ones(self.num_steps) * self.deps_xy_dt
+
+        def get_L(deps_xy_dt):
+            L = jnp.zeros((3, 3))
+            L = L.at[0, 1].set(deps_xy_dt)
+            return L
+
+        L_control_stack = jax.vmap(get_L)(deps_xy_dt_stack)
+
+        new_material_points = material_points
+
+        if self.init_material_points:
+            L_stack = L_control_stack.at[0].get()
+            new_material_points = new_material_points.replace(
+                L_stack=jnp.tile(L_stack, (material_points.num_points, 1, 1))
+            )
+            new_material_points = new_material_points.init_stress_from_p_0(
+                p_stack.at[0].get()
+            )
+
+        return ConstantPressureShear(
+            deps_xy_dt=self.deps_xy_dt,
             p0=self.p0,
             num_steps=self.num_steps,
             L_control_stack=L_control_stack,

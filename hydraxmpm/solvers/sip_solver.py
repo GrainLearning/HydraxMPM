@@ -23,10 +23,10 @@ from ..material_points.material_points import MaterialPoints
 
 def stress_update(L_next, material_points_prev, constitutive_law_prev, dt):
     """Performs a stress update step for a single material point."""
-    
+
     # Pad dimensions
     L_next_padded = jnp.expand_dims(L_next, axis=0)
-    
+
     # Advance velocity gradient and deformation gradient over a timestep
     material_points_next = material_points_prev.update_L_and_F_stack(
         L_stack_next=L_next_padded, dt=dt
@@ -37,6 +37,7 @@ def stress_update(L_next, material_points_prev, constitutive_law_prev, dt):
         material_points=material_points_next, dt=dt
     )
     return material_points_next, constitutive_law_next
+
 
 def apply_control(
     L_control,
@@ -51,9 +52,8 @@ def apply_control(
     max_steps=20,
 ):
     """Applies a single control step, solving for unknowns if needed (mixed control)."""
- 
+
     def servo_controller(sol, return_aux=False):
-        
         # sol = jnp.nan_to_num(sol)
         L_next = L_control.at[et_benchmark.L_unknown_indices].set(sol)
 
@@ -64,13 +64,13 @@ def apply_control(
         stress_guess = jnp.squeeze(material_points_next.stress_stack, axis=0)
 
         R = et_benchmark.loss_stress(stress_guess, x_target)
-        
+
         # R = jnp.nan_to_num(R)
-        
+
         # jax.debug.print("mixed control: sol {} R {}",sol,R)
 
         # jax.debug.breakpoint()
-        
+
         if return_aux:
             return R, (material_points_next, constitutive_law_next)
         return R
@@ -92,12 +92,10 @@ def apply_control(
                 args=False,
                 throw=False,
                 has_aux=False,
-                options = dict(
-                    lower = -100,
-                    upper = 100
-                ),
+                options=dict(lower=-100, upper=100),
                 max_steps=max_steps,
             )
+
             return sol.value
 
         X_root = find_roots()
@@ -106,6 +104,7 @@ def apply_control(
         material_points_next, constitutive_law_next = aux
 
     return material_points_next, constitutive_law_next
+
 
 def mix_control(
     solver,

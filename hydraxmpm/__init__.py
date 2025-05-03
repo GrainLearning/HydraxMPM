@@ -18,12 +18,14 @@ from jaxtyping import install_import_hook
 hook = install_import_hook("hydraxmpm", "typeguard.typechecked")
 
 
-from .constitutive_laws.constitutive_law import ConvergenceControlConfig # remove?
+from .constitutive_laws.constitutive_law import ConvergenceControlConfig  # remove?
 from .constitutive_laws.constitutive_law import ConstitutiveLaw
 from .common.base import Base
 from .constitutive_laws.linearelastic import LinearIsotropicElastic
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay
-from .constitutive_laws.mu_i_rheology_incompressible import MuI_incompressible
+from .constitutive_laws.modifiedcamclay_nl import ModifiedCamClayNL
+from .constitutive_laws.mu_i_lc import MuI_LC
+from .constitutive_laws.mu_i_lc_phi_i import MuI_LC_PhiI
 from .constitutive_laws.newtonfluid import NewtonFluid
 from .constitutive_laws.druckerprager import DruckerPrager
 
@@ -31,6 +33,7 @@ from .sip_benchmarks.sip_benchmarks import (
     TriaxialConsolidatedUndrained,
     TriaxialConsolidatedDrained,
     ConstantPressureShear,
+    ConstantVolumeShear,
     IsotropicCompression,
 )
 

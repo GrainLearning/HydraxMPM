@@ -38,14 +38,12 @@ def yield_function(p_hat, px_hat, q, M):
 
 def get_p_hat(deps_e_v, kap, p_hat_prev):
     """Compute non-linear pressure."""
-
     p_hat = p_hat_prev / (1.0 - (1.0 / kap) * deps_e_v + 1e-12)
     return jnp.clip(p_hat, 1.0, None)
 
 
 def get_px_hat_mcc(px_hat_prev, cp, deps_p_v):
     """Compute non-linear pressure."""
-
     px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v + 1e-12)
     return jnp.clip(px_hat, 1.0, None)
 
@@ -66,7 +64,15 @@ def get_G(nu, K):
     return G
 
 
-class ModifiedCamClay(ConstitutiveLaw):
+def get_reloadingline(p, px, ps, kap, lam, phi_0):
+    p_hat = p + ps
+    pc_hat = px + ps
+    phi = phi_0 * ((pc_hat / ps) ** lam) * ((p_hat / pc_hat) ** kap)
+
+    return phi
+
+
+class ModifiedCamClayNL(ConstitutiveLaw):
     nu: TypeFloat
     M: TypeFloat
     OCR: TypeFloat
@@ -77,6 +83,10 @@ class ModifiedCamClay(ConstitutiveLaw):
 
     K_min: Optional[TypeFloat] = None
     K_max: Optional[TypeFloat] = None
+
+    ln_Z: Optional[TypeFloat] = None
+    ps: Optional[TypeFloat] = None
+    ln_v0: Optional[TypeFloat] = None
 
     px_hat_stack: Optional[TypeFloatScalarPStack] = None
     stress_0_stack: Optional[TypeFloatMatrixPStack] = None
@@ -93,7 +103,9 @@ class ModifiedCamClay(ConstitutiveLaw):
         K_min: TypeFloat = None,
         K_max: TypeFloat = None,
         ln_N: Optional[TypeFloat] = None,
-        p_t: Optional[TypeFloat] = 0.0,
+        ln_Z: Optional[TypeFloat] = None,
+        ln_v0: Optional[TypeFloat] = None,
+        ps: Optional[TypeFloat] = None,
         settings: Optional[dict | ConvergenceControlConfig] = None,
         **kwargs,
     ) -> Self:
@@ -107,13 +119,33 @@ class ModifiedCamClay(ConstitutiveLaw):
 
         self.kap = kap
 
-        self.p_t = p_t
-
         self.ln_N = ln_N
 
         self.K_min = K_min
 
         self.K_max = K_max
+
+        rho_0 = kwargs.get("rho_0", None)
+        rho_p = kwargs.get("rho_p", None)
+
+        if ps == 0.0:
+            self.ps = 0
+            self.ln_Z = ln_N
+            self.ln_v0 = ln_N
+        elif ln_v0 is not None:
+            self.ln_v0 = ln_v0
+            self.ps = jnp.exp((ln_N - self.ln_v0) / lam)
+            self.ln_Z = self.ln_v0 - lam * jnp.log((1.0 + self.ps) / self.ps)
+        elif rho_0 is not None:
+            self.ln_v0 = jnp.log(1.0 / (rho_0 / rho_p))
+            self.ps = jnp.exp((ln_N - self.ln_v0) / lam)
+            self.ln_Z = self.ln_v0 - lam * jnp.log((1.0 + self.ps) / self.ps)
+        elif ln_Z is not None:
+            self.ln_Z = ln_Z
+            self.ps = jnp.exp((ln_N - ln_Z) / lam) - 1.0
+            self.ln_v0 = ln_Z + lam * jnp.log((1 + self.ps) / self.ps)
+
+        self.ln_Z = ln_Z
 
         self.eps_e_stack = kwargs.get("eps_e_stack")
 
@@ -127,12 +159,11 @@ class ModifiedCamClay(ConstitutiveLaw):
         if isinstance(settings, dict):
             self.settings = ConvergenceControlConfig(
                 rtol=settings.get("rtol", 1e-3),
-                atol=settings.get("atol", 1e-6),
+                atol=settings.get("atol", 1e-5),
                 max_iter=settings.get("max_iter", 256),
                 throw=settings.get("throw", True),
                 # plastic multiplier and volumetric strain, respectively
                 lower_bound=settings.get("lower_bound", (0, -1e4)),
-                # upper_bound=settings.get("upper_bound", (1000.0, 1.0)),
             )
         else:
             self.settings = settings
@@ -141,42 +172,24 @@ class ModifiedCamClay(ConstitutiveLaw):
         super().__init__(**kwargs)
 
     def init_state(self: Self, material_points: MaterialPoints):
-        # tension cuttoff
-        # at p_0=px = 1 Pa
-        # then ln_N = ln_sl
-        # i.e., normall consolidation line and swelling line both are zero
-
-        # pressure has to be at least 1 Pa
-        def clip_(p):
-            return jnp.clip(p, 1.0, None)
-
         stress_0_stack = material_points.stress_stack
         p_0_stack = material_points.p_stack
-
-        ln_N = self.ln_N
-
-        rho_0 = self.rho_0
-        if self.ln_N is None:
-            phi_N = self.rho_0 / self.rho_p
-            N = 1.0 / phi_N
-            ln_N = jnp.log(N)
-        else:
-            N = jnp.exp(self.ln_N)
-            phi_N = 1.0 / N
-            rho_0 = self.rho_p * phi_N
-
-        ln_v0 = jax.vmap(self.get_ln_v0, in_axes=(0, None))(stress_0_stack, ln_N)
-
-        rho = self.rho_p / jnp.exp(ln_v0)
-
         px_hat_stack = p_0_stack * self.OCR
 
+        rho_0 = self.rho_0
+
+        phi = get_reloadingline(
+            p_0_stack, px_hat_stack, self.ps, self.kap, self.lam, self.phi_0
+        )
+
+        rho = self.rho_p * phi
+
+        # jax.debug.breakpoint()
         eps_e_stack = jnp.zeros((material_points.num_points, 3, 3))
         return self.post_init_state(
             material_points,
             rho_0=rho_0,
             rho=rho,
-            ln_N=ln_N,
             stress_0_stack=stress_0_stack,
             px_hat_stack=px_hat_stack,
             eps_e_stack=eps_e_stack,
@@ -225,85 +238,94 @@ class ModifiedCamClay(ConstitutiveLaw):
         stress_0,
         specific_volume,
     ):
-        # reference stress
+        # reference stresses
         p_0 = get_pressure(stress_0)
         s_0 = get_dev_stress(stress_0, pressure=p_0)
 
+        # previous stresses
         p_prev = get_pressure(stress_prev)
-
-        p_hat_prev = p_prev + self.p_t
-
         s_prev = get_dev_stress(stress_prev, pressure=p_prev)
 
+        # previous pressure in transformed space
+        p_hat_prev = p_prev + self.ps
+        px_hat_prev = px_hat_prev + self.ps
+
+        # trail elastic volumetric strain
         deps_e_v_tr = get_volumetric_strain(deps_next)
 
+        # trail pressure in transformed space
         p_hat_tr = get_p_hat(deps_e_v_tr, self.kap, p_hat_prev)
 
-        deps_e_d_tr = get_dev_strain(deps_next, deps_e_v_tr)
-
+        # trail bulk and shear modulus in transformed space
         K_tr = get_K(self.kap, p_hat_tr, self.K_min, self.K_max)
-
         G_tr = get_G(self.nu, K_tr)
 
+        # trail elastic deviatoric strain tensor
+        deps_e_d_tr = get_dev_strain(deps_next, deps_e_v_tr)
+
+        # trail elastic deviatoric stress tensor
         s_tr = get_s(deps_e_d_tr, G_tr, s_prev)
 
+        # trail von Mises stress
         q_tr = get_q_vm(dev_stress=s_tr)
 
-        yf = yield_function(p_hat_tr, px_hat_prev, q_tr, self.M)
+        # trail yield function
+        # in regular space
+        yf = yield_function(p_hat_tr - self.ps, px_hat_prev - self.ps, q_tr, self.M)
+
         is_ep = yf > 0.0
 
         def elastic_update():
-            stress_next = s_tr - (p_hat_tr - self.p_t) * jnp.eye(3)
+            stress_next = s_tr - (p_hat_tr - self.ps) * jnp.eye(3)
             eps_e_tr = eps_e_prev + deps_next
-            return stress_next, eps_e_tr, px_hat_prev
+            return stress_next, eps_e_tr, px_hat_prev - self.ps
 
         def pull_to_ys():
             # https://github.com/patrick-kidger/optimistix/issues/132
             deps_e_v_tr_ = jnp.where(~is_ep, 0.0, deps_e_v_tr)
-            p_hat_prev_ = jnp.where(~is_ep, p_0, p_hat_prev)
-            px_hat_prev_ = jnp.where(~is_ep, p_0, px_hat_prev)
+            p_hat_prev_ = jnp.where(~is_ep, p_0 + self.ps, p_hat_prev)
+            px_hat_prev_ = jnp.where(~is_ep, p_0 + self.ps, px_hat_prev)
             q_tr_ = jnp.where(~is_ep, 0.0, q_tr)
 
             def residuals(sol, args):
                 pmulti, deps_p_v = sol
 
+                # next pressure in transformed space
                 p_hat_next = get_p_hat(deps_e_v_tr_ - deps_p_v, self.kap, p_hat_prev_)
 
+                # next bulk and shear modulus in transformed space
                 K_next = get_K(self.kap, p_hat_next, self.K_min, self.K_max)
 
                 G_next = get_G(self.nu, K_next)
 
+                # next deviatoric strain tensor end Von Mises stress tensor
                 factor = 1 / (1 + 6.0 * G_next * pmulti)
 
                 s_next = s_tr * factor
-
                 q_next = q_tr_ * factor
 
+                # next consolidation pressure in transformed space
                 px_hat_next = get_px_hat_mcc(px_hat_prev_, self._cp, deps_p_v)
 
-                deps_v_p_fr = pmulti * (2.0 * p_hat_next - px_hat_next) * self.M**2
-                yf_next = yield_function(p_hat_next, px_hat_next, q_next, self.M)
+                deps_v_p_fr = (
+                    pmulti
+                    * (2.0 * (p_hat_next - self.ps) - (px_hat_next - self.ps))
+                    * self.M**2
+                )
 
-                # deps_scale = p_hat_tr * self.M**2
+                yf_next = yield_function(
+                    p_hat_next - self.ps, px_hat_next - self.ps, q_next, self.M
+                )
+
                 deps_scale = 1.0
-                # yf_scale = p_hat_tr * p_hat_tr
-                # yf_scale = K_tr
+
                 yf_scale = K_tr
                 R = jnp.array(
                     [yf_next / yf_scale, (deps_v_p_fr - deps_p_v) / deps_scale]
                 )
 
                 aux = (p_hat_next, s_next, px_hat_next, G_next, K_next)
-                # jax.debug.print(
-                #     "rho >= self.rho_0 {} is_ep {} R {} OCR {} pmulti {} deps_p_v {}",
-                #     rho >= self.rho_0,
-                #     is_ep,
-                #     R,
-                #     self.OCR,
-                #     pmulti,
-                #     deps_p_v,
-                # )
-                # jax.debug.breakpoint()
+
                 return R, aux
 
             def find_roots():
@@ -325,56 +347,39 @@ class ModifiedCamClay(ConstitutiveLaw):
                     max_steps=self.settings.max_iter,
                     options=dict(
                         lower=jnp.array(self.settings.lower_bound),
-                        upper=jnp.array(self.settings.upper_bound),
                     ),
                 )
                 return sol.value
 
             pmulti_curr, deps_p_v_next = find_roots()
 
-            # jax.debug.print("pmulti_curr {}", pmulti_curr)
-            # jax.debug.print("deps_p_v_next {}", deps_p_v_next)
             R, aux = residuals([pmulti_curr, deps_p_v_next], None)
-            # jax.debug.print(
-            #     "is_ep {} R {} pmulti_curr {}, deps_p_v_next {}",
-            #     R,
-            #     pmulti_curr,
-            #     deps_p_v_next,
-            # )
-            # jax.debug.print(
-            #     "R {} pmulti_curr {}  deps_p_v_next {}", R, pmulti_curr, deps_p_v_next
-            # )
+
             p_hat_next, s_next, px_hat_next, G_next, K_next = aux
 
-            p_next = p_hat_next - self.p_t
+            p_next = p_hat_next - self.ps
+
+            px_next = px_hat_next - self.ps
 
             stress_next = s_next - (p_next) * jnp.eye(3)
 
             eps_e_v_next = (p_next - p_0) / K_next
 
-            # jax.debug.print("eps_e_v_next {}", eps_e_v_next)
-
             eps_e_d_next = (s_next - s_0) / (2.0 * G_next)
 
             eps_e_next = eps_e_d_next - (1.0 / 3) * eps_e_v_next * jnp.eye(3)
 
-            return stress_next, eps_e_next, px_hat_next
+            return stress_next, eps_e_next, px_next
 
         ln_v = jnp.log(specific_volume)
-        # stress_next, eps_e_next, px_hat_next = jax.lax.cond(
-        #     is_ep,
-        #     pull_to_ys,
-        #     elastic_update,
-        # )
 
-        stress_next, eps_e_next, px_hat_next = jax.lax.cond(
-            # (rho <= self.rho_0),
-            ln_v <= self.ln_N,
+        stress_next, eps_e_next, px_next = jax.lax.cond(
+            ln_v <= self.ln_v0,
             lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
-            lambda: (0.0 * jnp.eye(3), eps_e_prev, px_hat_prev),
+            lambda: (0.0 * jnp.eye(3), eps_e_prev, px_hat_prev - self.ps),
         )
 
-        return stress_next, eps_e_next, px_hat_next
+        return stress_next, eps_e_next, px_next
 
     @property
     def GAMMA(self):
@@ -452,3 +457,15 @@ class ModifiedCamClay(ConstitutiveLaw):
             material_points.velocity_stack,
         )
         return (dt_alpha * cell_size) / jnp.max(c_stack)
+
+    def compute_reloadingline(self, p=None, px=None, phi_0=None):
+        """Wrapper that passes instance attributes to the external function."""
+
+        if p is None:
+            p = self.px_hat_stack
+        if px is None:
+            px = self.px_hat_stack
+        if phi_0 is None:
+            phi_0 = self.rho_0 / self.rho_p
+
+        return get_reloadingline(p, px, self.ps, self.kap, self.lam, phi_0)
