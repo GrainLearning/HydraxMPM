@@ -52,7 +52,8 @@ xv, yv = jnp.meshgrid(x_coords, y_coords)
 position_stack = jnp.array(list(zip(xv.flatten(), yv.flatten())))
 
 # Shared parameters (used by multiple models)
-rho_g = 2400.0  # [kg/m^3]
+# rho_g = 2400.0  # [kg/m^3]
+rho_g = 1500.0  # [kg/m^3]
 rho_p = 2450.0  # [kg/m^3]
 d = 0.005
 
@@ -74,7 +75,7 @@ I_0 = 0.279
 
 # --- Define Constitutive Models ---
 # Select which model to use by index (0, 1, or 2)
-model_index = 0
+model_index = 1
 # A tuple containing instances of the different models to test.
 # 'other' dictionary is used to add metadata, like project name for output folders.
 model = (
@@ -97,6 +98,7 @@ model = (
         rho_0=rho_g,
         rho_p=rho_p,
         other=dict(project="mcc_ocr4"),
+        settings=dict(throw=False)
     ),
     hdx.MuI_incompressible(
         mu_s=mu_0,

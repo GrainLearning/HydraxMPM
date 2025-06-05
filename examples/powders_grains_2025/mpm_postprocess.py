@@ -81,7 +81,7 @@ labels = [
     "MCC OCR=4",
 ]
 
-leg_label = "Shear Strain $\\gamma$"
+leg_label = "shear strain $\\gamma$"
 
 
 grid_size = (517, 165)  # change this when adjusting orgin/end
@@ -172,11 +172,11 @@ for pi, project in enumerate(projects):
         axes[pi, ai].set_ylim(0.0, 1.0)
 
         if pi == 2:
-            axes[pi, ai].set_xlabel("x [m]")
+            axes[pi, ai].set_xlabel("$x$ [m]")
             axes[pi, ai].set_xticks([0.5, 1.0, 1.5, 2.0, 2.5])
         if ai == 0:
-            axes[pi, ai].set_ylabel(f"{labels[pi]}\n\ny [m]")  # Add space and unit
-            axes[pi, ai].set_ylabel(f"{labels[pi]}\n\ny [m]")
+            axes[pi, ai].set_ylabel(f"{labels[pi]}\n\n $y$ [m]")
+            axes[pi, ai].set_ylabel(f"{labels[pi]}\n\n $y$ [m]")
 
 
 ticks = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
@@ -192,6 +192,7 @@ cbar = fig.colorbar(
     ticks=ticks,
 )
 cbar.ax.set_ylabel(leg_label)
+
 plt.minorticks_off()
 
-plt.savefig(plot_dir + "/collapse", bbox_inches="tight")
+plt.savefig(plot_dir + "/collapse.pdf", bbox_inches="tight")

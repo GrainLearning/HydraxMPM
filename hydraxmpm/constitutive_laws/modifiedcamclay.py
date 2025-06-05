@@ -393,13 +393,13 @@ class ModifiedCamClay(ConstitutiveLaw):
 
         xi = (self.lam - self.kap) * jnp.log(self.R)
 
-        ln_v_eta = (
-            ln_N
-            - self.lam * jnp.log(p)
-            - (self.lam - self.kap) * jnp.log(1 + q**2 / self.M**2)
-        )
-
-        ln_v = ln_v_eta - xi
+        ln_v = ln_N - self.lam * jnp.log(p) - (self.lam - self.kap) * jnp.log(self.R)
+        # ln_v_eta = (
+        #     ln_N
+        #     - self.lam * jnp.log(p)
+        #     - (self.lam - self.kap) * jnp.log(1 + q**2 / self.M**2)
+        # )
+        # ln_v = ln_v_eta - xi
 
         return ln_v
 

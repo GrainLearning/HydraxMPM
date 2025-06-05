@@ -7,6 +7,7 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import scienceplots
+import math
 
 # --- Configuration ---
 # JAX Configuration
@@ -24,7 +25,7 @@ cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
 # Current directory
 dir_path = os.path.dirname(os.path.realpath(__file__))
-output_filename = dir_path + "/plots/sip_pressure_control.png"
+
 
 # --- Configuration ---
 
@@ -81,7 +82,7 @@ constitutive_laws = (
         ln_N=ln_N,
         rho_p=rho_p,
     ),
-    # # initial density/ pressure is selected to match steady state of mcc
+    # initial density/ pressure is selected to match steady state of mcc
     hdx.MuI_incompressible(
         name="MU I LC",
         other=dict(label="$ \\mu (I)$-LC", ls="-", zorder=0, color=cycle[1]),
@@ -260,6 +261,14 @@ eta_csl_ref = (jnp.ones(total_num_steps) * model_ref.M * jnp.sqrt(3) * p_0) / (
 axes.flat[1].plot(time_stack, eta_csl_ref, "r-", lw=1.25, zorder=1)
 axes.flat[1].set_ylim(bottom=10)
 axes.flat[1].set_yticks([1, 1e1, 1e2, 1e3, 1e4, 1e5], minor=True)
+
+
+axes.flat[1].yaxis.set_minor_formatter(
+    mpl.ticker.FuncFormatter(lambda v, _: ("$10^{%d}$" % math.log(v, 10)))
+)
+axes.flat[1].yaxis.set_major_formatter(
+    mpl.ticker.FuncFormatter(lambda v, _: ("$10^{%d}$" % math.log(v, 10)))
+)
 axes.flat[1].set_xticks([0, 2, 4, 6])
 
 # Plot 3: Specific Volume vs Pressure (log-log scale) extras
@@ -269,7 +278,6 @@ v_csl = constitutive_laws[0].CSL(p_range_csl)
 
 # CSL
 axes.flat[2].plot(p_range_csl, v_csl, "r-", lw=1.25, zorder=-1)
-
 
 # OCL
 v_ocl = constitutive_laws[0].SL(
