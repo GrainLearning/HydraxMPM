@@ -207,6 +207,8 @@ class RigidParticles(Force):
                 vel_nt,
             )
             node_moments_nt = new_nodes_vel_nt * mass
+
+            node_moments_nt = jnp.nan_to_num(node_moments_nt)
             return node_moments_nt
 
         # jax.debug.print("r_nodes_vel_stack {}", r_nodes_vel_stack.max())

@@ -16,6 +16,7 @@ from ..common.types import (
     TypeFloat,
     TypeFloatMatrix3x3,
     TypeFloatMatrix3x3PStack,
+    TypeFloatScalarNStack,
     TypeInt,
 )
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
@@ -36,6 +37,8 @@ class USL_ASFLIP(MPMSolver):
     Dp: TypeFloatMatrix3x3
     Dp_inv: TypeFloatMatrix3x3
     Bp_stack: TypeFloatMatrix3x3PStack
+    
+    J_stack: TypeFloatScalarNStack
 
     def __init__(
         self,
@@ -102,6 +105,9 @@ class USL_ASFLIP(MPMSolver):
             self.Bp_stack = jnp.zeros((self.material_points.num_points, 3, 3))
         else:
             self.Bp_stack = Bp_stack
+        
+
+        self.J_stack = jnp.zeros(self.grid.num_cells)
 
     @jax.checkpoint
     def update(self: Self, step: TypeInt = 0, dt: TypeFloat = 1e-3) -> Self:
@@ -115,7 +121,7 @@ class USL_ASFLIP(MPMSolver):
             dt=dt,
         )
 
-        new_shape_map, grid = self.p2g(
+        self, new_shape_map, grid = self.p2g(
             material_points=material_points, grid=self.grid, dt=dt
         )
 
@@ -150,6 +156,7 @@ class USL_ASFLIP(MPMSolver):
             intr_velocities = material_points.velocity_stack.at[point_id].get()
             intr_ext_forces = material_points.force_stack.at[point_id].get()
             intr_stresses = material_points.stress_stack.at[point_id].get()
+            intr_F_stack = material_points.F_stack.at[point_id].get()
 
             intr_Bp = self.Bp_stack.at[point_id].get()  # APIC affine matrix
 
@@ -185,21 +192,9 @@ class USL_ASFLIP(MPMSolver):
 
             scaled_normal = (intr_shapef_grad * intr_masses).at[: self.dim].get()
 
-            return scaled_mass, scaled_moments, scaled_total_force, scaled_normal
+            scaled_Jm = scaled_mass * jnp.linalg.det(intr_F_stack)
 
-        # note the interactions and shapefunctions are calculated on the
-        # p2g to reduce computational overhead.
-        (
-            new_shape_map,
-            (
-                scaled_mass_stack,
-                scaled_moment_stack,
-                scaled_total_force_stack,
-                scaled_normal_stack,
-            ),
-        ) = self.shape_map.vmap_interactions_and_scatter(
-            vmap_intr_p2g, material_points, grid
-        )
+            return scaled_mass, scaled_moments, scaled_total_force, scaled_normal, scaled_Jm
 
         def sum_interactions(stack, scaled_stack):
             return (
@@ -207,6 +202,22 @@ class USL_ASFLIP(MPMSolver):
                 .at[new_shape_map._intr_hash_stack]
                 .add(scaled_stack)
             )
+        # note the interactions and shapefunctions are calculated on the
+        # p2g to reduce computational overhead.
+        (new_shape_map,p2g_out_stacks)= self.shape_map.vmap_interactions_and_scatter(
+            vmap_intr_p2g, material_points, grid
+        )
+
+        (
+            scaled_mass_stack,
+            scaled_moment_stack,
+            scaled_total_force_stack,
+            scaled_normal_stack,
+            scaled_Jm_stack,
+        ) = p2g_out_stacks
+  
+
+
 
         # sum
         new_mass_stack = sum_interactions(grid.mass_stack, scaled_mass_stack)
@@ -215,10 +226,23 @@ class USL_ASFLIP(MPMSolver):
             self.grid.moment_stack, scaled_total_force_stack
         )
         new_normal_stack = sum_interactions(grid.normal_stack, scaled_normal_stack)
+        # new_node_Jm_stack = sum_interactions(self.J_stack, scaled_Jm_stack)
 
+        # def divide(X_generic, mass):
+   
+        #     result = X_generic / (mass + 1e-22)
+        #     return result
+            
+        # new_node_J_stack = jax.vmap(divide)(new_node_Jm_stack, new_mass_stack)
         nodes_moment_nt_stack = new_moment_stack + new_force_stack * dt
 
-        return new_shape_map, eqx.tree_at(
+        # new_solver = eqx.tree_at(
+        #     lambda state: (state.J_stack),
+        #     self,
+        #     (new_node_J_stack),
+        # )
+
+        return self,new_shape_map, eqx.tree_at(
             lambda state: (
                 state.mass_stack,
                 state.moment_stack,
@@ -234,18 +258,19 @@ class USL_ASFLIP(MPMSolver):
             intr_masses = grid.mass_stack.at[intr_hashes].get()
             intr_moments = grid.moment_stack.at[intr_hashes].get()
             intr_moments_nt = grid.moment_nt_stack.at[intr_hashes].get()
+            intr_J = self.J_stack.at[intr_hashes].get()
 
             # intr_vels = intr_moments / (intr_masses + grid.small_mass_cutoff)
             intr_vels = jax.lax.cond(
                 intr_masses > grid.small_mass_cutoff,
-                lambda x: x / intr_masses,
+                lambda x: x / (intr_masses + 1e-22),
                 lambda x: jnp.zeros_like(x),
                 intr_moments,
             )
             # intr_vels_nt = intr_moments_nt / (intr_masses + grid.small_mass_cutoff)
             intr_vels_nt = jax.lax.cond(
                 intr_masses > grid.small_mass_cutoff,
-                lambda x: x / intr_masses,
+                lambda x: x / (intr_masses + 1e-22),
                 lambda x: jnp.zeros_like(x),
                 intr_moments_nt,
             )
@@ -254,6 +279,8 @@ class USL_ASFLIP(MPMSolver):
 
             intr_delta_vels = intr_vels_nt - intr_vels
             intr_scaled_delta_vels = intr_shapef * intr_delta_vels
+            
+            intr_scaled_J  = intr_shapef * intr_J
 
             # Pad velocities for plane strain
             intr_vels_nt_padded = jnp.pad(
@@ -277,6 +304,7 @@ class USL_ASFLIP(MPMSolver):
                 intr_scaled_vels_nt,
                 intr_scaled_velgrad,
                 intr_Bp,
+                intr_scaled_J
             )
 
         (
@@ -284,14 +312,37 @@ class USL_ASFLIP(MPMSolver):
             new_intr_scaled_vel_nt_stack,
             new_intr_scaled_velgrad_stack,
             new_intr_Bp_stack,
+            new_intr_scaled_J_stack
         ) = shape_map.vmap_intr_gather(vmap_intr_g2p)
+        if self.error_check:
+            new_intr_scaled_delta_vel_stack = eqx.error_if(
+                new_intr_scaled_delta_vel_stack,
+                ~jnp.isfinite(new_intr_scaled_delta_vel_stack),
+                "new_intr_scaled_delta_vel_stack is non finite",
+            )
+            new_intr_scaled_vel_nt_stack = eqx.error_if(
+                new_intr_scaled_vel_nt_stack,
+                ~jnp.isfinite(new_intr_scaled_vel_nt_stack),
+                "new_intr_scaled_vel_nt_stack is non finite",
+            )
+            new_intr_scaled_velgrad_stack = eqx.error_if(
+                new_intr_scaled_velgrad_stack,
+                ~jnp.isfinite(new_intr_scaled_velgrad_stack),
+                "new_intr_scaled_velgrad_stack is non finite",
+            )
+            new_intr_Bp_stack = eqx.error_if(
+                new_intr_Bp_stack,
+                ~jnp.isfinite(new_intr_Bp_stack),
+                "new_intr_Bp_stack is non finite",
+            )
 
-        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0, 0, 0))
+        @partial(jax.vmap, in_axes=(0, 0, 0, 0, 0, 0, 0, 0,0))
         def vmap_particles_update(
             intr_delta_vels_reshaped,
             intr_vels_nt_reshaped,
             intr_velgrad_reshaped,
             intr_Bp,
+            new_intr_scaled_J,
             p_velocities,
             p_positions,
             p_F,
@@ -304,29 +355,47 @@ class USL_ASFLIP(MPMSolver):
             vels_nt = jnp.sum(intr_vels_nt_reshaped, axis=0)
 
             p_Bp_next = jnp.sum(intr_Bp, axis=0)
+            p_J_bar_next = jnp.sum(new_intr_scaled_J, axis=0)
 
             if self.dim == 2:
                 p_Bp_next = p_Bp_next.at[2, 2].set(0.0)
+
+            if self.error_check:
+                p_velocities = eqx.error_if(
+                    p_velocities,
+                    ~jnp.isfinite(p_velocities),
+                    "p_velocities is non finite",
+                )
 
             T = self.alpha * (p_velocities + delta_vels - vels_nt)
             p_velocities_next = vels_nt + T
 
             if self.error_check:
                 p_velgrads_next = eqx.error_if(
-                    p_velocities_next,
-                    jnp.isnan(p_velocities_next).any(),
-                    "p_velocities_next is nan",
+                    p_velgrads_next,
+                    ~jnp.isfinite(p_velgrads_next),
+                    "p_velgrads_next is non finite",
                 )
             if self.dim == 2:
                 p_velgrads_next = p_velgrads_next.at[2, 2].set(0.0)
 
-            p_F_next = (jnp.eye(3) + p_velgrads_next * dt) @ p_F
-
+            # p_F_next = (jnp.eye(3) + p_velgrads_next * dt) @ p_F
+            p_F_next = jax.scipy.linalg.expm(p_velgrads_next * dt) @ p_F
+            
+            # p_J_next = jnp.linalg.det(p_F_next)
+            # p_F_next = ((p_J_bar_next/ p_J_next)**(1/3)) * p_F_next
+            
             if self.dim == 2:
                 p_F_next = p_F_next.at[2, 2].set(1)
 
             p_volumes_next = jnp.linalg.det(p_F_next) * p_volumes_orig
 
+            if self.error_check:
+                p_volumes_next = eqx.error_if(
+                    p_volumes_next,
+                    ~jnp.isfinite(p_volumes_next),
+                    "p_volumes_next is non finite",
+                )
             # solid volume fraction
             phi = p_volumes_orig / p_volumes_next  # mass is constant
 
@@ -361,6 +430,7 @@ class USL_ASFLIP(MPMSolver):
             new_intr_scaled_vel_nt_stack.reshape(-1, shape_map._window_size, self.dim),
             new_intr_scaled_velgrad_stack.reshape(-1, shape_map._window_size, 3, 3),
             new_intr_Bp_stack.reshape(-1, shape_map._window_size, 3, 3),
+            new_intr_scaled_J_stack.reshape(-1, shape_map._window_size),
             material_points.velocity_stack,
             material_points.position_stack,
             material_points.F_stack,
@@ -372,7 +442,12 @@ class USL_ASFLIP(MPMSolver):
             self,
             (new_Bp_stack),
         )
-
+        if self.error_check:
+            new_volume_stack = eqx.error_if(
+                new_volume_stack,
+                ~jnp.isfinite(new_volume_stack),
+                "new_volume_stack is non finite",
+            )
         new_particles = eqx.tree_at(
             lambda state: (
                 state.volume_stack,
@@ -390,5 +465,7 @@ class USL_ASFLIP(MPMSolver):
                 new_velocity_stack,
             ),
         )
+        
+        # jax.debug.print("new_particles.F_stack:{}", new_particles.F_stack)
 
         return new_solver, new_particles

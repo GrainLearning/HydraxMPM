@@ -73,7 +73,7 @@ class Grid(eqx.Module):
         origin: TypeFloat3 | tuple,
         end: TypeFloat3 | tuple,
         cell_size: TypeFloat,
-        small_mass_cutoff: TypeFloat = 1e-8,
+        small_mass_cutoff: TypeFloat = 1e-9,
         **kwargs,
     ) -> Self:
         self.origin = jnp.array(origin)

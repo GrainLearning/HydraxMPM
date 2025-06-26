@@ -5,6 +5,23 @@
 
 # -*- coding: utf-8 -*-
 
+"""
+MPM Solver core class for HydraxMPM.
+
+This module defines the MPMSolver class, which runs the Material Point Method (MPM) simulation.
+
+It manages material points, grid, forces, constitutive laws, and the simulation loop. 
+
+The solver supports adaptive time stepping, output management, and modular initialization for flexible simulation setups.
+
+Key responsibilities:
+- Initialize and set up all MPM components (material points, grid, forces, constitutive laws).
+- Manage the main simulation loop, including adaptive or fixed time stepping.
+- Update forces and constitutive laws at each step.
+- Handle output and debugging utilities.
+- Provide convenience methods for setup and output extraction.
+"""
+
 from typing import Callable, Optional, Self, Tuple, Dict
 
 import equinox as eqx
@@ -21,7 +38,6 @@ from ..common.types import (
     TypeUIntScalarAStack,
     TypeFloat,
 )
-
 from ..shapefunctions.mapping import ShapeFunctionMapping
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..forces.force import Force
@@ -29,7 +45,6 @@ from ..grid.grid import Grid
 from ..forces.boundary import Boundary
 from ..forces.slipstickboundary import SlipStickBoundary
 from ..material_points.material_points import MaterialPoints
-
 from ..utils.math_helpers import (
     get_hencky_strain_stack,
     get_inertial_number_stack,
@@ -38,40 +53,50 @@ from ..utils.math_helpers import (
     get_scalar_shear_strain_stack,
     get_strain_rate_from_L_stack,
 )
-
 import os
 import shutil
+from ..utils.jax_helpers import debug_state
+import itertools
+import sys
 
 
 def _numpy_tuple_deep(x) -> tuple:
+    """Convert nested arrays to nested tuples for hashability or serialization."""
     return tuple(map(tuple, jnp.array(x).tolist()))
 
 
 def create_dir(directory_path, override=True):
+    """Create a directory, removing it first if override is True."""
     if os.path.exists(directory_path) and override:
         shutil.rmtree(directory_path)
-
     os.makedirs(directory_path)
     return directory_path
 
 
 def save_files(step, output_dir, name="", **kwargs):
+    """Save simulation arrays to a .npz file for a given step and name."""
     if len(kwargs) > 0:
         jnp.savez(f"{output_dir}/{name}.{step.astype(int)}", **kwargs)
 
 
 class MPMSolver(Base):
     """
-    MPM solver base class for running MPM simulations which contains all components.
+    Main MPM solver class for running Material Point Method simulations.
 
-    This class also provides initialization convenience functions
-    to create a solver from a dictionary of options.
+    This class manages all simulation components and the main loop. It provides setup, update, and output routines, and supports both fixed and adaptive time stepping.
 
     Attributes:
-        material_points: (:class:`MaterialPoints`) MPM material_points object # MaterialPoints # see #[MaterialPoints]. # TODO
-        grid: (:class:`Grid`) Regular background grid see #[Nodes]. # TODO
-        constitutive_laws: (:class:`ConstitutiveLaw`) List of constitutive_laws see #[Materials]. # TODO
-        forces: (:class:`Force`) List of forces # see #[Forces]. # TODO
+        material_points: MaterialPoints object representing the particles.
+        grid: Grid object representing the background grid.
+        forces: Tuple of Force objects (gravity, boundaries, etc).
+        constitutive_laws: Tuple of ConstitutiveLaw objects (material models).
+        callbacks: Optional tuple of callback functions for custom hooks.
+        shape_map: ShapeFunctionMapping for particle-grid interpolation.
+        shapefunction: Name of the shape function used.
+        dt: Time step size.
+        dim: Problem dimension (2 or 3).
+        ppc: Particles per cell.
+        output_vars: Variables to output during simulation.
     """
 
     # Modules
@@ -85,6 +110,8 @@ class MPMSolver(Base):
     shapefunction: str = eqx.field(static=True, default="linear")
 
     dt: TypeFloat = eqx.field(default=1e-3)
+    
+    is_fbar: bool = eqx.field(static=True, default=False)
 
     dim: int = eqx.field(static=True)
     ppc: int = eqx.field(static=True, default=1)
@@ -106,8 +133,24 @@ class MPMSolver(Base):
         ppc=1,
         shapefunction="linear",
         output_vars: Optional[dict | Tuple[str, ...]] = None,
+        is_fbar: bool = False,
         **kwargs,
     ) -> Self:
+        """
+        Initialize the MPM solver and all simulation components.
+
+        Args:
+            dim: Problem dimension (2 or 3).
+            material_points: MaterialPoints object.
+            grid: Grid object.
+            constitutive_laws: Tuple of material models.
+            forces: Tuple of forces (gravity, boundaries, etc).
+            ppc: Particles per cell.
+            shapefunction: Name of shape function for interpolation.
+            output_vars: Variables to output during simulation.
+            is_fbar: If True, use F-bar method prevent volumetric locking.
+            **kwargs: Additional arguments for Base class.
+        """
         assert material_points.position_stack.shape[1] == dim, (
             "Dimension mismatch of material points, check if dim is set correctly. Either"
             "the material_points or the dim is set incorrectly."
@@ -123,6 +166,7 @@ class MPMSolver(Base):
         self.ppc = ppc
         self.shapefunction = shapefunction
         self._padding = (0, 3 - self.dim)
+        self.is_fbar = is_fbar
 
         self.material_points = material_points
 
@@ -149,6 +193,10 @@ class MPMSolver(Base):
         super().__init__(**kwargs)
 
     def setup(self: Self, **kwargs) -> Self:
+        """
+        Prepare the solver for simulation by initializing all components.
+        Sets up material points, grid, constitutive laws, and forces.
+        """
         # we run this once after initialization
         if self._setup_done:
             return self
@@ -184,7 +232,23 @@ class MPMSolver(Base):
         new_forces = tuple(new_forces)
 
         params = self.__dict__
-        print("🐢.. Setting up MPM solver")
+        # make turtle dance
+        turtle_frames = [
+            "🐢      ",
+            " 🐢     ",
+            "  🐢    ",
+            "   🐢   ",
+            "    🐢  ",
+            "     🐢 ",
+            "    🐢  ",
+            "   🐢   ",
+            "  🐢    ",
+            " 🐢     ",
+        ]
+        for frame in itertools.islice(itertools.cycle(turtle_frames), 10):
+            print(f"\r{frame} Setting up MPM solver", end="")
+            sys.stdout.flush()
+        print("\r🐢.. Setting up MPM solver")
         print(f"Material Points: {new_material_points.num_points}")
         print(f"Grid: {new_grid.num_cells} ({new_grid.grid_size})")
 
@@ -206,6 +270,10 @@ class MPMSolver(Base):
         step: TypeInt,
         dt: TypeFloat,
     ) -> Tuple[MaterialPoints, Tuple[Force, ...]]:
+        """
+        Apply all forces that act directly on material points (Lagrangian forces).
+        Returns updated material points and forces.
+        """
         # called within solver .update method
         new_forces = []
         for force in forces:
@@ -227,6 +295,10 @@ class MPMSolver(Base):
         step: TypeInt,
         dt: TypeFloat,
     ) -> Tuple[Grid, Tuple[Force, ...]]:
+        """
+        Apply all forces that act on the grid (Eulerian forces).
+        Returns updated grid and forces.
+        """
         # called within solver .update method
         new_forces = []
         for force in forces:
@@ -248,6 +320,10 @@ class MPMSolver(Base):
         constitutive_laws: Tuple[ConstitutiveLaw, ...],
         dt,
     ) -> Tuple[MaterialPoints, Tuple[ConstitutiveLaw, ...]]:
+        """
+        Update all constitutive laws (material models) for the current step.
+        Returns updated material points and constitutive laws.
+        """
         # called within solver .update method
         new_materials = []
         for material in constitutive_laws:
@@ -261,6 +337,10 @@ class MPMSolver(Base):
         return material_points, tuple(new_materials)
 
     def _get_timestep(self, dt_alpha: TypeFloat = 0.5) -> TypeFloat:
+        """
+        Compute the critical time step for stability, based on material and grid properties.
+        Returns the minimum stable time step across all constitutive laws.
+        """
         dt = 1e9
         for constitutive_laws in self.constitutive_laws:
             dt = jnp.minimum(
@@ -274,6 +354,10 @@ class MPMSolver(Base):
         return dt
 
     def get_output(self, new_solver, dt):
+        """
+        Collect output variables from the solver state for storage or analysis.
+        Returns dictionaries of arrays for material points, shape map, and forces.
+        """
         material_points_output = self.output_vars.get("material_points", ())
 
         material_point_arrays = {}
@@ -304,6 +388,7 @@ class MPMSolver(Base):
                     material_points=new_solver.material_points,
                     grid=new_solver.grid,
                     dt=dt,
+                    constitutive_law=new_solver.constitutive_laws[0],
                 )
             shape_map_arrays[key] = output
 
@@ -328,8 +413,25 @@ class MPMSolver(Base):
         dt_alpha: Optional[float] = 0.5,
         dt_max: Optional[float] = None,
         output_dir: Optional[str] = None,
+        debug_dir: Optional[str] = None,
         override_dir: Optional[bool] = False,
     ):
+        """
+        Main simulation loop for the MPM solver.
+
+        Args:
+            total_time: Total simulation time.
+            store_interval: Time interval for saving output.
+            adaptive: If True, use adaptive time stepping.
+            dt: Fixed time step (if not adaptive).
+            dt_alpha: CFL safety factor for adaptive time stepping.
+            dt_max: Maximum allowed time step (adaptive mode).
+            output_dir: Directory for output files.
+            debug_dir: Directory for debug files.
+            override_dir: If True, overwrite output directories.
+        Returns:
+            Final solver state after simulation.
+        """
         if adaptive:
             _dt = self._get_timestep(dt_alpha)
         else:
@@ -337,11 +439,22 @@ class MPMSolver(Base):
         if (override_dir) and (output_dir is not None):
             create_dir(output_dir)
 
+        if debug_dir is not None:
+            create_dir(debug_dir)
+
+        if debug_dir is not None:
+            jax.debug.print(
+                "Debugging enabled, saving to: {}",
+                debug_dir,
+            )
+
         def save_all(args):
             step, next_solver, prev_solver, store_interval, output_time, _dt = args
             shape_map_arrays, material_point_arrays, forces_arrays = (
                 prev_solver.get_output(next_solver, _dt)
             )
+            if output_dir is None:
+                return output_time + store_interval
             jax.debug.callback(
                 save_files, step, output_dir, "material_points", **material_point_arrays
             )
@@ -366,6 +479,15 @@ class MPMSolver(Base):
 
             next_solver = prev_solver.update(step, _dt)
 
+            if debug_dir is not None:
+                debug_state(
+                    (~jnp.isfinite(next_solver.material_points.stress_stack)).any(),
+                    (prev_solver, next_solver, step, _dt),
+                    filename=os.path.join(debug_dir, "debug_solver.pkl"),
+                    where="MPMSolver.run",
+                    why="Material points stress stack not finite",
+                )
+
             next_sim_time = prev_sim_time + _dt
 
             if output_dir is not None:
@@ -388,9 +510,10 @@ class MPMSolver(Base):
             if adaptive:
                 next_dt = next_solver._get_timestep(dt_alpha)
                 next_dt = jnp.clip(next_dt, None, dt_max)
+                # next_dt = jnp.nan_to_num(next_dt, dt)
             else:
                 next_dt = dt
-
+            # jax.debug.print(" next_dt {} \r", next_dt)
             return (step + 1, next_sim_time, next_output_time, next_dt, next_solver)
 
         step, sim_time, output_time, dt, new_solver = eqx.internal.while_loop(

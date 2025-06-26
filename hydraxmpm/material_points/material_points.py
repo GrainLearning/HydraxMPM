@@ -20,6 +20,7 @@ from ..common.types import (
     TypeFloatVector,
     TypeFloatVectorPStack,
     TypeInt,
+    TypeBoolPStack,
 )
 from ..utils.math_helpers import (
     get_hencky_strain_stack,
@@ -64,7 +65,7 @@ class MaterialPoints(Base):
     L_stack: TypeFloatMatrix3x3PStack
     stress_stack: TypeFloatMatrix3x3PStack
     F_stack: TypeFloatMatrix3x3PStack
-
+    isactive_stack: TypeBoolPStack
     dim: TypeInt = eqx.field(init=False, static=True, default=3)
     num_points: TypeInt = eqx.field(init=False, static=True, default=1)
 
@@ -126,6 +127,10 @@ class MaterialPoints(Base):
             "F_stack", jnp.tile(jnp.eye(3), (self.num_points, 1, 1))
         )
 
+        self.isactive_stack = kwargs.get(
+            "isactive_stack", jnp.ones(self.num_points, dtype=bool)
+        )
+
         self.ref_gravity_pe_pos = kwargs.get("ref_gravity_pe_pos")
         self.ref_gravity = kwargs.get("ref_gravity")
         super().__init__(**kwargs)
@@ -181,16 +186,28 @@ class MaterialPoints(Base):
             (self.L_stack.at[:].set(0.0), self.force_stack.at[:].set(0.0)),
         )
 
-    def update_L_and_F_stack(self, L_stack_next, dt):
-        """Update the velocity gradient and deformation gradient tensors."""
+    def update_L_and_F_stack(self, L_stack_next, dt, is_linear_approx=True):
+        """Update the velocity gradient and deformation gradient tensors.
+
+        is_linear_approx: If True, use linear approximation for deformation gradient update.
+
+        matrix expoonential is more expensive, but unconditionally volume-preserving for traceless
+        velocity gradient tensors
+
+        """
+
         def update_F_volume(L_next, F_prev, volume0):
-            F_next = (jnp.eye(3) + L_next * dt) @ F_prev
+            if is_linear_approx:
+                F_next = (jnp.eye(3) + L_next * dt) @ F_prev
+            else:
+                F_next = jax.scipy.linalg.expm(L_next * dt) @ F_prev
             volume_next = jnp.linalg.det(F_next) * volume0
             return F_next, volume_next
 
         F_stack_next, volume_stack_next = jax.vmap(update_F_volume)(
             L_stack_next, self.F_stack, self.volume0_stack
         )
+        # jax.debug.print("{}", volume_stack_next)
 
         return self.replace(
             L_stack=L_stack_next, F_stack=F_stack_next, volume_stack=volume_stack_next
@@ -198,7 +215,14 @@ class MaterialPoints(Base):
 
     @property
     def rho_stack(self):
-        return self.mass_stack / self.volume_stack
+        volumes_stack = self.volume_stack
+        if self.error_check:
+            volumes_stack = eqx.error_if(
+                volumes_stack,
+                ~jnp.isfinite(volumes_stack),
+                "[Material Points]: volumes_stack is non finite.",
+            )
+        return self.mass_stack / volumes_stack
 
     @property
     def rho0_stack(self):

@@ -39,6 +39,7 @@ from ..utils.math_helpers import (
     get_q_vm_stack,
     get_scalar_shear_strain_stack,
     get_strain_rate_from_L_stack,
+    get_volumetric_strain_stack,
 )
 
 
@@ -328,7 +329,7 @@ class ShapeFunctionMapping(Base):
         def divide(X_generic, mass):
             result = jax.lax.cond(
                 mass > grid.small_mass_cutoff,
-                lambda x: x / mass,
+                lambda x: x / (mass + 1e-12),
                 # lambda x: 0.0 * jnp.zeros_like(x),
                 lambda x: jnp.nan * jnp.zeros_like(x),
                 X_generic,
@@ -368,6 +369,14 @@ class ShapeFunctionMapping(Base):
     def grid_mesh(self, grid, **kwargs):
         return grid.position_mesh
 
+    def p2g_mass_stack(self, material_points, grid, **kwargs):
+        mass_stack = self.map_p2g(
+            material_points.mass_stack,
+            material_points.mass_stack,
+            grid,
+        )
+        return mass_stack
+
     def p2g_p_stack(self, material_points, grid, **kwargs):
         stress_stack = self.map_p2g(
             material_points.stress_stack,
@@ -402,12 +411,20 @@ class ShapeFunctionMapping(Base):
         )
 
     def p2g_dgamma_dt_stack(self, material_points, grid, **kwargs):
-        depsdt_stack = self.map_p2g(
-            material_points.depsdt_stack,
+        deps_dt_stack = self.map_p2g(
+            material_points.deps_dt_stack,
             material_points.mass_stack,
             grid,
         )
-        return get_scalar_shear_strain_stack(depsdt_stack)
+        return get_scalar_shear_strain_stack(deps_dt_stack)
+
+    def p2g_deps_v_dt_stack(self, material_points, grid, **kwargs):
+        deps_dt_stack = self.map_p2g(
+            material_points.deps_dt_stack,
+            material_points.mass_stack,
+            grid,
+        )
+        return get_volumetric_strain_stack(deps_dt_stack)
 
     def p2g_positions(self, material_points, grid, **kwargs):
         return self.map_p2g(
@@ -431,19 +448,38 @@ class ShapeFunctionMapping(Base):
         )
         return get_scalar_shear_strain_stack(eps_stack)
 
+    def p2g_eps_v_stack(self, material_points, grid, **kwargs):
+        eps_stack = self.map_p2g(
+            material_points.eps_stack,
+            material_points.mass_stack,
+            grid,
+        )
+        return get_volumetric_strain_stack(eps_stack)
 
-# @property
-# def p2g_specific_volume_stack(self):
-#     specific_volume_stack = self.material_points.specific_volume_stack(
-#         rho_p=self.constitutive_laws[0].rho_p
-#     )
-#     return self.map_p2g(X_stack=specific_volume_stack)
+    def p2g_specific_volume_stack(self, material_points, grid, **kwargs):
+        constitutive_law = kwargs.get("constitutive_law", None)
 
-# @property
-# def p2g_viscosity_stack(self):
-#     q_stack = self.p2g_q_vm_stack
-#     dgamma_dt_stack = self.p2g_dgamma_dt_stack
-#     return (jnp.sqrt(3) * q_stack) / dgamma_dt_stack
+        assert constitutive_law is not None, (
+            "Constitutive law must be provided for specific volume calculation."
+        )
+        specific_volume_stack = self.map_p2g(
+            material_points.specific_volume_stack(constitutive_law.rho_p),
+            material_points.mass_stack,
+            grid,
+        )
+        return specific_volume_stack
+
+    def p2g_viscosity_stack(self, material_points, grid, **kwargs):
+        dgamma_dt_stack = self.p2g_dgamma_dt_stack(
+            material_points,
+            grid,
+        )
+        q_stack = self.p2g_q_stack(
+            material_points,
+            grid,
+        )
+        return (jnp.sqrt(3) * q_stack) / dgamma_dt_stack
+
 
 # @property
 # def p2g_inertial_number_stack(self):
