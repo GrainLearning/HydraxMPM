@@ -25,9 +25,11 @@ from .constitutive_laws.linearelastic import LinearIsotropicElastic
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay
 from .constitutive_laws.modifiedcamclay_nl import ModifiedCamClayNL
 from .constitutive_laws.mu_i_lc import MuI_LC
+from .constitutive_laws.mu_i_lc_rm import MuI_LC_RM
 from .constitutive_laws.mu_i_lc_phi_i import MuI_LC_PhiI
 from .constitutive_laws.newtonfluid import NewtonFluid
 from .constitutive_laws.druckerprager import DruckerPrager
+from .constitutive_laws.modifiedcamclay_nl_mu_i_phi_i import ModifiedCamClayNLMuI
 
 from .sip_benchmarks.sip_benchmarks import (
     TriaxialConsolidatedUndrained,
@@ -35,8 +37,10 @@ from .sip_benchmarks.sip_benchmarks import (
     ConstantPressureShear,
     ConstantVolumeShear,
     IsotropicCompression,
+    UniaxialCompression,
 )
 
+from .forces.particle_damping import ParticleDamping
 from .forces.boundary import Boundary
 from .forces.slipstickboundary import SlipStickBoundary
 from .forces.rigidparticles import RigidParticles
@@ -71,6 +75,8 @@ from .utils.math_helpers import (
     get_scalar_shear_strain,
     get_inertial_number,
     get_inertial_number_stack,
+    get_strain_rate_from_L_stack,
+    get_volumetric_strain_stack,
 )
 
 from .common.types import (

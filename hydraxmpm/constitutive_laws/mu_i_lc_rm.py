@@ -14,7 +14,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from typing_extensions import Optional, Self, Union
-
+import optimistix as optx
 from ..common.types import TypeFloat, TypeFloatScalarPStack, TypeInt
 from ..material_points.material_points import MaterialPoints
 from ..utils.math_helpers import (
@@ -22,6 +22,7 @@ from ..utils.math_helpers import (
     get_inertial_number,
     get_scalar_shear_strain,
     get_sym_tensor,
+    get_scalar_shear_stress
 )
 from .constitutive_law import ConstitutiveLaw
 import equinox.internal as eqxi
@@ -29,6 +30,8 @@ import pickle
 
 from ..utils.jax_helpers import debug_state
 
+def yield_function(tau, p, mu_I):
+    return tau - mu_I * p
 
 def get_mu_I(I, mu_s, mu_d, I0):
     return mu_s + (mu_d - mu_s) * (1 / (1 + I0 / I))
@@ -55,7 +58,7 @@ def give_rho(K, rho_0, p):
     return rho_0 * ((p / K) + 1)
 
 
-class MuI_LC(ConstitutiveLaw):
+class MuI_LC_RM(ConstitutiveLaw):
     mu_s: TypeFloat
     mu_d: TypeFloat
     I_0: TypeFloat
@@ -136,13 +139,14 @@ class MuI_LC(ConstitutiveLaw):
 
         deps_dt_stack = material_points.deps_dt_stack
 
-        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=0)
+        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=
+                                  (0, 0, 0, 0))
 
         new_stress_stack = vmap_update_ip(
             material_points.stress_stack,
             material_points.F_stack,
             deps_dt_stack,
-            rho_rho_0_stack,
+            rho_rho_0_stack
         )
 
         new_material_points = eqx.tree_at(
@@ -158,46 +162,71 @@ class MuI_LC(ConstitutiveLaw):
         stress_prev,
         F,
         deps_dt,
-        rho_rho_0,
+        rho_rho_0
     ):
-        deps_dev_dt = get_dev_strain(deps_dt)
-
+        rho_rho_0 = jnp.clip(rho_rho_0, 1.0, None)
         dgamma_dt = get_scalar_shear_strain(deps_dt)
+        deps_dev_dt = get_dev_strain(deps_dt)
+        p = jnp.log(rho_rho_0) * self.K
+        p_next = jnp.clip(p, 1e-12, None)
+        def residuals_cone(sol, args):
+            hat_dgamma_dt = sol
 
-        # is connected and sheared
-        is_connected = (rho_rho_0 > 1.0)* (dgamma_dt > 1e-22)
-        def viscoplastic_update():
-            # https://github.com/patrick-kidger/optimistix/issues/132
-            rho_rho_0_safe = jnp.where(~is_connected, 1.0, rho_rho_0)
-            p = jnp.log(rho_rho_0_safe) * self.K
-            eta_s = (self.mu_s * p)/ jnp.sqrt(dgamma_dt*dgamma_dt + self.alpha_2)
-            delta_mu = self.mu_d - self.mu_s
-            xi = self.I_0 *jnp.sqrt(p/ self.rho_p)
-       
-            eta_d =  (self.d*p*delta_mu) / (
-                    xi + self.d*dgamma_dt
-                )
             
-            eta = eta_s + eta_d
+            I = get_inertial_number( p_next,hat_dgamma_dt, self.d, self.rho_p)
+            
+            # eta_s = (self.mu_s * p)/ (dgamma_dt*dgamma_dt + self.alpha_2)
+            mu_I = get_mu_I(I, self.mu_s, self.mu_d, self.I_0)
+            eta = (mu_I * p)/ hat_dgamma_dt
+
+            s_next = eta*deps_dev_dt
+            tau_next = get_scalar_shear_stress(s_next)
+
+            R  = yield_function(tau_next, p_next, mu_I)
+            aux = (s_next,p_next)
+            return R, aux
+
+        def find_roots_cone():
+            solver = optx.Newton(rtol=1e-1, atol=1e-3)
+
+            sol = optx.root_find(
+                residuals_cone,
+                solver,
+                jnp.clip(dgamma_dt, 1e-22, None),
+                throw=False,
+                has_aux=True,
+                max_steps=20,
+                options=dict(lower=1e-22,upper=None),
+            )
+
+            return sol.value
         
-  
-            stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
-            return stress_next
+        def pull_to_cone():
+            pmulti = find_roots_cone()
+
+            R, aux = residuals_cone(pmulti, None)
+            return aux, pmulti
         
-        ptol = 0.0
-        stress_next = jax.lax.cond(
-            is_connected,  # partciles disconnect (called stress-free assumption)
-            lambda: viscoplastic_update(),
-            lambda: -ptol * jnp.ones((3, 3)),
-        )
+        (s_next, p_next), pmulti = pull_to_cone()
+        stress_next = -p_next * jnp.eye(3) + s_next
         return stress_next
-        # rho_rho_0 = jnp.clip(rho_rho_0, 1.0, None)
-        
-    #     
-    #     p = jnp.clip(p, 1e-12, None)
+
+    #     dgamma_dt = get_scalar_shear_strain(deps_dt)
+    #     I_min = 1e-5
+    #     I_max = 1e3
+    #     # dgamma_dt = jnp.clip(dgamma_dt, 1e-22, None)
+
+ 
+
+    #     alpha_r = 0.01
+
+    #     alpha_s = 0.000001
+
+
+    #     p = jnp.clip(p, 1e-22, None)
     #     dgamma_dt_min = (I_min / self.d) * jnp.sqrt(p / self.rho_p)
     #     dgamma_dt_max = (I_max / self.d) * jnp.sqrt(p / self.rho_p)
-    #     # dgamma_dt = jnp.clip(dgamma_dt, dgamma_dt_min, dgamma_dt_max)
+    #     dgamma_dt = jnp.clip(dgamma_dt, dgamma_dt_min, dgamma_dt_max)
     #     # p_max = self.rho_p * ((dgamma_dt * self.d) / I_min) ** 2
     #     # p_min = self.rho_p * ((dgamma_dt * self.d) / I_max) ** 2
     #     # p = jnp.clip(p, p_min, p_max)
@@ -205,7 +234,9 @@ class MuI_LC(ConstitutiveLaw):
 
     #     # eta_s = ((self.mu_s * p) * (1 - jnp.exp(-dgamma_dt / alpha_r)) )/ (dgamma_dt)
 
-
+    #     eta_s = (self.mu_s * p)/ (dgamma_dt*dgamma_dt + self.alpha_2)
+    #     delta_mu = self.mu_d - self.mu_s
+        
 
 
     #     # eta_d = (p * delta_mu * dgamma_dt) / (
@@ -235,7 +266,7 @@ class MuI_LC(ConstitutiveLaw):
     #             ~jnp.isfinite(stress_next).any(),
     #             "stress_next is non finite",
     #         )
-    #     return stress_next
+        # return stress_next
 
     def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
         """Get critical timestep of material poiints for stability."""

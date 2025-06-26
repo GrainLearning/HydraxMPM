@@ -28,25 +28,26 @@ from ..utils.math_helpers import (
 from .constitutive_law import ConstitutiveLaw
 
 
-def give_p_implicit(phi, dgamma_dt, K, phi_0, I_phi, d, rho_p, p_prev=1e-12):
+def give_p_implicit(phi_phi_0, dgamma_dt, K, I_phi, d, rho_p, p_prev=1e-12):
+
+
     def give_p_correction(p, args):
         I = get_inertial_number(p, dgamma_dt, d, rho_p)
-
-        Inert_part = jnp.exp(-I / I_phi)
-        LC_part = jnp.exp(p / K)
-        R = Inert_part * LC_part - phi / phi_0
-
+ 
+        R = p / K - I / I_phi - jnp.log(phi_phi_0)
         return R
+        # return R**2
 
-    solver = optx.Newton(rtol=1e-12, atol=1e-12)
+    solver = optx.Newton(rtol=1e-1, atol=1e-4)
+    # sol = optx.minimise(
     sol = optx.root_find(
         give_p_correction,
         solver,
         p_prev,
-        throw=True,
+        throw=False,
         has_aux=False,
-        max_steps=200,
-        options=dict(lower=1e-12),
+        max_steps=100,
+        options=dict(lower=1e-8),
     )
     return sol.value
 
@@ -61,6 +62,7 @@ class MuI_LC_PhiI(ConstitutiveLaw):
     I_0: TypeFloat
     K: TypeFloat
     I_phi: TypeFloat
+    alpha_2: TypeFloat = 1e-4
 
     def __init__(
         self: Self,
@@ -69,6 +71,7 @@ class MuI_LC_PhiI(ConstitutiveLaw):
         I_0: TypeFloat,
         I_phi: TypeFloat,
         K: TypeFloat = 1.0,
+        alpha: TypeFloat = 1e-4,
         **kwargs,
     ) -> Self:
         self.mu_s = mu_s
@@ -79,6 +82,7 @@ class MuI_LC_PhiI(ConstitutiveLaw):
 
         self.I_phi = I_phi
         self.K = K
+        self.alpha_2 = alpha * alpha
 
         super().__init__(**kwargs)
 
@@ -89,12 +93,11 @@ class MuI_LC_PhiI(ConstitutiveLaw):
         #     jax.vmap,
         #     in_axes=(None, None, 0),
         # )(give_rho)
+        p_0_stack = jnp.clip(p_0_stack, 1e-12, None)
 
         I = get_inertial_number_stack(
             p_0_stack, material_points.dgamma_dt_stack, self.d, self.rho_p
         )
-
-        I = jnp.clip(I, 1e-12)
 
         phi_0 = self.rho_0 / self.rho_p
 
@@ -151,36 +154,79 @@ class MuI_LC_PhiI(ConstitutiveLaw):
         deps_dt,
         phi,
     ):
+        
         deps_dev_dt = get_dev_strain(deps_dt)
 
         dgamma_dt = get_scalar_shear_strain(deps_dt)
-
-        p_prev = get_pressure(stress_prev)
-
-        p_prev = jnp.clip(p_prev, 1e-12)
-
+        
         phi_0 = self.rho_0 / self.rho_p
-
-        def stress_update():
+        phi_phi_0 = phi / phi_0
+        
+        # is connected and sheared
+        is_connected = (phi_phi_0 > 1.0)* (dgamma_dt > 1e-22)
+        # used for initial gues of p
+        p_prev = get_pressure(stress_prev)
+        p_prev = jnp.clip(p_prev, 1e-12)
+        def viscoplastic_update():
+            # https://github.com/patrick-kidger/optimistix/issues/132
+            phi_phi_0_safe = jnp.where(~is_connected, 1.0, phi_phi_0)
+            
             p = give_p_implicit(
-                phi, dgamma_dt, self.K, phi_0, self.I_phi, self.d, self.rho_p, p_prev
+                phi_phi_0_safe, dgamma_dt, self.K, self.I_phi, self.d, self.rho_p, p_prev
             )
-
-            r = 0.0001
-
+            eta_s = (self.mu_s * p)/ jnp.sqrt(dgamma_dt*dgamma_dt + self.alpha_2)
+            
             delta_mu = self.mu_d - self.mu_s
-
-            eta_d = (p * delta_mu * self.d) / (
-                self.I_0 * jnp.sqrt(p / self.rho_p) + self.d * dgamma_dt
-            )
-
-            eta_s = (p * self.mu_s) / jnp.sqrt(dgamma_dt * dgamma_dt + r * r)
-
+            
+            xi = self.I_0 *jnp.sqrt(p/ self.rho_p)
+       
+            eta_d =  (self.d*p*delta_mu) / (
+                    xi + self.d*dgamma_dt
+                )
+            
             eta = eta_s + eta_d
+        
+            # eta = jnp.clip(eta, 1e-22, None)
             stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
             return stress_next
+        
+        ptol = 0.0
+        stress_next = jax.lax.cond(
+            is_connected,  # partciles disconnect (called stress-free assumption)
+            lambda: viscoplastic_update(),
+            lambda: -ptol * jnp.ones((3, 3)),
+        )
+        return stress_next
+        # 
+        # # jax.debug.print("phi_0: {}", self.I_phi)
 
-        return stress_update()
+
+        # xi = self.I_0 * (self.rho_p * self.d * self.d) ** (-0.5)
+
+        # alpha_r = 0.01
+
+        # alpha_s = 0.000001
+
+        # p = jnp.clip(p, 1e-22, None)
+        # dgamma_dt = jnp.clip(dgamma_dt, 1e-22, None)
+
+        # eta_s = (self.mu_s * p) * ((1 - jnp.exp(-dgamma_dt / alpha_r)) / (dgamma_dt))
+
+        # delta_mu = self.mu_d - self.mu_s
+
+        # eta_d = (p * delta_mu * dgamma_dt) / (
+        #     (xi * jnp.sqrt(p) + dgamma_dt)
+        #     * jnp.sqrt(dgamma_dt * dgamma_dt + alpha_s * alpha_s)
+        # )
+
+        # eta = eta_s + eta_d
+        # stress_next = -p * jnp.eye(3) + eta * deps_dev_dt
+
+        # if self.error_check:
+        #     stress_next = eqx.error_if(
+        #         stress_next, jnp.isnan(stress_next).any(), "stress_next is nan"
+        #     )
+        # return stress_next
 
     def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
         """Get critical timestep of material poiints for stability."""

@@ -28,39 +28,20 @@ from ..utils.math_helpers import (
     get_pressure,
     get_q_vm,
     get_volumetric_strain,
+    get_inertial_number,
+    get_scalar_shear_strain,
 )
 from .constitutive_law import ConstitutiveLaw, ConvergenceControlConfig
 
 
+# def yield_function(p, px, q, M, chi=0.0):
+# return ((q * q) / (M * M)) + p * p - px * p
 def yield_function(p, px, q, M, chi=0.0):
-    return ((q * q) / (M * M)) + p * p - px * p
-
-    # return (q * q) + (M * M) * p * p - (M * M) * px * p
-
-    # return ((q * q) / (M * M)) + p * p - px * p
+    return (q * q) + (p * p - px * p) * (M * M)
 
 
-# q_2 = q * q
-# M_2 = M * M
-# p_2 = p_hat * p_hat
-# return (
-#     ((1 + chi) * q_2) / M_2
-#     + (M_2 * p_2 - chi * q_2) / M_2
-#     - (px_hat / p_hat) * (M_2 * p_2 - chi * q_2) / M_2
-# )
-
-
-# def yield_function(p_hat, px_hat, q, M, chi=0.0):
-#     q_2 = q * q
-#     M_2 = M * M
-#     p_2 = p_hat * p_hat
-#     # return (
-#     #     ((1 + chi) * q_2) / M_2
-#     #     + (M_2 * p_2 - chi * q_2) / M_2
-#     #     - (px_hat / p_hat) * (M_2 * p_2 - chi * q_2) / M_2
-#     # )
-#     return ((1 + chi) * q_2) / (M_2 * p_2 - chi * q_2) + 1.0 - px_hat / p_hat
-#     # return ((q * q) / (M * M)) + p_hat * p_hat - px_hat * p_hat
+def get_M_I(I, M, M_d, I0):
+    return M + I * ((M_d - M) / (I0 + I))
 
 
 def get_p_hat(deps_e_v, kap, p_hat_prev):
@@ -72,6 +53,13 @@ def get_p_hat(deps_e_v, kap, p_hat_prev):
 def get_px_hat_mcc(px_hat_prev, cp, deps_p_v):
     """Compute non-linear pressure."""
     px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v + 1e-12)
+    return jnp.clip(px_hat, 1.0, None)
+
+
+def get_px_hat_mcc_mu_i(px_hat_prev, cp, deps_p_v, dI, I_phi):
+    """Compute non-linear pressure."""
+    deps_p_v_I = deps_p_v + dI / I_phi
+    px_hat = px_hat_prev / (1.0 - (1.0 / cp) * deps_p_v_I + 1e-12)
     return jnp.clip(px_hat, 1.0, None)
 
 
@@ -99,12 +87,17 @@ def get_reloadingline(p, px, ps, kap, lam, phi_0):
     return phi
 
 
-class ModifiedCamClayNL(ConstitutiveLaw):
+class ModifiedCamClayNLMuI(ConstitutiveLaw):
     nu: TypeFloat
     M: TypeFloat
     OCR: TypeFloat
     lam: TypeFloat
     kap: TypeFloat
+
+    I_0: TypeFloat
+    I_phi: TypeFloat
+    M_d: TypeFloat
+
     p_t: TypeFloat = 0.0
     ln_N: Optional[TypeFloat] = None
 
@@ -117,6 +110,7 @@ class ModifiedCamClayNL(ConstitutiveLaw):
     chi: TypeFloat = 0.0
 
     px_hat_stack: Optional[TypeFloatScalarPStack] = None
+    I_stack: Optional[TypeFloatScalarPStack] = None
     stress_0_stack: Optional[TypeFloatMatrixPStack] = None
 
     settings: ConvergenceControlConfig
@@ -128,6 +122,9 @@ class ModifiedCamClayNL(ConstitutiveLaw):
         OCR: TypeFloat,
         lam: TypeFloat,
         kap: TypeFloat,
+        I_0: TypeFloat,
+        I_phi: TypeFloat,
+        M_d: TypeFloat,
         K_min: TypeFloat = None,
         K_max: TypeFloat = None,
         ln_N: Optional[TypeFloat] = None,
@@ -156,6 +153,10 @@ class ModifiedCamClayNL(ConstitutiveLaw):
 
         self.K_max = K_max
 
+        self.I_0 = I_0
+        self.I_phi = I_phi
+        self.M_d = M_d
+
         rho_0 = kwargs.get("rho_0", None)
         rho_p = kwargs.get("rho_p", None)
 
@@ -167,28 +168,24 @@ class ModifiedCamClayNL(ConstitutiveLaw):
             self.ln_v0 = ln_v0
             self.ps = jnp.exp((ln_N - self.ln_v0) / lam)
             self.ln_Z = self.ln_v0 - lam * jnp.log((1.0 + self.ps) / self.ps)
-        elif rho_0 is not None:
-            self.ln_v0 = jnp.log(1.0 / (rho_0 / rho_p))
-            self.ps = jnp.exp((ln_N - self.ln_v0) / lam)
-            self.ln_Z = self.ln_v0 - lam * jnp.log((1.0 + self.ps) / self.ps)
         elif ln_Z is not None:
             self.ln_Z = ln_Z
             self.ps = jnp.exp((ln_N - ln_Z) / lam) - 1.0
             self.ln_v0 = ln_Z + lam * jnp.log((1 + self.ps) / self.ps)
             self.rho_0 = rho_p / jnp.exp(self.ln_v0)
             kwargs["rho_0"] = self.rho_0
-        # print(
-        #     self.ln_Z,
-        #     self.ln_v0,
-        #     self.ps,
-        #     self.rho_0,
-        # )
-        # exit()
+        elif rho_0 is not None:
+            self.ln_v0 = jnp.log(1.0 / (rho_0 / rho_p))
+            self.ps = jnp.exp((ln_N - self.ln_v0) / lam)
+            self.ln_Z = self.ln_v0 - lam * jnp.log((1.0 + self.ps) / self.ps)
+
         self.eps_e_stack = kwargs.get("eps_e_stack")
 
         self.px_hat_stack = kwargs.get("px_hat_stack")
 
         self.stress_0_stack = kwargs.get("stress_0_stack")
+
+        self.I_stack = kwargs.get("I_stack")
 
         # settings used for convergence control
         if settings is None:
@@ -223,6 +220,7 @@ class ModifiedCamClayNL(ConstitutiveLaw):
 
         # jax.debug.breakpoint()
         eps_e_stack = jnp.zeros((material_points.num_points, 3, 3))
+        I_stack = jnp.zeros(material_points.num_points)
         return self.post_init_state(
             material_points,
             rho_0=rho_0,
@@ -230,6 +228,7 @@ class ModifiedCamClayNL(ConstitutiveLaw):
             stress_0_stack=stress_0_stack,
             px_hat_stack=px_hat_stack,
             eps_e_stack=eps_e_stack,
+            I_stack=I_stack,
         )
 
     def update(
@@ -242,21 +241,23 @@ class ModifiedCamClayNL(ConstitutiveLaw):
 
         deps_dt_stack = material_points.deps_dt_stack
 
-        new_stress_stack, new_eps_e_stack, new_px_hat_stack = (
+        new_stress_stack, new_eps_e_stack, new_px_hat_stack, new_I_stack = (
             self.vmap_constitutive_update(
-                deps_dt_stack * dt,
+                dt,
+                deps_dt_stack,
                 self.eps_e_stack,
                 material_points.stress_stack,
                 self.px_hat_stack,
                 self.stress_0_stack,
                 material_points.specific_volume_stack(self.rho_p),
                 material_points.isactive_stack,
+                self.I_stack,
             )
         )
         new_self = eqx.tree_at(
-            lambda state: (state.eps_e_stack, state.px_hat_stack),
+            lambda state: (state.eps_e_stack, state.px_hat_stack, state.I_stack),
             self,
-            (new_eps_e_stack, new_px_hat_stack),
+            (new_eps_e_stack, new_px_hat_stack, new_I_stack),
         )
 
         new_material_points = eqx.tree_at(
@@ -267,30 +268,34 @@ class ModifiedCamClayNL(ConstitutiveLaw):
         # new_self = new_self.post_update(new_stress_stack, deps_dt_stack, dt)
         return new_material_points, new_self
 
-    @partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0))
+    @partial(
+        jax.vmap, in_axes=(None, None, 0, 0, 0, 0, 0, 0, 0, 0), out_axes=(0, 0, 0, 0)
+    )
     def vmap_constitutive_update(
         self: Self,
-        deps_next,
+        dt,
+        deps_dt_next,
         eps_e_prev,
         stress_prev,
         px_hat_prev,
         stress_0,
         specific_volume,
         isactive,
+        I_prev,
     ):
-        default_values = (stress_prev, eps_e_prev, px_hat_prev)
+        default_values = (stress_prev, eps_e_prev, px_hat_prev, I_prev)
 
         def update(_):
             return self.update_ip(
-                deps_next,
+                dt,
+                deps_dt_next,
                 eps_e_prev,
                 stress_prev,
                 px_hat_prev,
                 stress_0,
                 specific_volume,
+                I_prev,
             )
-
-            # Use lax.cond to choose between update or default
 
         return jax.lax.cond(
             isactive,
@@ -301,13 +306,16 @@ class ModifiedCamClayNL(ConstitutiveLaw):
 
     def update_ip(
         self: Self,
-        deps_next,
+        dt,
+        deps_dt_next,
         eps_e_prev,
         stress_prev,
         px_hat_prev,
         stress_0,
         specific_volume,
+        I_prev,
     ):
+        deps_next = deps_dt_next * dt
         # reference stresses
         p_0 = get_pressure(stress_0)
         s_0 = get_dev_stress(stress_0, pressure=p_0)
@@ -339,8 +347,13 @@ class ModifiedCamClayNL(ConstitutiveLaw):
         # trail von Mises stress
         q_tr = get_q_vm(dev_stress=s_tr)
 
-        # trail yield function
-        # in regular space
+        ######
+        # dgamma_dt = get_scalar_shear_strain(deps_dt_next)
+
+        # I = get_inertial_number(p_hat_tr - self.ps, dgamma_dt, self.d, self.rho_p)
+
+        # M_I = get_M_I(I, self.M, self.M_d, self.I_0)
+
         yf = yield_function(
             p_hat_tr - self.ps,
             px_hat_prev - self.ps,
@@ -355,7 +368,7 @@ class ModifiedCamClayNL(ConstitutiveLaw):
         def elastic_update():
             stress_next = s_tr - (p_hat_tr - self.ps) * jnp.eye(3)
             eps_e_tr = eps_e_prev + deps_next
-            return stress_next, eps_e_tr, px_hat_prev - self.ps
+            return stress_next, eps_e_tr, px_hat_prev - self.ps, 0.0
 
         def pull_to_ys():
             # https://github.com/patrick-kidger/optimistix/issues/132
@@ -384,47 +397,61 @@ class ModifiedCamClayNL(ConstitutiveLaw):
                 q_next = q_tr_ * factor
 
                 # next consolidation pressure in transformed space
-                px_hat_next = get_px_hat_mcc(px_hat_prev_, self._cp, deps_p_v)
+                # px_hat_next = get_px_hat_mcc(px_hat_prev_, self._cp, deps_p_v)
+
+                # dgamma_dt = get_scalar_shear_strain(deps_dt_next)
+                dgamma_p_dt = (2 * pmulti * q_next) / dt
+                I_next = get_inertial_number(
+                    jnp.clip(p_hat_next - self.ps, 1, None),
+                    dgamma_p_dt,
+                    self.d,
+                    self.rho_p,
+                )
+                # I_next = jnp.nanmax(I_next, 10)
+                # I_next = jnp.clip(I_next, 1e-22, 10)
+                dI = I_next - I_prev
+                px_hat_next = get_px_hat_mcc_mu_i(
+                    px_hat_prev, self._cp, deps_p_v, dI, self.I_phi
+                )
+                # px_hat_next = get_px_hat_mcc(px_hat_prev_, self._cp, deps_p_v)
+
+                M_I = get_M_I(I_next, self.M, self.M_d, self.I_0)
 
                 deps_v_p_fr = (
                     pmulti
                     * (2 * (p_hat_next - self.ps) - (px_hat_next - self.ps))
-                    * self.M**2
+                    * M_I**2
+                    # * self.M**2
                 )
 
-                # deps_v_p_fr = (
-                #     pmulti * 2 * (p_hat_next - self.ps)
-                #     - (px_hat_next - self.ps) * self.M**2
-                # )
-
-                # px_hat_next_fr = (
-                #     2.0 * (p_hat_next - self.ps)
-                #     - deps_p_v / (pmulti * self.M**2)
-                #     + self.ps
-                # )
-                # deps_v_p_fr = (
-                #     pmulti * 2 * ((p_hat_next - self.ps) - px_hat_next) * self.M**2
-                # )
                 yf_next = yield_function(
                     p_hat_next - self.ps,
                     px_hat_next - self.ps,
                     q_next,
-                    self.M,
+                    M_I,
                     self.chi,
                 )
 
                 deps_scale = 1.0
 
                 # yf_scale = K_tr
-                # yf_scale = 1.0
-                yf_scale = p_hat_prev_ * p_hat_prev_
+                yf_scale = 1.0
+                yf_scale = p_hat_prev_ * p_hat_prev_ * M_I
                 # R = jnp.array([yf_next / yf_scale, px_hat_next_fr - px_hat_next])
                 R = jnp.array(
                     [yf_next / yf_scale, (deps_v_p_fr - deps_p_v) / deps_scale]
                 )
                 # jax.debug.print("R: {}", R)
 
-                aux = (p_hat_next, s_next, px_hat_next, G_next, K_next, deps_v_p_fr)
+                aux = (
+                    I_next,
+                    p_hat_next,
+                    s_next,
+                    px_hat_next,
+                    G_next,
+                    K_next,
+                    deps_v_p_fr,
+                )
 
                 return R, aux
 
@@ -464,7 +491,7 @@ class ModifiedCamClayNL(ConstitutiveLaw):
 
             R, aux = residuals([pmulti_curr, deps_p_v_next], None)
 
-            p_hat_next, s_next, px_hat_next, G_next, K_next, deps_v_p_fr = aux
+            I_next, p_hat_next, s_next, px_hat_next, G_next, K_next, deps_v_p_fr = aux
 
             p_next = p_hat_next - self.ps
 
@@ -492,17 +519,17 @@ class ModifiedCamClayNL(ConstitutiveLaw):
 
             eps_e_next = eps_e_d_next - (1.0 / 3) * eps_e_v_next * jnp.eye(3)
 
-            return stress_next, eps_e_next, px_next
+            return stress_next, eps_e_next, px_next, I_next
 
         ln_v = jnp.log(specific_volume)
 
-        stress_next, eps_e_next, px_next = jax.lax.cond(
+        stress_next, eps_e_next, px_next, I_next = jax.lax.cond(
             ln_v <= self.ln_v0,
             lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
-            lambda: (0.0 * jnp.eye(3), eps_e_prev, px_hat_prev - self.ps),
+            lambda: (0.0 * jnp.eye(3), eps_e_prev, px_hat_prev - self.ps, 0.0),
         )
 
-        return stress_next, eps_e_next, px_next
+        return stress_next, eps_e_next, px_next, I_next
 
     @property
     def GAMMA(self):
