@@ -29,17 +29,36 @@ def make_plot(
     xlogscale=False,
     ylogscale=False,
     label=None,
-    start_end_markersize=None,
+    start_marker_kwargs=None,
+    end_marker_kwargs=None,
     **kwargs,
 ):
+    if start_marker_kwargs is None:
+        start_marker_kwargs = {}
+    start_marker_kwargs = start_marker_kwargs.copy()
+
+    if end_marker_kwargs is None:
+        end_marker_kwargs = {}
+    end_marker_kwargs = end_marker_kwargs.copy()
+
     out = ax.plot(x, y, label=label, **kwargs)
     (line,) = out
     if start_end_markers:
         ax.plot(
-            x[0], y[0], ".", color=line.get_color(), markersize=start_end_markersize
+            x[0],
+            y[0],
+            ls="",
+            marker=start_marker_kwargs.pop("marker", "."),
+            color=start_marker_kwargs.pop("color", line.get_color()),
+            **start_marker_kwargs,
         )
         ax.plot(
-            x[-1], y[-1], "*", color=line.get_color(), markersize=start_end_markersize
+            x[-1],
+            y[-1],
+            ls="",
+            marker=end_marker_kwargs.pop("marker", "*"),
+            color=end_marker_kwargs.pop("color", line.get_color()),
+            **end_marker_kwargs,
         )
 
     ax.set_xlabel(xlabel)
