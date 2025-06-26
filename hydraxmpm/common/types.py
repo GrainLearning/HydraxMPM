@@ -18,6 +18,7 @@ TypeFloatVector = Float[Array, "dim"]
 TypeFloatMatrix3x3 = Float[Array, "3 3"]
 
 # Particles
+TypeBoolPStack = Bool[Array, "num_points"]
 TypeFloatScalarPStack = Float[Array, "num_points"]
 TypeFloatVectorPStack = Float[Array, "num_points dim"]
 TypeFloatMatrixPStack = Float[Array, "num_points dim dim"]
