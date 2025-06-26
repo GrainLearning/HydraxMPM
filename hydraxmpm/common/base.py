@@ -20,11 +20,15 @@ class Base(eqx.Module):
     name: Optional[str] = eqx.field(static=True, default=None)
     other: Optional[Dict] = eqx.field(static=True, default=None)
     error_check: bool = eqx.field(static=True, default=False)
+    save_debug_pickle: bool = eqx.field(static=True, default=False)
+    debug_filename: Optional[str] = eqx.field(static=True, default=None)
 
     def __init__(self: Self, **kwargs) -> Self:
         self.name = kwargs.get("name", None)
         self.other = kwargs.get("other", None)
         self.error_check = kwargs.get("error_check", False)
+        self.save_debug_pickle = kwargs.get("save_debug_pickle", False)
+        self.debug_filename = kwargs.get("debug_filename", None)
 
     def replace(self: Self, **kwargs) -> Self:
         return dataclasses.replace(self, **kwargs)
