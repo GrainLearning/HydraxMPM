@@ -33,6 +33,7 @@ from ..utils.math_helpers import (
     get_volumetric_strain_stack,
     get_double_contraction_stack,
     get_double_contraction,
+    get_trx_shear_strain_stack
 )
 
 
@@ -263,6 +264,10 @@ class MaterialPoints(Base):
     @property
     def gamma_stack(self):
         return get_scalar_shear_strain_stack(self.eps_stack)
+    
+    @property
+    def eps_s_stack(self):
+        return get_trx_shear_strain_stack(self.eps_stack)
 
     @property
     def dgamma_dt_stack(self):

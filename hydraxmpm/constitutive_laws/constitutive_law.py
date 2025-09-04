@@ -39,7 +39,6 @@ class ConstitutiveLaw(Base):
     d: Optional[float] = eqx.field(static=True, default=1.0)
     rho_p: float = eqx.field(static=True, default=1.0)
 
-    # for elastoplastic models
     eps_e_stack: Optional[TypeFloatMatrixPStack] = None
 
     approx_stress_power: bool = eqx.field(static=True, default=False)

@@ -31,6 +31,7 @@ from .constitutive_laws.newtonfluid import NewtonFluid
 from .constitutive_laws.druckerprager import DruckerPrager
 from .constitutive_laws.modifiedcamclay_nl_mu_i_phi_i import ModifiedCamClayNLMuI
 
+from .constitutive_laws.isotropic_family_soil_models_inertia import IsotropicFamilySoilsInertia
 from .sip_benchmarks.sip_benchmarks import (
     TriaxialConsolidatedUndrained,
     TriaxialConsolidatedDrained,

@@ -142,15 +142,23 @@ def mix_control(
     else:
         X_0 = None
 
+    
+    if dt is isinstance(dt, jax.Array):
+        dt_stack =  dt
+    else:
+        dt_stack = jnp.ones(et_benchmark.L_control_stack.shape[0]) * dt
+
+        
+        
     def scan_fn(carry, xs):
         constitutive_law_prev, material_points_prev, step = carry
-        L_control, x_target = xs
+        L_control, x_target,dt_ = xs
         material_points_next, constitutive_law_next = apply_control(
             L_control,
             material_points_prev,
             constitutive_law_prev,
             et_benchmark,
-            dt,
+            dt_,
             X_0,
             x_target,
             rtol,
@@ -159,7 +167,7 @@ def mix_control(
             is_linear_approx=solver.is_linear_approx,
         )
         accumulate = solver.get_output(
-            dt,
+            dt_,
             material_points_next,
             constitutive_law_next,
             material_points_prev,
@@ -168,10 +176,11 @@ def mix_control(
         carry = (constitutive_law_next, material_points_next, step + 1)
         return carry, accumulate
 
+
     carry, accumulate = jax.lax.scan(
         scan_fn,
         (constitutive_law, material_points, 0),
-        (et_benchmark.L_control_stack, et_benchmark.X_control_stack),
+        (et_benchmark.L_control_stack, et_benchmark.X_control_stack,dt_stack),
     )
     return carry, accumulate
 
@@ -265,7 +274,7 @@ class SIPSolver(Base):
         return self.__class__(**params)
 
     @eqx.filter_jit
-    def run(self, dt: float):
+    def run(self, dt: jax.Array | float) -> list:
         """
         Run the SIP solver for all benchmarks, accumulating outputs.
         """

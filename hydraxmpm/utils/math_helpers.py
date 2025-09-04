@@ -237,6 +237,28 @@ def get_scalar_shear_strain_stack(
     )
 
 
+
+def get_trx_shear_strain(
+    strain=None, dev_strain=None, volumetric_strain=None, dim=3
+):
+    """Get scalar shear strain gamma = sqrt(1/2 trace(e_dev @ e_dev.T))."""
+    if dev_strain is None:
+        dev_strain = get_dev_strain(strain, volumetric_strain, dim)
+
+    return jnp.sqrt( (2/3) * jnp.trace(dev_strain @ dev_strain.T))
+
+
+def get_trx_shear_strain_stack(
+    strain_stack: jax.Array, dev_strain_stack=None, volumetric_strain_stack=None, dim=3
+):
+    """Get scalar shear strain from a stack of strain tensors."""
+    vmap_get_scalar_shear_strain = jax.vmap(
+        get_scalar_shear_strain, in_axes=(0, 0, 0, None)
+    )
+
+    return vmap_get_scalar_shear_strain(
+        strain_stack, dev_strain_stack, volumetric_strain_stack, dim
+    )
 def get_KE(mass: TypeFloat, velocity: TypeFloatVector) -> TypeFloat:
     """Get kinetic energy."""
     return 0.5 * mass * jnp.dot(velocity, velocity)
