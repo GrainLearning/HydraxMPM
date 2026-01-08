@@ -7,117 +7,171 @@
 
 """Constitutive model for a nearly incompressible Newtonian fluid."""
 
-from functools import partial
-from typing import Optional, Self, Tuple
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from ..common.types import TypeFloat, TypeFloatMatrix3x3, TypeInt
-from ..material_points.material_points import MaterialPoints
+from .constitutive_law import ConstitutiveLawState
 from .constitutive_law import ConstitutiveLaw
-from ..utils.math_helpers import get_dev_strain
 
+from ..material_points.material_points import MaterialPointState
 
-def give_p(K, rho, rho_0, beta):
-    return K * ((rho / rho_0) ** beta - 1.0)
+from jaxtyping import Float, Array
 
+from typing import Any, Tuple, Optional
 
-def give_rho(K, rho_0, p, beta):
-    return rho_0 * ((p / K) + 1) ** (1.0 / beta)
-
+class NewtonFluidState(ConstitutiveLawState):
+    density_ref_stack: Float[Array, "num_points"]
+    pass
 
 class NewtonFluid(ConstitutiveLaw):
     """Nearly incompressible Newtonian fluid.
 
+    - Tait-Murnaghan power law to link density to pressure
+    - Shear History Suppression option to reset shear deformation (Default)
     Attributes:
         K: Bulk modulus.
         viscosity: Viscosity.
         gamma: Exponent.
     """
+    K: float
+    viscosity: float
+    beta: float
 
-    K: TypeFloat
-    viscosity: TypeFloat
-    beta: TypeFloat
 
     def __init__(
-        self: Self,
-        K: TypeFloat = 2.0 * 10**6,
-        viscosity: TypeFloat = 0.001,
-        beta: TypeFloat = 7.0,
-        **kwargs,
-    ) -> Self:
+        self,
+        K: float = 2e6, 
+        viscosity: float = 1e-3, 
+        beta: float = 7.0,
+        requires_F_reset: bool = True
+    ):
         """Initialize the nearly incompressible Newtonian fluid material."""
 
         self.K = K
         self.viscosity = viscosity
         self.beta = beta
-        super().__init__(**kwargs)
 
-    def init_state(self: Self, material_points: MaterialPoints):
-        p_0_stack = material_points.p_stack
-        vmap_give_rho_ref = partial(
-            jax.vmap,
-            in_axes=(None, None, 0, None),
-        )(give_rho)
+    
+        # inherited from base class for bvps
+        self.requires_F_reset = requires_F_reset 
 
-        rho = vmap_give_rho_ref(self.K, self.rho_0, p_0_stack, self.beta)
 
-        deps_dt_stack = material_points.deps_dt_stack
-        rho_rho_0_stack = rho / self.rho_0
+    def create_state_from_density(
+        self,
+        density_stack: Float[Array, "num_points"],
+        pressure_stack: Optional[Float[Array, "num_points"]] = None,
+    ) -> NewtonFluidState:
+        """ initializes the constitutive state based on given density."""
+        
+        if pressure_stack is None:
+            pressure_stack = jnp.zeros_like(density_stack)
 
-        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0))
-        new_stress_stack = vmap_update_ip(deps_dt_stack, rho_rho_0_stack)
+        factor = (pressure_stack / self.K + 1.0) ** (1.0 / self.beta)
 
-        material_points = material_points.replace(stress_stack=new_stress_stack)
+        density_ref_stack = density_stack / factor
 
-        return self.post_init_state(material_points, rho=rho, rho_0=self.rho_0)
+        print(jnp.mean(density_ref_stack))
+        return NewtonFluidState(density_ref_stack=density_ref_stack)
+    
+    def create_state(
+        self,
+        material_points: MaterialPointState
+    ) -> NewtonFluidState:
+        """defaults to using initial density to create state."""
+
+
+        density_initial_stack = material_points.mass_stack/ material_points.volume0_stack
+        
+        return self.create_state_from_density(
+            material_points.pressure_stack,
+            density_stack=density_initial_stack
+        )
+ 
+
+    
+    def _update_stress(
+        self,
+        L,      # Velocity Gradient
+        mass,
+        volume,
+        density_ref,
+    ):
+        """ Calculates Cauchy stress for a single material point."""
+
+        # Strain rate symmetric part of velocity gradient L
+        deps_dt = 0.5 * (L + L.T)
+
+        # Get deviatoric part of strain rate via decomposition
+        deps_dt_v = jnp.trace(deps_dt) # volumetric part
+        dev_deps_dt = deps_dt - (1.0/3.0) * deps_dt_v * jnp.eye(3) # deviatoric part
+
+        # Equation of State (EOS, Pressure)
+        density = mass / volume
+
+        # Tait-Murnaghan EOS
+        # p = K * ((rho/rho_0)^beta - 1)
+        ratio = density / density_ref
+
+        # Numerical safeguard: prevent NaN if volume explodes (ratio < 0)
+        # and prevent extreme negative pressures (cavitation limit optional)
+        ratio = jnp.maximum(ratio, 1e-6) 
+
+        p = self.K * (ratio**self.beta - 1.0)
+
+        # clip negative pressure if you want to disallow tension
+        p = jnp.maximum(p, 0.0) 
+
+        # Cauchy stress calculation
+        # sigma = -pI + 2*mu*dev(D)
+        stress = -p * jnp.eye(3) + (2.0 * self.viscosity * dev_deps_dt)
+
+
+        return stress
+
+    
 
     def update(
-        self: Self,
-        material_points: MaterialPoints,
-        dt: TypeFloat,
-        dim: Optional[TypeInt] = 3,
-    ) -> Tuple[MaterialPoints, Self]:
-        """Update the material state and particle stresses for MPM solver."""
+        self,
+        material_points_state: MaterialPointState, 
+        law_state: NewtonFluidState,
+        dt
+    ) -> Tuple[Any, NewtonFluidState]:
 
-        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(0, 0))
-        deps_dt_stack = material_points.deps_dt_stack
-        rho_rho_0_stack = material_points.rho_stack / self.rho_0
-
-        new_stress_stack = vmap_update_ip(deps_dt_stack, rho_rho_0_stack)
-
-        new_particles = eqx.tree_at(
-            lambda state: (state.stress_stack),
-            material_points,
-            (new_stress_stack),
+        # Vectorize the physics over all particles
+        new_stress_stack = jax.vmap(self._update_stress, in_axes=(0,  0, 0, 0, ))(
+            material_points_state.L_stack,
+            material_points_state.mass_stack,
+            material_points_state.volume_stack,
+            law_state.density_ref_stack,
         )
 
-        return new_particles, self
-
-    def update_ip(
-        self: Self,
-        deps_dt: TypeFloatMatrix3x3,
-        rho_rho_0: TypeFloat,
-    ) -> TypeFloatMatrix3x3:
-        deps_dev_dt = get_dev_strain(deps_dt)
-
-        p = self.K * ((rho_rho_0) ** self.beta - 1.0)
-        p = jnp.clip(p, 0, None)
-        return -p * jnp.eye(3) + self.viscosity * deps_dev_dt
-
-    def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
-        """Get critical timestep of material poiints for stability."""
-
-        def vmap_dt_crit(rho, vel):
-            cdil = jnp.sqrt(self.K / rho)
-
-            c = jnp.abs(vel) + cdil * jnp.ones_like(vel)
-            return c
-
-        c_stack = jax.vmap(vmap_dt_crit)(
-            material_points.rho_stack,
-            material_points.velocity_stack,
+        # Return updated particles and (unchanged) law state
+        new_p_state = eqx.tree_at(
+            lambda s: s.stress_stack,
+            material_points_state,
+            new_stress_stack
         )
-        return (dt_alpha * cell_size) / jnp.max(c_stack)
+        
+        return new_p_state, law_state
+    
+    def get_dt_crit(self, mp_state, cell_size: float, alpha: float = 0.5) -> Float[Array, ""]:
+        """Calculates CFL limit based on sound speed."""
+        
+        def particle_c(rho):
+            # c = sqrt(dp/drho) ~ sqrt(K/rho) (simplified)
+            # Actual: c = sqrt( beta * K / rho_0 * (rho/rho_0)^(beta-1) )
+            # Conservative Estimate: c = sqrt(K/rho) * safety
+            return jnp.sqrt(self.K * self.beta / rho)
+
+        rho = mp_state.mass_stack / mp_state.volume_stack
+        c_sound = jax.vmap(particle_c)(rho)
+        
+        # Particle Velocity
+        vel_mag = jnp.linalg.norm(mp_state.velocity_stack, axis=1)
+        
+        # Max signal speed
+        max_signal = jnp.max(c_sound + vel_mag)
+        
+        # Avoid div zero
+        return (alpha * cell_size) / (max_signal + 1e-9)

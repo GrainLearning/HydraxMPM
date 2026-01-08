@@ -1,175 +1,125 @@
-# Copyright (c) 2024, Retiefasuarus
-# SPDX-License-Identifier: BSD-3-Clause
-#
-# Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+# # Copyright (c) 2024, Retiefasuarus
+# # SPDX-License-Identifier: BSD-3-Clause
+# #
+# # Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
 
-# -*- coding: utf-8 -*-
+# # -*- coding: utf-8 -*-
+"""
+Explanation:
+    This module contains the `GridState` class which contains the state of the computational grid.
+"""
 
-import copy
+import jax.numpy as jnp
+
+from jaxtyping import Array, Float, UInt
+
+from typing import Self
 
 import equinox as eqx
-import jax.numpy as jnp
-from typing_extensions import Self
-
-from ..common.types import (
-    TypeFloat,
-    TypeFloat3,
-    TypeFloatScalarNStack,
-    TypeFloatVectorAStack,
-    TypeFloatVectorNStack,
-    TypeUIntScalarAStack,
-)
 
 
-class Grid(eqx.Module):
-    """Background grid of the MPM simulation.
-
-
-
-    node types
-    type 1: boundary
-    type 2: neighboring boundary
-    type 3: inside domain
+class GridState(eqx.Module):
+    """
+    The grid state in MPM simulations
 
     Attributes:
-        origin: start point of the domain box
-        end: end point of the domain box
-        cell_size: cell size of the background grid
         mass_stack: Mass assigned to each grid node
-            (shape: `(num_nodes)`).
         moment_stack: Momentum (velocity * mass) stored at each
-            grid node (shape: `(num_nodes, dim)`).
-        moment_nt_stack (jnp.ndarray): Momentum at the next time step, used for
-            integration schemes like FLIP (shape: `(num_nodes, dim)`).
-        normal_stack (jnp.ndarray): Normal vectors associated with each node
-            (shape: `(num_nodes, dim)`).
-            This might represent surface normals if the grid represents a boundary.
-        small_mass_cutoff (float): Threshold for small mass values.
-            Nodes with mass below this cutoff may be treated specially to
-            avoid numerical instabilities.
+        moment_nt_stack: Momentum at the next time step
+        force_stack: Force accumulated at each grid node
+        origin: Origin coordinates of the grid
+        end: End coordinates of the grid
+        cell_size: Size of each grid cell
+        _inv_cell_size: Precomputed inverse of cell size for efficiency
+        grid_size: Number of grid nodes along each dimension
     """
 
+    mass_stack: Float[Array, "num_nodes"]
+    moment_stack: Float[Array, "num_nodes dim"]
+    moment_nt_stack: Float[Array, "num_nodes dim"]
+    force_stack: Float[Array, "num_nodes dim"]
+
+    # store static info to resolve dependency injection problems
     origin: tuple = eqx.field(static=True)
     end: tuple = eqx.field(static=True)
-    cell_size: float = eqx.field(static=True)
-    num_cells: int = eqx.field(init=False, static=True, converter=lambda x: int(x))
-    grid_size: tuple = eqx.field(init=False, static=True)
-    dim: int = eqx.field(static=True, init=False)
+    cell_size: float | Float[Array, "..."] = eqx.field(static=True)
 
-    small_mass_cutoff: float = eqx.field(static=True, converter=lambda x: float(x))
+    _inv_cell_size: float | Float[Array, "..."] = eqx.field(static=True)
 
-    mass_stack: TypeFloatScalarNStack
-    moment_stack: TypeFloatVectorNStack
-    moment_nt_stack: TypeFloatVectorNStack
+    grid_size: tuple = eqx.field(static=True)
 
-    type_stack: TypeUIntScalarAStack
-    normal_stack: TypeFloatVectorNStack
-
-    _is_padded: bool = eqx.field(static=True)
-    _inv_cell_size: float = eqx.field(init=False, static=True)
-
-    def __init__(
-        self,
-        origin: TypeFloat3 | tuple,
-        end: TypeFloat3 | tuple,
-        cell_size: TypeFloat,
-        small_mass_cutoff: TypeFloat = 1e-8,
+    @classmethod
+    def create(
+        cls,
+        origin: Float[Array, "dim"] | tuple,
+        end: Float[Array, "dim"] | tuple,
+        cell_size: float | Float[Array, "..."],
         **kwargs,
     ) -> Self:
-        self.origin = jnp.array(origin)
-        self.end = jnp.array(end)
-        self.cell_size = cell_size
-        self.dim = len(origin)
+        """
+        Creates a GridState with zero-initialized stacks.
 
-        self._inv_cell_size = 1.0 / self.cell_size
+        kwargs:
+            padding: Optional padding by length of cell_size to extend the grid boundaries. `1` by default.
+        """
 
-        # requires jnp.array for calculations
-        self.grid_size = (
-            (jnp.array(self.end) - jnp.array(self.origin)) / self.cell_size + 1
-        ).astype(jnp.uint32)
+        # Pad the origin and end
+        padded_origin = tuple(o - kwargs.get("padding", 0) * cell_size for o in origin)
+        padded_end = tuple(e + kwargs.get("padding", 0) * cell_size for e in end)
 
-        self.num_cells = jnp.prod(self.grid_size).astype(jnp.uint32)
+        # Update the origin and end with padding
+        origin = jnp.array(padded_origin)
+        end = jnp.array(padded_end)
 
-        # convert to tuple after calculation
-        self.grid_size = tuple(self.grid_size.tolist())
-        self.origin = tuple(self.origin.tolist())
-        self.end = tuple(self.end.tolist())
-
-        self.mass_stack = jnp.zeros(self.num_cells)
-        self.moment_stack = jnp.zeros((self.num_cells, self.dim))
-
-        self.moment_nt_stack = jnp.zeros((self.num_cells, self.dim))
-
-        self.type_stack = (
-            jnp.zeros(self.num_cells, dtype=jnp.uint32).at[0].set(3)
-        )  # inside domain
-
-        self.normal_stack = jnp.zeros((self.num_cells, self.dim))
-
-        self.small_mass_cutoff = small_mass_cutoff
-
-        # flag if the outside domain is padded
-        self._is_padded = kwargs.get("_is_padded", False)
-
-        # super().__init__(**kwargs)
-
-    def refresh(self: Self) -> Self:
-        """Reset background MPM node states."""
-
-        return eqx.tree_at(
-            lambda state: (
-                state.mass_stack,
-                state.moment_stack,
-                state.moment_nt_stack,
-            ),
-            self,
-            (
-                jnp.zeros_like(self.mass),
-                jnp.zeros_like(self.momentum),
-                jnp.zeros_like(self.momentum_next),
-            ),
+        # number of cells in each dimens (M_x,M_y) for 2D, (M_x,M_y,M_z) for 3D
+        grid_size = ((jnp.array(end) - jnp.array(origin)) / cell_size + 1).astype(
+            jnp.uint32
         )
 
-    def init_padding(self, shapefunction) -> Self:
-        # pad outside of the domain
-        if self._is_padded:
-            return self
-        else:
-            if shapefunction == "linear":
-                pad = 1
-            elif shapefunction == "quadratic":
-                pad = 1
-            elif shapefunction == "cubic":
-                pad = 2
-            new_origin = (
-                jnp.array(self.origin) - jnp.ones(self.dim) * self.cell_size * pad
-            )
-            new_end = jnp.array(self.end) + jnp.ones(self.dim) * self.cell_size * pad
+        _inv_cell_size = 1.0 / cell_size
 
-            # returns a copy of the object with the new domain
-            return copy.copy(
-                Grid(
-                    new_origin,
-                    new_end,
-                    self.cell_size,
-                    self.small_mass_cutoff,
-                    _is_padded=True,
-                )
-            )
+        dim = len(origin)
+        num_cells = jnp.prod(grid_size).astype(jnp.uint32)
+
+        # Create empty array
+        mass_stack = jnp.zeros(num_cells)
+        moment_stack = jnp.zeros((num_cells, dim))
+        moment_nt_stack = jnp.zeros((num_cells, dim))
+        force_stack = jnp.zeros((num_cells, dim))
+
+        return GridState(
+            mass_stack=mass_stack,
+            moment_stack=moment_stack,
+            moment_nt_stack=moment_nt_stack,
+            force_stack=force_stack,
+            origin=tuple(origin.tolist()),
+            end=tuple(end.tolist()),
+            cell_size=float(cell_size),
+            _inv_cell_size=float(_inv_cell_size),
+            grid_size=tuple(grid_size.tolist()),
+        )
 
     @property
-    def position_mesh(self) -> TypeFloatVectorAStack:
-        x = jnp.linspace(self.origin[0], self.end[0], self.grid_size[0])
-        y = jnp.linspace(self.origin[1], self.end[1], self.grid_size[1])
-
-        if self.dim == 3:
-            z = jnp.linspace(self.origin[2], self.end[2], self.grid_size[2])
-            X, Y, Z = jnp.meshgrid(x, y, z)
-            return jnp.array([X, Y, Z]).T
-        else:
-            X, Y = jnp.meshgrid(x, y)
-            return jnp.array([X, Y]).T
+    def dim(self) -> int:
+        """Give dimension of the grid"""
+        return len(self.origin)
 
     @property
-    def position_stack(self) -> TypeFloatVectorNStack:
+    def num_cells(self) -> UInt[Array, ""]:
+        """Give total number of cells/ nodes in the grid"""
+        return jnp.prod(jnp.array(self.grid_size)).astype(jnp.uint32)
+
+    @property
+    def position_mesh(self):
+        """Create mesh of node coordinates compatible with C-Contiguous (Row-Major) layout.
+        
+        (M_x, M_y, M_z, dim) shaped array for 3D, (M_x, M_y, dim) for 2D.
+        
+        """
+        indices = jnp.indices(self.grid_size, dtype=jnp.float32)
+        return jnp.moveaxis(indices, 0, -1) * self.cell_size + jnp.array(self.origin)
+
+    @property
+    def position_stack(self):
+        """Flattened stack of grid node positions"""
         return self.position_mesh.reshape(-1, self.dim)

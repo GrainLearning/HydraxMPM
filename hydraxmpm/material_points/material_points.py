@@ -4,323 +4,302 @@
 # Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
 
 # -*- coding: utf-8 -*-
+"""
+Explanation:
 
-import warnings
-from typing import Optional, Self
+    This module includes state definitions for material points in MPM simulations.
+
+    The `BaseMaterialPointState` class, defining basic material point properties like position, mass, and velocity.
+
+    The `MaterialPointState` class extends the base class to include additional attributes
+    such as force, volume, stress, deformation gradient, and velocity gradient.
+
+    The `RigidMaterialPointState` class defines state for rigid body material points. This hos no deformation or stress
+    and should not be included in the particle-to-grid/grid-to-particle transfers or constitutive model update.
+
+
+    References:
+    - De Vaucorbeil, Alban, et al. "Material point method after 25 years: Theory, implementation, and applications."
+
+"""
 
 import equinox as eqx
 import jax
+
+from typing import Self, Optional
+
+from jaxtyping import Array, Float
+
 import jax.numpy as jnp
 
-from ..common.base import Base
-from ..common.types import (
-    TypeFloat,
-    TypeFloatMatrix3x3PStack,
-    TypeFloatScalarPStack,
-    TypeFloatVector,
-    TypeFloatVectorPStack,
-    TypeInt,
-)
-from ..utils.math_helpers import (
-    get_hencky_strain_stack,
-    get_inertial_number_stack,
-    get_KE_stack,
-    get_pressure_stack,
-    get_q_vm_stack,
-    get_scalar_shear_strain_stack,
-    get_strain_rate_from_L_stack,
-    get_volumetric_strain_stack,
-    get_double_contraction_stack,
-    get_double_contraction,
-)
+import warnings
+
+from ..utils.math_helpers import get_pressure_stack
 
 
-class MaterialPoints(Base):
-    """Collection of material points (particles) in an MPM simulation.
+class BaseMaterialPointState(eqx.Module):
+    """Base state for material point state in MPM simulations.
 
     Attributes:
-        position_stack: Spatial coordinate vectors (shape: `(num_points, dim)`).
-        velocity_stack: Spatial velocity vectors (shape: `(num_points, dim)`).
-        force_stack: External force vectors (shape: `(num_points, dim)`).
-        mass_stack: material point masses (shape: `(num_points,)`).
-        volume_stack: Current particle volumes (shape: `(num_points,)`).
-        volume0_stack: Initial particle volumes (shape: `(num_points,)`).
-        L_stack: Velocity gradient tensors (shape: `(num_points, dim, dim)`).
-        stress_stack: Cauchy stress tensors (shape: `(num_points, dim, dim)`).
-        F_stack: Deformation gradient tensors (shape: `(num_points, dim, dim)`).
-        rho_p: Particle density (assuming constant particle density for all particles).
-        rho_0: Reference pressure for particles (scalar or array of shape: `(num_points,)`).
-        rho_0: Reference density for particles (scalar or array of shape: `(num_points,)`).
+        position_stack: Position coordinates of material points.
+        mass_stack: Mass of each material point.
+        velocity_stack: Velocity vectors of material points.
     """
 
-    position_stack: TypeFloatVectorPStack
-    velocity_stack: TypeFloatVectorPStack
-    force_stack: TypeFloatVectorPStack
+    position_stack: Float[Array, "num_points dim"]
+    mass_stack: Float[Array, "num_points"]
+    velocity_stack: Optional[Float[Array, "num_points dim"]]
 
-    mass_stack: TypeFloatScalarPStack
-    volume_stack: TypeFloatScalarPStack
-    volume0_stack: TypeFloatScalarPStack
+    @property
+    def num_points(self) -> int:
+        """Gives total number of material points"""
+        return self.position_stack.shape[0]
 
-    L_stack: TypeFloatMatrix3x3PStack
-    stress_stack: TypeFloatMatrix3x3PStack
-    F_stack: TypeFloatMatrix3x3PStack
+    @property
+    def dim(self) -> int:
+        """Gives dimension of the material points"""
+        return self.position_stack.shape[1]
 
-    dim: TypeInt = eqx.field(init=False, static=True, default=3)
-    num_points: TypeInt = eqx.field(init=False, static=True, default=1)
 
-    ref_gravity_pe_pos: Optional[TypeFloatVector] = None
-    ref_gravity: Optional[TypeFloatVector] = None
+class RigidMaterialPointState(BaseMaterialPointState):
+    """
+    Rigid body state for material points in MPM simulations.
 
-    def __init__(
-        self: Self,
-        position_stack: Optional[TypeFloatVectorPStack] = None,
-        velocity_stack: Optional[TypeFloatVectorPStack] = None,
-        force_stack: Optional[TypeFloatVectorPStack] = None,
-        mass_stack: Optional[TypeFloatScalarPStack] = None,
-        stress_stack: Optional[TypeFloatMatrix3x3PStack] = None,
-        # Use kwargs for less common parameters
+    Inherits from the BaseMaterialPointState.
+
+    Note if no normal_stack is provided, the grid contact algorim uses mass gradients
+    to approximate normals for contact handling (See `GridContact`)
+
+    Attributes:
+        normal_stack: optional normal vectors for rigid body surface points.
+    """
+
+    normal_stack: Optional[Float[Array, "num_points dim"]] = None
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        position_stack: Optional[Float[Array, "num_points dim"]] = None,
+        normal_stack: Optional[Float[Array, "num_points dim"]] = None,
+    ) -> Self:
+        """Helper function to create RigidMaterialPointState with default values."""
+        if position_stack is None:
+            position_stack = jnp.array([[0.0, 0.0, 0.0]])
+            warning = (
+                "No position_stack provided for RigidMaterialPoints. "
+                "Defaulting to a single particle at the origin."
+            )
+            warnings.warn(warning)
+
+        position_stack = jnp.array(position_stack)
+
+        num_points, dim = position_stack.shape
+
+        if normal_stack is None:
+            normal_stack = jnp.zeros((num_points, dim))
+
+        return cls(
+            position_stack=position_stack,
+            mass_stack=jnp.ones((num_points,)),
+            velocity_stack=jnp.zeros((num_points, dim)),
+            normal_stack=normal_stack,
+        )
+
+
+class MaterialPointState(BaseMaterialPointState):
+    """
+
+    Standard material point state for MPM simulations.
+
+    Inherits from the BaseMaterialPointState.
+
+    - Volume initialization defaults to uniform distribution based on cell size and points per cell.
+    - This is calculated from input parameters `cell_size` and `points_per_cell` if provided.
+    - Mass initiation defaults to density if `mass_stack` is not provided.
+
+    Attributes:
+
+         force_stack: External force vectors.
+         mass_stack: material point masses, assumed to remain constant throughout the simulation.
+         volume_stack: Current particle volumes.
+         volume0_stack: Initial particle volumes.
+         L_stack: Velocity gradient tensors.
+         stress_stack: Cauchy stress tensors.
+         F_stack: Deformation gradient tensors.
+         density_per_particle: Particle density. Defaults to 1000.0 if not provided.
+         kwargs:
+            - cell_size: Size of the grid cell. Defaults to 1.0 if not provided.
+            - points_per_cell: Number of material points per cell. Defaults to 4 if not provided.
+            - density_stack: Density per particle. Defaults to 1000.0 if not provided.
+    """
+
+    force_stack: Float[Array, "num_points dim"]
+    volume_stack: Float[Array, "num_points"]
+    volume0_stack: Float[Array, "num_points"]
+    L_stack: Float[Array, "num_points 3 3"]
+    stress_stack: Float[Array, "num_points 3 3"]
+    F_stack: Float[Array, "num_points 3 3"]
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        position_stack: Optional[Float[Array, "num_points dim"]] = None,
+        velocity_stack: Optional[Float[Array, "num_points dim"]] = None,
+        force_stack: Optional[Float[Array, "num_points dim"]] = None,
+        mass_stack: Optional[Float[Array, "num_points"]] = None,
+        volume_stack: Optional[Float[Array, "num_points"]] = None,
+        volume0_stack: Optional[Float[Array, "num_points"]] = None,
+        L_stack: Optional[Float[Array, "num_points 3 3"]] = None,
+        stress_stack: Optional[Float[Array, "num_points 3 3"]] = None,
+        F_stack: Optional[Float[Array, "num_points 3 3"]] = None,
         **kwargs,
     ) -> Self:
-        # Initialize required fields
+        """Helper function to create MaterialPointState with default values."""
 
         if position_stack is None:
             position_stack = jnp.array([[0.0, 0.0, 0.0]])
+            warning = (
+                "No position_stack provided for MaterialPoints. "
+                "Defaulting to a single particle at the origin."
+            )
+            warnings.warn(warning)
 
-        self.position_stack = position_stack
-        self.num_points, self.dim = position_stack.shape
+        position_stack = jnp.array(position_stack)
 
-        # Set defaults for explicit args
-        self.velocity_stack = (
+        num_points, dim = position_stack.shape
+
+        # Initialize with empty/default arrays if not provided
+        velocity_stack = (
             velocity_stack
             if velocity_stack is not None
-            else jnp.zeros((self.num_points, self.dim))
+            else jnp.zeros((num_points, dim))
         )
 
-        self.force_stack = (
-            force_stack
-            if force_stack is not None
-            else jnp.zeros((self.num_points, self.dim))
+        force_stack = (
+            force_stack if force_stack is not None else jnp.zeros((num_points, dim))
         )
 
-        self.mass_stack = (
-            mass_stack if mass_stack is not None else jnp.ones(self.num_points)
-        )
-        p_stack = kwargs.get("p_stack", None)
-        if p_stack is not None:
-            if eqx.is_array(p_stack):
-                stress_stack = jax.vmap(lambda x: -x * jnp.eye(3))(p_stack)
-            else:
-                stress_stack = jnp.tile(jnp.eye(3), (self.num_points, 1, 1)) * -p_stack
-
-        self.stress_stack = (
-            stress_stack
-            if stress_stack is not None
-            else jnp.zeros((self.num_points, 3, 3))
+        stress_stack = (
+            stress_stack if stress_stack is not None else jnp.zeros((num_points, 3, 3))
         )
 
-        self.volume_stack = kwargs.get("volume_stack", jnp.ones(self.num_points))
-        self.volume0_stack = kwargs.get("volume0_stack", self.volume_stack.copy())
-        self.L_stack = kwargs.get("L_stack", jnp.zeros((self.num_points, 3, 3)))
+        L_stack = L_stack if L_stack is not None else jnp.zeros((num_points, 3, 3))
 
-        self.F_stack = kwargs.get(
-            "F_stack", jnp.tile(jnp.eye(3), (self.num_points, 1, 1))
+        F_stack = (
+            F_stack if F_stack is not None else jnp.tile(jnp.eye(3), (num_points, 1, 1))
         )
 
-        self.ref_gravity_pe_pos = kwargs.get("ref_gravity_pe_pos")
-        self.ref_gravity = kwargs.get("ref_gravity")
-        super().__init__(**kwargs)
+        # Default volume calculation if not provided.
+        # Assumes uniform distribution based on cell size and points per cell.
+        if volume_stack is None:
+            cell_size = kwargs.get("cell_size", 1.0)
+            points_per_cell = kwargs.get("ppc", 4.0)
+            default_volume = (cell_size**2) / points_per_cell
+            volume_stack = jnp.ones(num_points) * default_volume
 
-    def init_stress_from_p_0(self: Self, p_0) -> Self:
-        # initialize stress tensor from hydrostatic pressure
-        # assumes no deviatoric stresses
-        p_0_array = jnp.array([p_0]).flatten()
-        if p_0_array.shape[0] == self.num_points:
-            new_stress_stack = jax.vmap(lambda x: -x * jnp.eye(3))(p_0_array)
-        else:
-            new_stress_stack = jax.vmap(lambda x: -p_0_array * jnp.eye(3))(
-                self.stress_stack
-            )
+        volume0_stack = volume0_stack if volume0_stack is not None else volume_stack
 
-        return eqx.tree_at(
-            lambda state: state.stress_stack,
-            self,
-            (new_stress_stack),
-        )
+        # Default mass calculation if not provided, using density
+        if mass_stack is None:
+            density_stack = kwargs.get("density_stack", jnp.full((num_points,), 1000.0))
+            mass_stack = volume_stack * density_stack
 
-    def init_volume_from_cellsize(
-        self, cell_size: TypeFloat, ppc: int, init_volume0=True
-    ) -> Self:
-        """
-        Discretizes the particles into cells so volumes are distributed evenly
-        for a given number of particles per cell
-        """
-
-        new_volume_stack = (jnp.ones(self.num_points) * cell_size**self.dim) / ppc
-        if init_volume0:
-            new_volume0_stack = new_volume_stack
-
-        return eqx.tree_at(
-            lambda state: (state.volume_stack, state.volume0_stack),
-            self,
-            (new_volume_stack, new_volume0_stack),
-        )
-
-    def init_mass_from_rho_0(self: Self, rho_0) -> Self:
-        """
-        Discretizes the particles into cells so densities are distributed evenly
-        for a given number of particles per cell
-        """
-        new_mass_stack = rho_0 * self.volume_stack
-        return eqx.tree_at(lambda state: (state.mass_stack), self, (new_mass_stack))
-
-    def _refresh(self) -> Self:
-        """Zero velocity gradient"""
-        return eqx.tree_at(
-            lambda state: (state.L_stack, state.force_stack),
-            self,
-            (self.L_stack.at[:].set(0.0), self.force_stack.at[:].set(0.0)),
-        )
-
-    def update_L_and_F_stack(self, L_stack_next, dt):
-        # TODO a better name for this function?
-        def update_F_volume(L_next, F_prev, volume0):
-            F_next = (jnp.eye(3) + L_next * dt) @ F_prev
-            volume_next = jnp.linalg.det(F_next) * volume0
-            return F_next, volume_next
-
-        F_stack_next, volume_stack_next = jax.vmap(update_F_volume)(
-            L_stack_next, self.F_stack, self.volume0_stack
-        )
-
-        return self.replace(
-            L_stack=L_stack_next, F_stack=F_stack_next, volume_stack=volume_stack_next
+        return cls(
+            position_stack=position_stack,
+            velocity_stack=velocity_stack,
+            force_stack=force_stack,
+            mass_stack=mass_stack,
+            volume_stack=volume_stack,
+            volume0_stack=volume0_stack,
+            L_stack=L_stack,
+            stress_stack=stress_stack,
+            F_stack=F_stack,
         )
 
     @property
-    def rho_stack(self):
-        return self.mass_stack / self.volume_stack
+    def density_stack(self):
+        """Get current density of material points."""
+        return self.mass_stack / (self.volume_stack + 1e-16)
 
     @property
-    def rho0_stack(self):
-        return self.mass_stack / self.volume0_stack
+    def density_ref_stack(self):
+        """Get initial density of material points."""
+        return self.mass_stack / (self.volume0_stack + 1e-16)
 
     @property
-    def p_stack(self):
+    def pressure_stack(self):
+        """Pressure of material points. Compression positive.
+        (see `get_pressure_stack` in utils/math_helpers.py)
+        """
         return get_pressure_stack(self.stress_stack)
 
     @property
     def KE_density_stack(self):
-        return get_KE_stack(self.rho_stack, self.velocity_stack)
+        """Kinetic energy density of material points."""
+        NotImplementedError("KE_density_stack property not implemented yet.")
+        pass
+        # return get_KE_stack(self.rho_stack, self.velocity_stack)
 
     @property
     def KE_stack(self):
-        return get_KE_stack(self.mass_stack, self.velocity_stack)
+        """Kinetic energy of material points."""
+        NotImplementedError("KE_stack property not implemented yet.")
+        pass
+        # return get_KE_stack(self.mass_stack, self.velocity_stack)
 
     @property
     def q_stack(self):
-        return get_q_vm_stack(self.stress_stack)
+        """Triaxial shear stress invariant of material points."""
+        NotImplementedError("q_stack property not implemented yet.")
+        pass
+        # return get_q_vm_stack(self.stress_stack)
 
     @property
     def q_p_stack(self):
-        return self.q_stack / self.p_stack
+        """Shear stress to pressure ratio of material points."""
+        NotImplementedError("q_p_stack property not implemented yet.")
+        pass
+
+        # return self.q_stack / self.p_stack
 
     @property
     def eps_stack(self):
-        return get_hencky_strain_stack(self.F_stack)[0]
+        """Hencky strain tensor of material points."""
+        NotImplementedError("eps_stack property not implemented yet.")
+        pass
+        # return get_hencky_strain_stack(self.F_stack)[0]
 
     @property
     def eps_v_stack(self):
-        return get_volumetric_strain_stack(self.eps_stack)
+        """ "Volumetric strain of material points."""
+        NotImplementedError("eps_v_stack property not implemented yet.")
+        pass
+
+        # return get_volumetric_strain_stack(self.eps_stack)
 
     @property
     def deps_dt_stack(self):
-        return get_strain_rate_from_L_stack(self.L_stack)
+        """Strain rate tensor of material points."""
+        NotImplementedError("deps_dt_stack property not implemented yet.")
+        pass
+        # return get_strain_rate_from_L_stack(self.L_stack)
 
     @property
     def gamma_stack(self):
-        return get_scalar_shear_strain_stack(self.eps_stack)
+        NotImplementedError("gamma_stack property not implemented yet.")
+        pass
+        # return get_scalar_shear_strain_stack(self.eps_stack)
 
     @property
     def dgamma_dt_stack(self):
-        return get_scalar_shear_strain_stack(self.deps_dt_stack)
+        NotImplementedError("dgamma_dt_stack property not implemented yet.")
+        pass
+        # return get_scalar_shear_strain_stack(self.deps_dt_stack)
 
     @property
     def viscosity_stack(self):
-        return (jnp.sqrt(3) * self.q_stack) / self.dgamma_dt_stack
-
-    # def work_ext_stack(self, dt, **kwargs):
-    #     # external work  (e.g., potential energy due to gravity)
-    #     def vmap_W_ext(force, vel):
-    #         # relative displacement
-    #         rel_disp = vel * dt
-    #         return jnp.dot(force, rel_disp)
-
-    #     return jax.vmap(vmap_W_ext)(self.force_stack, self.velocity_stack)
-
-    def PE_ext_stack(self, dt, **kwargs):
-        return self.work_ext_stack(dt)
-
-    @property
-    def PE_grav_stack(self):
-        if self.ref_gravity is None:
-            return
-
-        def vmap_grav_pe(pos, mass):
-            f_grav = mass * self.ref_gravity  # neg
-            displacement = self.ref_gravity_pe_pos - pos
-            # return jnp.dot(f_grav, displacement)  # positive if in same direction
-
-            return jnp.dot(f_grav, displacement)
-
-        return jax.vmap(vmap_grav_pe)(self.position_stack, self.mass_stack)
-
-    def PE_stack(self, dt, W_stack, **kwargs):
-        assert W_stack is not None, (
-            "Please set approx_strain_energy_density=True for the material points"
-        )
-        return W_stack * self.volume_stack + self.PE_grav_stack
-
-    def KE_PE_Stack(self, dt, W_stack, **kwargs):
-        return self.KE_stack / self.PE_stack(dt, W_stack)
-
-    def deps_stack(self, dt, **kwargs):
-        return self.deps_dt_stack * dt
-
-    def phi_stack(self, rho_p, **kwargs):
-        return self.rho_stack / rho_p
-
-    def specific_volume_stack(self, rho_p, **kwargs):
-        return 1.0 / self.phi_stack(rho_p)
-
-    def inertial_number_stack(self, d, rho_p, **kwargs):
-        return get_inertial_number_stack(
-            self.p_stack,
-            self.dgamma_dt_stack,
-            d,
-            rho_p,
-        )
-
-    def deps_p_dt_stack(self, dt, eps_e_stack=None, eps_e_stack_prev=None, **kwargs):
-        """Plastic strain rate tensor"""
-
-        if eps_e_stack is None:
-            eps_e_stack = jnp.zeros((3, 3))
-
-        if eps_e_stack_prev is None:
-            eps_e_stack_prev = jnp.zeros((3, 3))
-
-        return (eps_e_stack - eps_e_stack_prev) * dt
-
-    def dgamma_p_dt_stack(self, dt, eps_e_stack=None, eps_e_stack_prev=None, **kwargs):
-        """Plastic scalar shear strain rate"""
-
-        return get_scalar_shear_strain_stack(
-            self.deps_p_dt_stack(dt, eps_e_stack, eps_e_stack_prev, **kwargs)
-        )
-
-    def deps_p_v_dt_stack(self, dt, eps_e_stack, eps_e_stack_prev=None, **kwargs):
-        """Plastic scalar volumetric strain rate"""
-
-        return get_volumetric_strain_stack(
-            self.deps_p_dt_stack(dt, eps_e_stack, eps_e_stack_prev, **kwargs)
-        )
+        NotImplementedError("viscosity_stack property not implemented yet.")
+        pass
+        # return (jnp.sqrt(3) * self.q_stack) / self.dgamma_dt_stack

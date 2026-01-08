@@ -2,38 +2,94 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
+"""
+Explanation:
+    This module contains the base `Force` logic class and a state
+    which is used for consistent type checking and dependency injection.
 
-# -*- coding: utf-8 -*-
-
-from typing import Optional, Self, Tuple, Any
-
-from ..common.base import Base
-from ..common.types import TypeFloat, TypeInt
-from ..grid.grid import Grid
-from ..material_points.material_points import MaterialPoints
+    The force class contains hooks that are called at various stages of the MPM solver.
+"""
+import equinox as eqx
 
 
-class Force(Base):
-    """Force state for the material properties."""
+from ..grid.grid import GridState
+from ..material_points.material_points import MaterialPointState
+from ..solvers.coupling import BodyCoupling
 
-    def apply_on_grid(
+from typing import Self, List, Optional, Tuple, Dict
+
+class BaseForceState(eqx.Module):
+    pass
+
+
+from ..shapefunctions.mapping import InteractionCache
+from ..sdf.sdfobject import SDFObjectState
+
+class Force(eqx.Module):
+
+    def apply_kinematics(
         self: Self,
-        material_points: Optional[MaterialPoints] = None,
-        grid: Optional[Grid] = None,
-        step: Optional[TypeInt] = 0,
-        dt: Optional[TypeFloat] = 0.01,
-        dim: TypeInt = 3,
-        **kwargs: Any,
-    ) -> Tuple[Grid, Self]:
-        return grid, self
+        mp_states: List[MaterialPointState],
+        grid_states: List[GridState],
+        f_states: List[Optional[BaseForceState | SDFObjectState]],
+        intr_caches: Dict[Tuple[int, int], InteractionCache],
+        couplings: Tuple[BodyCoupling,...],
+        dt,
+        time,
+    ):
+        """
+        Apply hook 1 after interactions and connectivity is computed within the solver
+        (e.g., Move rigid body)
+        """
+        return f_states
 
-    def apply_on_points(
+    def apply_pre_p2g(
         self: Self,
-        material_points: Optional[MaterialPoints] = None,
-        grid: Optional[Grid] = None,
-        step: Optional[TypeInt] = 0,
-        dt: Optional[TypeFloat] = 0.01,
-        dim: TypeInt = 3,
-        **kwargs: Any,
-    ) -> Tuple[MaterialPoints, Self]:
-        return material_points, self
+        mp_states: List[MaterialPointState],
+        grid_states: List[GridState],
+        f_states: List[Optional[BaseForceState | SDFObjectState]],
+        intr_caches: Dict[Tuple[int, int], InteractionCache],
+        couplings: Tuple[BodyCoupling,...],
+        dt,
+        time,
+    ):
+        """
+        Apply hook 2 nefore particle to grid transfer, acting on particles.
+        """
+        return mp_states, f_states
+
+    def apply_grid_forces(
+        self: Self,
+        mp_states: List[MaterialPointState],
+        grid_states: List[GridState],
+        f_states: List[Optional[BaseForceState | SDFObjectState]],
+        intr_caches: Dict[Tuple[int, int], InteractionCache],
+        couplings: Tuple[BodyCoupling,...],
+        dt,
+        time,
+    ):
+        """
+        Apply hook 3 before integration acting on grid.
+
+        Modify grid forces here directly.
+
+        """
+        return grid_states, f_states
+
+    def apply_grid_moments(
+        self: Self,
+        mp_states: List[MaterialPointState],
+        grid_states: List[GridState],
+        f_states: List[Optional[BaseForceState | SDFObjectState]],
+        intr_caches: Dict[Tuple[int, int], InteractionCache],
+        couplings: Tuple[BodyCoupling,...],
+        dt,
+        time,
+    ):
+        """
+        Apply hook 4 before g2p (after integration) acting on grid.
+
+        The grid momentum can be modified here.
+
+        """
+        return grid_states, f_states

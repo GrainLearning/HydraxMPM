@@ -1,50 +1,56 @@
-# """Unit tests for the MaterialPoints dataclass."""
-
+import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 import hydraxmpm as hdx
 
 
-def test_create():
-    """Unit test to initialize material_points  2 material_points."""
-    material_points = hdx.MaterialPoints(position_stack=jnp.zeros((2, 2)))
-    assert isinstance(material_points, hdx.MaterialPoints)
-
-    assert material_points.dim == 2
-    assert material_points.num_points == 2
-
-
-def test_post_init():
-    material_points = hdx.MaterialPoints(
-        position_stack=jnp.zeros((2, 2)),
-        rho_0=1.0,
-    )
-
-    material_points = material_points.init_volume_from_cellsize(cell_size=0.1, ppc=2)
-
-    print(material_points.volume_stack, material_points.volume0_stack)
-    np.testing.assert_allclose(material_points.volume_stack, jnp.array([0.005, 0.005]))
-    np.testing.assert_allclose(
-        material_points.volume_stack, material_points.volume0_stack
-    )
-
-    # check density ref
-
-    material_points = hdx.MaterialPoints(
-        position_stack=jnp.zeros((2, 2)),
-        rho_0=1400,
-    )
+def test_material_point_base_state():
+    position_stack = jnp.array([[0.0, 0.0], [1.0, 1.0]])
+    state = hdx.BaseMaterialPointState(
+        position_stack=position_stack,
+        velocity_stack=jnp.zeros_like(position_stack),
+        mass_stack = jnp.array([1.0, 1.0]),
+        )
+    
+    assert state.num_points == 2
+    assert state.dim == 2
+    np.testing.assert_array_equal(state.position_stack, position_stack)
 
 
-def test_refresh():
-    """Unit test to refresh the state of the material_points."""
+def test_standard_material_point_defaults():
+    """Test creation with minimal arguments (defaults)."""
+    # 3D points
     position_stack = jnp.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+    
+    state = hdx.MaterialPointState.create(position_stack=position_stack)
+    
+    
+    assert state.num_points == 2
+    assert state.dim == 3
 
-    material_points = hdx.MaterialPoints(
-        position_stack=position_stack, L_stack=jnp.ones((2, 3, 3))
-    )
+    # Check other defaults
+    np.testing.assert_array_equal(state.velocity_stack, jnp.zeros((2, 3)))
+    np.testing.assert_array_equal(state.force_stack, jnp.zeros((2, 3)))
+    np.testing.assert_array_equal(state.L_stack, jnp.zeros((2, 3, 3)))
+    np.testing.assert_array_equal(state.stress_stack, jnp.zeros((2, 3, 3)))
+    
+    # F_stack default is identity
+    expected_F = jnp.tile(jnp.eye(3), (2, 1, 1))
+    np.testing.assert_array_equal(state.F_stack, expected_F)
 
-    material_points = material_points._refresh()
-
-    np.testing.assert_allclose(material_points.L_stack, jnp.zeros((2, 3, 3)))
+def test_standard_material_point_state_no_position():
+    # Should warn and default to origin
+    # We expect multiple warnings here (no position, plus missing params)
+    with pytest.warns(UserWarning, match="No position_stack provided"):
+        state = hdx.MaterialPointState.create(
+            cell_size=1.0,
+            points_per_cell=1,
+            density_per_particle=1.0,
+            volume_per_particle=1.0
+        )
+        
+    assert state.num_points == 1
+    assert state.dim == 3
+    np.testing.assert_array_equal(state.position_stack, jnp.array([[0.0, 0.0, 0.0]]))
