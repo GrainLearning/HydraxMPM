@@ -139,8 +139,9 @@ class SDFObjectBase(eqx.Module):
             # [-w * ry, w * rx]
             cross = jnp.array([-sdf_state.angular_velocity * p_local[1], sdf_state.angular_velocity * p_local[0]])
         else:
-            # 3D Cross product TODO: Verify quaternion usage
+            # 3D in WORLD frame
             cross = jnp.cross(sdf_state.angular_velocity, p_local)
+            
 
         v_body = sdf_state.velocity + cross
 

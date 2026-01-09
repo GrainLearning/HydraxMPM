@@ -41,7 +41,7 @@ from .simstate import SimState
 
 import os
 import sys
-
+import rerun.blueprint as rrb
 try:
     from skimage import measure
     HAS_SKIMAGE = True
@@ -93,15 +93,21 @@ class RerunVisualizer:
     origin: tuple = None
     end: tuple = None
 
+   # Class-level flag to prevent opening multiple windows/servers
+    _viewer_started = False 
+
     def __init__(
         self,
         app_name="HydraxMPM",
+        recording_id= None,
+        root_path="Sim_A",
         cmap=None,
         cell_size: float | Float[Array, "..."] = None,
         origin: Float[Array, "dim"] = None,
         end: Float[Array, "dim"] = None,
         ppc: int = 1,
         scale_radius: int = 1.0,
+        mode="spawn"
     ):
         """Initialize the Rerun Visualizer.
         
@@ -122,6 +128,8 @@ class RerunVisualizer:
         venv_bin = os.path.join(sys.prefix, "bin")
         if venv_bin not in os.environ["PATH"]:
             os.environ["PATH"] = venv_bin + os.pathsep + os.environ["PATH"]
+
+
 
         # Store parameters
         self.origin = np.array(origin)
@@ -153,13 +161,25 @@ class RerunVisualizer:
             self._point_radius = 0.05
 
         # Initialize the ID
-        rr.init(app_name)
+        rr.init(app_name, recording_id=recording_id)
+        self.root_path = root_path
 
-        # Setup the world coordinate system
-        rr.spawn()
-
-        # Set the world coordinate system (Y-up for 3D)
-        rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
+        # Serve viewer once
+        if not RerunVisualizer._viewer_started:
+            if mode == "spawn":
+                rr.spawn()
+            elif mode == "serve":
+                rr.serve(open_browser=False, server_addr="0.0.0.0")
+            
+            # Mark as started so we don't open a second window next time
+            RerunVisualizer._viewer_started = True
+            
+        elif mode == "save":
+            # Save mode is safe to run every time
+            rr.save("simulation.rrd")
+            
+        if self.dim == 3:
+            rr.log(f"{self.root_path}", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
 
         # Set up the camera for 3D visualization
         if (
@@ -170,7 +190,7 @@ class RerunVisualizer:
 
             max_dim = np.max(np.array(self.end))
             rr.log(
-                "world/camera",
+                f"{self.root_path}/camera",
                 rr.Pinhole(focal_length=max_dim, width=max_dim * 2, height=max_dim * 2),
                 static=True,
             )
@@ -182,6 +202,25 @@ class RerunVisualizer:
             and (self.cell_size is not None)
         ):
             self._log_static_domain()
+
+        # if self.dim == 2:
+        #     # Force a 2D View
+        #     blueprint = rrb.Blueprint(
+        #         rrb.Horizontal(
+        #             rrb.Spatial2DView(origin=f"/{self.root_path}", name="2D Simulation")
+        #         ),
+        #         collapse_panels=True,
+        #     )
+        # else:
+        #     # Force a 3D View
+        #     blueprint = rrb.Blueprint(
+        #         rrb.Horizontal(
+        #             rrb.Spatial3DView(origin=f"/{self.root_path}", name="3D Simulation")
+        #         ),
+        #         collapse_panels=True,
+        #     )
+        
+        # rr.send_blueprint(blueprint)
 
     def log_simulation(self, state: SimState):
         """
@@ -196,7 +235,7 @@ class RerunVisualizer:
         rr.set_time("sim_time", timestamp=current_time)
         
         for i, mp in enumerate(state.material_points):
-            self._log_particles(mp, f"world/material_{i}")
+            self._log_particles(mp, f"{self.root_path}/material_{i}")
 
         # Add SDF logging here if needed?
 
@@ -261,7 +300,7 @@ class RerunVisualizer:
             sizes = end - origin
 
             rr.log(
-                "world/domain/bounds",
+                f"{self.root_path}/domain/bounds",
                 rr.Boxes2D(
                     mins=[origin],
                     sizes=[sizes],
@@ -274,7 +313,7 @@ class RerunVisualizer:
         elif self.dim == 3:
             sizes = self.end - self.origin
             rr.log(
-                "world/domain/bounds",
+                f"{self.root_path}/domain/bounds",
                 rr.Boxes3D(
                     mins=[origin],
                     sizes=[sizes],
@@ -357,7 +396,7 @@ class RerunVisualizer:
 
                 all_strips.append(points)
             rr.log(
-                f"world/{label}",
+                f"{self.root_path}/{label}",
                 rr.LineStrips2D(
                     all_strips,
                     colors=[[255, 165, 0]],  # Orange
@@ -384,7 +423,7 @@ class RerunVisualizer:
                 world_normals = normals[:, [1, 0, 2]]
 
                 rr.log(
-                    f"world/{label}",
+                    f"{self.root_path}/{label}",
                     rr.Mesh3D(
                         vertex_positions=world_verts,
                         vertex_normals=world_normals,

@@ -19,6 +19,7 @@ from jaxtyping import Float, Array
 from ..sdf.sdfobject import SDFObjectBase, SDFObjectState
 from .force import Force
 
+from ..utils.math_helpers import integrate_quaternion
 
 class SDFCollider(Force):
     """
@@ -105,8 +106,8 @@ class SDFCollider(Force):
         if dim == 2:
             new_rot = f_state.rotation + f_state.angular_velocity * dt
         else:
-            # Quaternion Update to be implemented
-            new_rot = f_state.rotation
+
+            new_rot = integrate_quaternion(f_state.rotation, f_state.angular_velocity, dt)
 
         f_state = eqx.tree_at(
             lambda s: (s.center_of_mass, s.rotation), f_state, (new_pos, new_rot)

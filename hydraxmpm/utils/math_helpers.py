@@ -631,3 +631,35 @@ def rotation_2d_inv(theta,v):
     x_new =  c * v[0] + s * v[1]
     y_new = -s * v[0] + c * v[1]
     return jnp.stack([x_new, y_new])
+
+
+def integrate_quaternion(q, w, dt):
+    """
+    Integrates a unit quaternion with an angular velocity vector.
+
+    """
+    # create quaternion from angular velocity: [0, wx, wy, wz]
+    w_quat = jnp.concatenate([jnp.array([0.0]), w])
+    
+    # Quaternion multiplication: dq/dt = 0.5 * w_quat * q
+
+    # q_new = q + 0.5 * w_quat * q * dt
+    # Explicit multiplication for w_quat * q
+    # w_quat = [0, bx, by, bz], q = [aw, ax, ay, az]    
+    bx, by, bz = w
+    aw, ax, ay, az = q
+    
+    dq = 0.5 * dt * jnp.array([
+        -bx*ax - by*ay - bz*az,
+         bx*aw + by*az - bz*ay,
+        -bx*az + by*aw + bz*ax,
+         bx*ay - by*ax + bz*aw
+    ])
+
+    q_new = q + dq
+    
+    # Normalize to prevent drift
+    return q_new / (jnp.linalg.norm(q_new) + 1e-12)
+
+def rotate_2d_update(theta, omega, dt):
+    return theta + omega * dt

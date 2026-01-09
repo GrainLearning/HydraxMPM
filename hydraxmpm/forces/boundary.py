@@ -82,41 +82,40 @@ class PlanarBoundaries(Force):
         dim = jnp.array(origin).shape[0]
         self.gap = gap
 
+        o = jnp.array(origin)
+        e = jnp.array(end)
+
         if dim == 2:
             # Define 4 walls in 2D
             o_x, o_y = origin
             e_x, e_y = end
             points = [
-                (o_x, o_y ),
-                (o_x , o_y),
-                (e_x, o_y),
-                (e_x, e_y),
+                o,
+                o,
+                e,
+                e
             ]
             normals = [(0.0, 1.0), (1.0, 0.0), (-1.0, 0.0), (0.0, -1.0)]
 
         elif dim == 3:
             # Define 6 walls in 3D
-            o_x, o_y, o_z = origin
-            e_x, e_y, e_z = end
+            # o_x, o_y, o_z = origin
+            # e_x, e_y, e_z = end
             points = [
-                (o_x, o_y, o_z),
-                (o_x, o_y, o_z),
-                (e_x, o_y, o_z),
-                (e_x, e_y, o_z),
-                (o_x, o_y, o_z),
-                (o_x, o_y, o_z),
-                (e_x, e_y, e_z),
-                (e_x, e_y, e_z),
+                o,              # Bottom (y=0)
+                o,              # Left (x=0)
+                o,              # Back (z=0)
+                e,              # Right (x=10)
+                e,              # Top (y=10)
+                e               # Front (z=10)
             ]
             normals = [
-                (0.0, 1.0, 0.0), 
-                (1.0, 0.0, 0.0), 
-                (-1.0, 0.0, 0.0), 
-                (0.0, -1.0, 0.0),
-                (0.0, 0.0, 1.0),
-                (0.0, 0.0, -1.0),
-                (0.0, 0.0, 1.0),
-                (0.0, 0.0, -1.0),
+                (0.0, 1.0, 0.0),  # Bottom (Up)
+                (1.0, 0.0, 0.0),  # Left (Right)
+                (0.0, 0.0, 1.0),  # Back (Forward)
+                (-1.0, 0.0, 0.0), # Right (Left)
+                (0.0, -1.0, 0.0), # Top (Down)
+                (0.0, 0.0, -1.0)  # Front (Backward)
             ]
 
         # store points and normals as arrays
