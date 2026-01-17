@@ -151,10 +151,8 @@ class SDFCollider(Force):
             v_object_stack = self.sdf_object.get_velocity_stack(f_state, flat_coords,dt)
 
             # Apply contact via vmap over all points to cover while domain
-            new_vel = jax.vmap(self._collide_node,
-                               in_axes =(0,0,0,0,None)
-                               )(
-                dis_stack, vel, normals_stack, v_object_stack, dt
+            new_vel = jax.vmap(self._collide_node)(
+                dis_stack, vel, normals_stack, v_object_stack
             )
 
             # reconstruct momentum
@@ -168,98 +166,45 @@ class SDFCollider(Force):
 
         return grid_states, f_states
 
-    def _collide_node(self, dist, v_node, normal, v_object,dt):
+    def _collide_node(self, dist, v_node, normal, v_object):
         """
         Calculates collision for a single node.
         """
 
+        # Get velocity direction relative Velocity to object
+        v_rel = v_node - v_object
 
         # v_n < 0 means moving INTO the wall
+        v_n_mag = jnp.dot(v_rel, normal)
 
         # Check Inside/Touching AND Moving Inward
         # dist <= 0 implies we are behind the plane
-        is_colliding = (dist <= self.gap) 
-        # & (v_n_mag < 0.0)
+        is_colliding = (dist <= self.gap) & (v_n_mag < 0.0)
 
         def handle_collision(v_in):
-
-            # Check if we  are  inside the gap
-            # add velocity bias to push us out
-            # by next timestep
-            # bias = (overlap)/dt * stiffness
-            # ensure we dont apply negative bias (suction)
-            bias_factor = 0. # good values (0.1 - 0.5) 
-            overlap = self.gap - dist
-            v_bias = (overlap / dt) * bias_factor
-            v_bias = jnp.maximum(0.0, v_bias)
-            
-
-            # Solve normal velocity
-            # Get velocity direction relative Velocity to object
-            v_rel = v_node - v_object
-            v_n_mag = jnp.dot(v_rel, normal)
-            delta_v_stop = jnp.maximum(0.0, -v_n_mag)
-
-
-            # calculate the impulse to reach v_bias
-            # if current velocity is already > v_bias,
-            # we are moving fast enough
-            delta_v_n = v_bias - v_n_mag
-            delta_v_n = jnp.maximum(0.0, delta_v_n)
-
-            
-            # apply impuse to velocity
-            v_corrected = v_in + delta_v_n * normal
-            
-
-
-            # Friction
             # Decompose normal and tangential velocity
-            v_rel_corrected = v_corrected - v_object
-            v_n_new = jnp.dot(v_rel_corrected, normal)
-            v_t_vec = v_rel_corrected - v_n_new * normal
+            v_n_vec = v_n_mag * normal
+            v_t_vec = v_in - v_n_vec
 
+            # Friction (Coulomb)
+            # We apply an impulse to stop normal motion (Delta_vn = -v_n_mag)
+            # Max Tangential Impulse <= mu * Normal Impulse
+            # => Delta_vt <= mu * |v_n_mag|
             vt_mag = jnp.linalg.norm(v_t_vec)
+            vn_impulse = jnp.abs(v_n_mag)
 
+            # Calculate slip reduction
+            # If friction is high, we subtract the full magnitude (Stick)
+            # If friction is low, we subtract mu * vn
+            reduction = self.friction * vn_impulse
 
-            # Friction limits based on the Normal Impulse we just applied
-            # The "Normal Force" is proportional to delta_v_n / dt
-            friction_impulse_max = self.friction * delta_v_stop
-            
-            # Calculate how much we can reduce tangential velocity
-            reduction = jnp.minimum(vt_mag, friction_impulse_max)
-            
-            # Apply reduction
-            v_t_new = v_t_vec * (1.0 - reduction / (vt_mag + 1e-12))
-            
-            # Reassemble
-            return v_object + v_n_new * normal + v_t_new
-        
-            # Friction limits based on the Normal Impulse we just applied
-            # The "Normal Force" is proportional to delta_v_n / dt
-            # So we can just scale velocities directly.
-            # friction_impulse_max = self.friction * delta_v_n
+            # New tangential magnitude (cannot go below zero)
+            vt_new_mag = jnp.maximum(0.0, vt_mag - reduction)
 
+            # rescale tangent vector
+            v_t_new = v_t_vec * (vt_new_mag / (vt_mag + 1e-12))
 
-            # # Friction (Coulomb)
-            # # We apply an impulse to stop normal motion (Delta_vn = -v_n_mag)
-            # # Max Tangential Impulse <= mu * Normal Impulse
-            # # => Delta_vt <= mu * |v_n_mag|
-            # vt_mag = jnp.linalg.norm(v_t_vec)
-            # vn_impulse = jnp.abs(v_n_mag)
-
-            # # Calculate slip reduction
-            # # If friction is high, we subtract the full magnitude (Stick)
-            # # If friction is low, we subtract mu * vn
-            # reduction = self.friction * vn_impulse
-
-            # # New tangential magnitude (cannot go below zero)
-            # vt_new_mag = jnp.maximum(0.0, vt_mag - reduction)
-
-            # # rescale tangent vector
-            # v_t_new = v_t_vec * (vt_new_mag / (vt_mag + 1e-12))
-
-            # return v_t_new + v_object
+            return v_t_new + v_object
 
         return jax.lax.cond(
             is_colliding,

@@ -23,7 +23,7 @@ class ElementTestDriver(eqx.Module):
                  mp_state, 
                  (L_input, F_next)
                  )
-            
+
             mp_next, law_next = self.constitutive_law.update(mp_temp, law_state, dt)
             
             # 3. Update Volume/Density
@@ -36,8 +36,8 @@ class ElementTestDriver(eqx.Module):
 
             # Repack
             return eqx.tree_at(
-                lambda m: (m.F_stack, m.stress_stack, m.volume_stack),
+                lambda m: (m.L_stack, m.F_stack, m.stress_stack, m.volume_stack),
                 mp_state,
-                (F_next, mp_next.stress_stack, vol_next)
+                (mp_next.L_stack, F_next, mp_next.stress_stack, vol_next)
             ), law_next
       

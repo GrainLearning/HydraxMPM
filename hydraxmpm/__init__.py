@@ -26,8 +26,16 @@ from .material_points.material_points import (
 
 from .common.simstate import SimState
 
-from .common.rerun import RerunVisualizer
-from .common.vtk_io import VTKVisualizer
+try:
+    from .common.rerun import RerunVisualizer
+except ImportError:
+    RerunVisualizer = None
+
+try:
+    from .common.vtk_io import VTKVisualizer
+except ImportError:
+    VTKVisualizer = None
+
 from .common.sim_io import SimIO
 
 from .grid.grid import GridState
@@ -70,14 +78,30 @@ from .sdf.sdfcollection import (
     StarSDF,
     HollowCylinderSDF,
 )
+from .sdf.sdfmorph import ChainMorphSDF,MorphSDF, MorphSDFState
+from .sdf.gridsdf import GridSDF
 
 from .forces.sdf_collider import SDFCollider
 from .forces.boundary import PlanarBoundaries
 from .utils.generate_body import generate_particles_in_sdf
 
 
+from .element_tests.driver import ElementTestDriver
+
+from .element_tests.triaxial_test import TriaxialTest
+
 from .common.builder import SimBuilder
 
+from .utils.math_helpers import (
+    # get_deviatoric_stress,
+    # get_pressure,
+    # get_von_mises_stress,
+    # get_volumetric_strain,
+    get_volumetric_strain_stack,
+)
+
+# JMP journal (remove later maybe?)
+from .constitutive_laws.JMPS import ParamMCCInertia, ParamMCCInertiaState
 
 hook.uninstall()
 del hook

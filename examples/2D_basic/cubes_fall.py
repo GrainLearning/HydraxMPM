@@ -3,6 +3,7 @@
 
 
 
+
 def simulation_wrapper():
 
     import sys
@@ -26,6 +27,55 @@ def simulation_wrapper():
 
     import equinox as eqx
 
+
+    class HeartSDF(hdx.SDFObjectBase):
+        """
+        A Heart Shape.
+        Based on Inigo Quilez's exact Heart SDF.
+        
+        Domain: 2D (Shape) or 3D (Infinite Column along Z)
+        The 'tip' of the heart is at the local origin (0,0).
+        """
+        scale: float
+
+        def __init__(self, scale=1.0):
+
+            self.scale = scale
+
+        def signed_distance_local(self, state, p_local):
+            
+    
+
+            p = p_local / self.scale
+
+            x = p[0]
+            y = p[1]
+
+            # 3. Apply Symmetry
+            x = jnp.abs(x)
+
+
+            dx_a = x - 0.25
+            dy_a = y - 0.75
+            dist_a = jnp.sqrt(dx_a**2 + dy_a**2) - jnp.sqrt(2.0)/4.0
+
+
+            d1 = x**2 + (y - 1.0)**2
+            
+
+            w = 0.5 * jnp.maximum(x + y, 0.0)
+            d2 = (x - w)**2 + (y - w)**2
+            
+            dist_b = jnp.sqrt(jnp.minimum(d1, d2)) * jnp.sign(x - y)
+
+        
+            dist_unit = jnp.where(
+                (y + x) > 1.0,
+                dist_a,
+                dist_b
+            )
+
+            return dist_unit * self.scale
     # =========================================================
     # 1. SIMULATION PARAMETERS
     # =========================================================
@@ -46,63 +96,10 @@ def simulation_wrapper():
     # =========================================================
     # sdf_block = hdx.BoxSDF(size=(9.0, 4.0))
     sdf_block = hdx.BoxSDF(size=(10.0, 6.0))
-    # position_stack = hdx.generate_particles_in_sdf(
-    #     sdf_obj=sdf_block,
-    #     center_of_mass=jnp.array([5.0, 7.0]),
-    #     # center_of_mass=jnp.array([5.5, 0.5]),
-    #     bounds_min=origin,
-    #     bounds_max=end,
-    #     cell_size=cell_size,
-    #     ppc=ppc,
-    #     mode="regular",
-    # )
-
-    # density_stack = jnp.full((len(position_stack),), 1000.0   )
-
-    # water_p_idx = sim_builder.add_material_points(
-    #     position_stack=position_stack,
-    #     density_stack=density_stack,
-    #     cell_size=cell_size,
-    #     ppc=ppc
-    # )
-
-    # water_g_idx = sim_builder.add_grid(
-    #     origin =origin,
-    #     end =end,
-    #     cell_size=cell_size,
-    # )
-
-    #     # mu_s: float,
-    #     # mu_d: float,
-    #     # I_0: float,
-    #     # d_p: float,
-    #     # K: float = 1.0e6,
-    #     # rho_p: float = 2650.0,
-    #     # alpha: float = 1e-4,
-    #     # p_min_calc: float = 10.0,
-
-    # water_c_id = sim_builder.add_constitutive_law(
-    #     #  law = hdx.NewtonFluid(K=2e6, viscosity=1e-3, beta=7.0),
-    #     law = hdx.MuI_LC(
-    #         K=2e6, mu_s=0.4, mu_d=1.41, I_0=1e-4,  d_p=0.025, alpha=1e-4
-    #     ),
-    #      density_stack=density_stack
-    # )
-
-    # water_b_idx = sim_builder.couple(
-    #     # p_idx=water_p_idx,
-    #     # g_idx=water_g_idx,
-    #     # c_idx=water_c_id,
-    #     shapefunction="quadratic",
-    # )
-
-    # =========================================================
-    # clay
-  
-
+    sdf = HeartSDF(scale=3.0)
     position_stack = hdx.generate_particles_in_sdf(
         sdf_obj=sdf_block,
-         center_of_mass=jnp.array([5.0, 7.0]),
+        center_of_mass=jnp.array([5.0, 7.0]),
         # center_of_mass=jnp.array([5.5, 0.5]),
         bounds_min=origin,
         bounds_max=end,
@@ -111,39 +108,93 @@ def simulation_wrapper():
         mode="regular",
     )
 
-    p_stack = jnp.full((position_stack.shape[0],), 10_000.0)  # kPa
+    density_stack = jnp.full((len(position_stack),), 1000.0   )
 
-    mcc = hdx.ModifiedCamClay(
-        nu=0.3, M=0.9, lam=0.2, kap=0.05, N=2.0, p_ref=1000.0, K_min=100
-    )
-
-    mcc_state, stress_ref_stack,density_stack = mcc.create_state_from_ocr(
-        p_stack=p_stack,
-        ocr_stack =1.0
-    )
-
-    clay_p_idx = sim_builder.add_material_points(
+    water_p_idx = sim_builder.add_material_points(
         position_stack=position_stack,
-        stress_stack=stress_ref_stack,
         density_stack=density_stack,
         cell_size=cell_size,
         ppc=ppc
     )
 
-    clay_g_idx = sim_builder.add_grid(
+    water_g_idx = sim_builder.add_grid(
         origin =origin,
         end =end,
         cell_size=cell_size,
     )
 
-    clay_c_id = sim_builder.add_constitutive_law(
-         law = mcc,
-         law_state = mcc_state
+        # mu_s: float,
+        # mu_d: float,
+        # I_0: float,
+        # d_p: float,
+        # K: float = 1.0e6,
+        # rho_p: float = 2650.0,
+        # alpha: float = 1e-4,
+        # p_min_calc: float = 10.0,
+
+    water_c_id = sim_builder.add_constitutive_law(
+         law = hdx.NewtonFluid(K=2e6, viscosity=1e-3, beta=7.0),
+        # law = hdx.MuI_LC(
+        #     K=2e6, mu_s=0.4, mu_d=1.41, I_0=1e-4,  d_p=0.025, alpha=1e-4
+        # ),
+         density_stack=density_stack
     )
 
-    clay_b_idx = sim_builder.couple(
+    water_b_idx = sim_builder.couple(
+        # p_idx=water_p_idx,
+        # g_idx=water_g_idx,
+        # c_idx=water_c_id,
         shapefunction="quadratic",
     )
+
+    # =========================================================
+    # clay
+  
+
+    # position_stack = hdx.generate_particles_in_sdf(
+    #     sdf_obj=sdf_block,
+    #      center_of_mass=jnp.array([5.0, 7.0]),
+    #     # center_of_mass=jnp.array([5.5, 0.5]),
+    #     bounds_min=origin,
+    #     bounds_max=end,
+    #     cell_size=cell_size,
+    #     ppc=ppc,
+    #     mode="regular",
+    # )
+
+    # p_stack = jnp.full((position_stack.shape[0],), 10_000.0)  # kPa
+
+    # mcc = hdx.ModifiedCamClay(
+    #     nu=0.3, M=0.9, lam=0.2, kap=0.05, N=2.0, p_ref=1000.0, K_min=100
+    # )
+
+    # mcc_state, stress_ref_stack,density_stack = mcc.create_state_from_ocr(
+    #     p_stack=p_stack,
+    #     ocr_stack =1.0
+    # )
+
+    # clay_p_idx = sim_builder.add_material_points(
+    #     position_stack=position_stack,
+    #     stress_stack=stress_ref_stack,
+    #     density_stack=density_stack,
+    #     cell_size=cell_size,
+    #     ppc=ppc
+    # )
+
+    # clay_g_idx = sim_builder.add_grid(
+    #     origin =origin,
+    #     end =end,
+    #     cell_size=cell_size,
+    # )
+
+    # clay_c_id = sim_builder.add_constitutive_law(
+    #      law = mcc,
+    #      law_state = mcc_state
+    # )
+
+    # clay_b_idx = sim_builder.couple(
+    #     shapefunction="quadratic",
+    # )
 
     # =========================================================
 
@@ -228,7 +279,7 @@ def simulation_wrapper():
         center_of_mass=jnp.array([5.0, 2.5]),
         velocity=jnp.array([0.0, 0.0]),
         rotation=30.0 * jnp.pi / 180.0,
-        # angular_velocity=-180 * (jnp.pi / 180.0),
+        angular_velocity=-180 * (jnp.pi / 180.0),
         gap=cell_size / 2,
         friction=0.9,
     )
@@ -262,8 +313,8 @@ def simulation_wrapper():
     vis = hdx.RerunVisualizer(
         
         origin=origin, end=end, cell_size=cell_size, ppc=ppc,
-        recording_id="CompareModels",
-        root_path="RD",
+        # recording_id="CompareModels",
+        # root_path="RD",
         )
 
     # vis.log_sdf_boundary(

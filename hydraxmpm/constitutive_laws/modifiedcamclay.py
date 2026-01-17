@@ -78,14 +78,22 @@ def get_v_ncl(p_c, p_ref, N, lam):
     return N * (p_ref / (p_c)) ** lam
 
 
+def get_v_csl(p, p_ref, N, lam, kap):
+    """
+    Compute specific volume on the Critical State Line (CSL) at pressure p.
+
+    """
+    gamma = N * jnp.power(2.0, kap - lam)
+    return gamma * (p_ref / p) ** lam
+
 def get_v_f_kappa(p_c, p, kap):
     """Critical state specific volume elastic state"""
     return (p_c / p) ** kap
 
 
-def get_v_sl_kappa(p_c, p, p_ref, gamma, lam, kap):
+def get_v_sl(p_c, p, p_ref, N, lam, kap):
     """Swelling line specific volume"""
-    v_ncl = get_v_ncl(p_c, p_ref, gamma, lam)
+    v_ncl = get_v_ncl(p_c, p_ref, N, lam)
     v_elas = get_v_f_kappa(p_c, p, kap)
     return v_ncl * v_elas
 
@@ -108,24 +116,24 @@ class ModifiedCamClayState(ConstitutiveLawState):
 
 
 class ModifiedCamClay(ConstitutiveLaw):
-    nu: float
-    M: float
-    lam: float
-    kap: float
-    N: Optional[float] = None  # Specific volume at p=1 kPa on NCL
-    p_ref: float = 1_000.0  # 1 kPa
+    nu: float | Float[Array, ""]
+    M: float | Float[Array, ""]
+    lam: float | Float[Array, ""]
+    kap: float | Float[Array, ""]
+    N: Optional[float |Float[Array, ""]] = None  # Specific volume at p=1 kPa on NCL
+    p_ref: float |Float[Array, ""] = 1_000.0  # 1 kPa
 
     # Stability
-    K_min: Optional[float] = None    
-    K_max: Optional[float] = None
+    K_min: Optional[float |Float[Array, ""]] = None    
+    K_max: Optional[float |Float[Array, ""]] = None
 
 
-    p_min_calc: Optional[float]  = 10.0 
+    p_min_calc: Optional[float | Float[Array, ""]]  = 10.0 
     
-    rho_p: Optional[float] = 2650.0
+    rho_p: Optional[float | Float[Array, ""]] = 2650.0
 
     # Derived
-    _cp: float  # (Lambda - Kappa)
+    _cp: float | Float[Array, ""]  # (Lambda - Kappa)
 
 
     """
@@ -143,17 +151,17 @@ class ModifiedCamClay(ConstitutiveLaw):
     def __init__(
         self,
         *,
-        nu: float,
-        M: float,
-        lam: float,
-        kap: float,
-        N: float,
-        p_ref: float = 1_000,  # 1 kPa
-        K_min: float = None,
-        K_max: float = None,
-        p_t: Optional[float] = 0.0,
-        p_min_calc: float = 10.0,
-        rho_p: Optional[float] = 2650.0,
+        nu: float | Float[Array, ""],
+        M: float |Float[Array, ""],
+        lam: float | Float[Array, ""],
+        kap: float |Float[Array, ""],
+        N: float | Float[Array, ""],
+        p_ref: float | Float[Array, ""] = 1_000,  # 1 kPa
+        K_min: float | Float[Array, ""] = None,
+        K_max: float | Float[Array, ""] = None,
+        p_t: Optional[float | Float[Array, ""]] = 0.0,
+        p_min_calc:float | Float[Array, ""] = 10.0,
+        rho_p: Optional[float |Float[Array, ""]] = 2650.0,
         requires_F_reset: bool = True,
     ):
         # Model parameters, material properties
@@ -182,7 +190,7 @@ class ModifiedCamClay(ConstitutiveLaw):
     def create_state_from_ocr(
         self,
         p_stack: Float[Array, "num_points"],
-        ocr_stack: Float[Array, "num_points"] | float,
+        ocr_stack:  float | Float[Array, "num_points"] | Float[Array, ""],
         q_stack: Optional[Float[Array, "num_points"]] = None,
     ) -> Tuple[
         ModifiedCamClayState, Float[Array, "num_points 3 3"], Float[Array, "num_points"]
@@ -197,6 +205,15 @@ class ModifiedCamClay(ConstitutiveLaw):
 
         Triaxial initiation
 
+        We assume the relationship:
+        ρ = ρₚ / v
+        
+        Where:
+        v  = Specific Volume (1 + void_ratio)
+        ρ  = Bulk Density (kg/m³)
+        ρₚ = Particle Density (self.rho_p)
+    
+        
         Args:
             p_stack: Current hydrostatic pressure.
             ocr_stack: Over-Consolidation Ratio (p_c / p).
@@ -207,18 +224,18 @@ class ModifiedCamClay(ConstitutiveLaw):
         """
 
 
-        if isinstance(ocr_stack, float):
+        if isinstance(ocr_stack, float | Float[Array, ""]):
             ocr_stack = jnp.full((p_stack.shape[0],), ocr_stack)
 
         # Normal consolidation pressure
         p_c_stack = p_stack * ocr_stack
 
         # Derive specific volume from swelling line
-        specific_volume_stack = get_v_sl_kappa(
+        specific_volume_stack = get_v_sl(
             p_c_stack, p_stack, self.p_ref, self.N, self.lam, self.kap
         )
 
-        density_stack = self.rho_p * specific_volume_stack
+        density_stack = self.rho_p / specific_volume_stack
 
 
         q_p_stack = get_qp_ys(p_c_stack, p_stack, self.M)
@@ -262,7 +279,7 @@ class ModifiedCamClay(ConstitutiveLaw):
         We derive p_s and specific volume.
         """
         # 1. Solve for p_s from Yield Function
-        # f = (q/M)^2 + (p - ps)^2 - ps^2 = 0
+        # f = (q/M)^2 + (p - ps)^2 - ps^2 = 0gamma
         # This implies: p_s = p * [ (q/Mp)^2 + 1 ]
         
         q_p = q_stack / p_stack
@@ -272,11 +289,11 @@ class ModifiedCamClay(ConstitutiveLaw):
         # 2. Derive Specific Volume
         # Since it's NC (on yield surface), we technically use the NCL at p_s
         # or the swelling line from p_s back to p. They meet at the yield surface.
-        specific_volume_stack = get_v_sl_kappa(
-            p_c_stack, p_stack, self.p_ref, self.gamma, self.lam, self.kap
+        specific_volume_stack = get_v_sl(
+            p_c_stack, p_stack, self.p_ref, self.N, self.lam, self.kap
         )
 
-        density_stack = self.rho_p * specific_volume_stack
+        density_stack = self.rho_p / specific_volume_stack
 
         eps_e = jnp.zeros((p_stack.shape[0], 3, 3))
         return ModifiedCamClayState(p_c_stack=p_c_stack, eps_e_stack=eps_e),density_stack
@@ -293,7 +310,8 @@ class ModifiedCamClay(ConstitutiveLaw):
             
             WARNING: This can result in 'Impossible' states if (p, v) is outside the NCL.
             """
-            specific_volume_stack = density_stack / self.rho_p
+            specific_volume_stack = self.rho_p/density_stack
+
             # 1. Invert Swelling Line Equation to find p_s
             # v = v_csl * v_elas
             # v = [Gamma * (pref/ps)^lam] * [(ps/p)^kap]
@@ -428,7 +446,7 @@ class ModifiedCamClay(ConstitutiveLaw):
 
             # using logarithmic critical state pressure for better numerical stability
             u_p_c_prev =jnp.log(p_c_prev_safe)
-
+            
             def residuals(sol, args):
                 pmulti, u_p_c = sol
                 p_c_next = jnp.exp(u_p_c)
@@ -539,6 +557,25 @@ class ModifiedCamClay(ConstitutiveLaw):
 
         return stress_next, eps_e_next, p_c_next
 
+# This code makes available helper functions on the class for user-facing API
+_helpers = (
+    "yield_function",
+    "get_pressure_mcc",
+    "get_nc_pressure_mcc",
+    "get_s",
+    "get_K",
+    "get_G",
+    "get_v_ncl",
+    "get_v_f_kappa",
+    "get_v_sl",
+    "get_qp_ys",
+    "get_v_csl"
+)
+
+for _name in _helpers:
+    _fn = globals().get(_name)
+    if _fn is not None:
+        setattr(ModifiedCamClay, _name, staticmethod(_fn))
 
 #     def precondition(
 #             self,
@@ -589,7 +626,7 @@ class ModifiedCamClay(ConstitutiveLaw):
 #         # output v (specific volume), q (shear stress);
 #         if (p_stack is not None) & (p_s_stack is not None):
 #             # specific volume from swelling line
-#             specific_volume_stack = get_v_sl_kappa(
+#             specific_volume_stack = get_v_sl(
 #                 p_s_stack,
 #                 p_stack,
 #                 self.p_ref,
@@ -618,7 +655,7 @@ class ModifiedCamClay(ConstitutiveLaw):
 #             # analytical inversion for p_s, from yield surface for MCC
 #             p_s_stack = (0.5*(q_p_stack / self.M)**2 + 0.5)*p_stack
 
-#             specific_volume_stack = get_v_sl_kappa(
+#             specific_volume_stack = get_v_sl(
 #                 p_s_stack,
 #                 p_stack,
 #                 self.p_ref,
@@ -926,3 +963,4 @@ class ModifiedCamClay(ConstitutiveLaw):
 # #             material_points.velocity_stack,
 # #         )
 # #         return (dt_alpha * cell_size) / jnp.max(c_stack)
+
