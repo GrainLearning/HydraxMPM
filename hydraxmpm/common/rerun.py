@@ -67,7 +67,7 @@ class RerunVisualizer:
         (Optional) Log SDF boundaries:
         ```python
             vis.log_sdf_boundary(
-                sdf_logic=sdf_object,
+                sdf_logic=sdf_logic,
                 sdf_state=sdf_state,
             )
         ```
@@ -134,6 +134,7 @@ class RerunVisualizer:
         # Store parameters
         self.origin = np.array(origin)
         self.end = np.array(end)
+
         self.cell_size = cell_size
         self.dim = len(origin)
 
@@ -234,7 +235,7 @@ class RerunVisualizer:
         rr.set_time("step", sequence=current_step)
         rr.set_time("sim_time", timestamp=current_time)
         
-        for i, mp in enumerate(state.material_points):
+        for i, mp in enumerate(state.world.material_points):
             self._log_particles(mp, f"{self.root_path}/material_{i}")
 
         # Add SDF logging here if needed?
@@ -358,8 +359,9 @@ class RerunVisualizer:
             return
 
 
+
         # Here we generate a bunch of points in the domain
-        domain_size = self.end - self.origin
+        domain_size = self.end*1.05 - self.origin*0.95
         step_size = np.max(domain_size) / resolution
 
         aspect_size = np.ceil(domain_size / step_size).astype(int)

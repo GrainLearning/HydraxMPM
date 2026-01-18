@@ -6,16 +6,15 @@
 # -*- coding: utf-8 -*-
 
 """
-    Explanation:
-            This module contains the gravity forces.
-            
-            Gravity is stores as a force state so it can be updated.
+Explanation:
+        This module contains the gravity forces.
 
-            e.g., by gravity packing or tilting a plane
+        Gravity is stores as a force state so it can be updated.
 
-            Gravity can be applied to particles or background grid nodes
+        e.g., by gravity packing or tilting a plane
+
+        Gravity can be applied to particles or background grid nodes
 """
-
 
 
 from .force import Force, BaseForceState
@@ -37,8 +36,8 @@ from ..grid.grid import GridState
 
 class GravityState(BaseForceState):
     """State for the gravity force"""
-    gravity: Float[Array, "dim"]
 
+    gravity: Float[Array, "dim"]
 
 
 class Gravity(Force):
@@ -51,20 +50,19 @@ class Gravity(Force):
         p_idx_list: List of particle set indices to apply gravity on
         g_idx_list: List of grid indices to apply gravity on
         f_idx: Index of the gravity force state in the force states
-        
+
     """
 
     # Optional callback for custom gravity application
     callback: Optional[Callable] = eqx.field(static=True)
-    
+
     # control
     is_apply_on_grid: bool = eqx.field(static=True, converter=lambda x: bool(x))
-    
+
     # Connectivity
     p_idx_list: list[int] = eqx.field(static=True)
     g_idx_list: list[int] = eqx.field(static=True)
-    f_idx : int = eqx.field(static=True, default =0)
-
+    f_idx: int = eqx.field(static=True, default=0)
 
     def __init__(
         self: Self,
@@ -72,15 +70,15 @@ class Gravity(Force):
         callback: Optional[Callable] = None,
         p_idx_list: list[int] = None,
         g_idx_list: list[int] = None,
-        f_idx = 0
+        f_idx=0,
     ) -> Self:
         """Initialize Gravity force."""
 
         if g_idx_list is None:
-            g_idx_list = [0] # select only first grid
+            g_idx_list = [0]  # select only first grid
 
         if p_idx_list is None:
-            p_idx_list = [0] # select only first particle set
+            p_idx_list = [0]  # select only first particle set
 
         self.is_apply_on_grid = is_apply_on_grid
         self.callback = callback
@@ -89,66 +87,64 @@ class Gravity(Force):
         self.p_idx_list = p_idx_list
 
     def create_state(self: Self, gravity: Float[Array, "dim"]) -> GravityState:
-        """ Helper function to create the state for the gravity force."""
+        """Helper function to create the state for the gravity force."""
         return GravityState(gravity=gravity)
 
-    def apply_grid_forces(
-            self, 
-            mp_states, 
-            grid_states, 
-            f_states, 
-            intr_caches, 
-            couplings,
-            dt, 
-            time
-            ):
+    def apply_grid_forces(self, world, mechanics, sdf_logics, couplings, dt, time):
         """
         Apply gravity on grid forces
         """
-    
+        grid_states = list(world.grids)
+        f_states = list(mechanics.forces)
+
         if not self.is_apply_on_grid:
-            return grid_states, f_states
-        
+            return world, mechanics
+
         f_state = f_states[self.f_idx]
-        
+
         # Loop over all grid ids
         for g_idx in self.g_idx_list:
 
             grid_state = grid_states[g_idx]
 
-            if self.callback:
-                f_state, grid_state = self.callback(self, f_state, grid_state, mp_states,  dt, time, g_idx)
-
             # F = m * g
             # Add to existing grid force directly
-            gravity_impulse = grid_state.mass_stack[:,None] * f_state.gravity
+            gravity_impulse = grid_state.mass_stack[:, None] * f_state.gravity
 
             new_force_stack = grid_state.force_stack + gravity_impulse
-            
-            grid_states[g_idx] =  eqx.tree_at(lambda g: g.force_stack, grid_state, new_force_stack)
-            
+
+            grid_states[g_idx] = eqx.tree_at(
+                lambda g: g.force_stack, grid_state, new_force_stack
+            )
 
         f_states[self.f_idx] = f_state
 
-        return grid_states, f_states
+        world = eqx.tree_at(
+            lambda w: (w.grids,),
+            world,
+            (tuple(grid_states),),
+        )
 
-    def apply_pre_p2g(
-            self, 
-            mp_states, 
-            grid_states, 
-            f_states, 
-            intr_caches, 
-            couplings,
-            dt, 
-            time
-            ):
+        mechanics = eqx.tree_at(
+            lambda m: (m.forces,),
+            mechanics,
+            (tuple(f_states),),
+        )
+
+        return world, mechanics
+
+    def apply_pre_p2g(self, world, mechanics, sdf_logics, couplings, dt, time):
         """
         Apply gravity on particle forces
         """
         # Same logic as above but applied to particles
+
+        mp_states = list(world.material_points)
+        f_states = list(mechanics.forces)
+
         if self.is_apply_on_grid:
-            return mp_states, f_states
-        
+            return world, mechanics
+
         f_state = f_states[self.f_idx]
 
         # Loop over all particle indices
@@ -156,11 +152,8 @@ class Gravity(Force):
 
             mp_state = mp_states[p_idx]
 
-            if self.callback:
-                f_state, mp_state  = self.callback(self, f_state, grid_states, mp_state,  dt, time, p_idx)
 
-            gravity_impulse = mp_state.mass_stack[:,None]  * f_state.gravity
-
+            gravity_impulse = mp_state.mass_stack[:, None] * f_state.gravity
 
             mp_state = eqx.tree_at(
                 lambda state: (state.force_stack),
@@ -172,4 +165,18 @@ class Gravity(Force):
 
         f_states[self.f_idx] = f_state
 
-        return mp_states, f_states
+
+        world = eqx.tree_at(
+            lambda w: (w.material_points,),
+            world,
+            (tuple(mp_states),),
+        )
+
+        mechanics = eqx.tree_at(
+            lambda m: (m.forces,),
+            mechanics,
+            (tuple(f_states),),
+        )
+
+
+        return world, mechanics

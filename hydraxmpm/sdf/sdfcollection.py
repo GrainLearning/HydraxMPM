@@ -21,6 +21,17 @@ from .sdfobject import SDFObjectBase,SDFObjectState
 
 from ..utils.math_helpers import safe_norm
 
+from ..utils.math_helpers import (
+    rotation_2d_inv,
+    quaternion_inv,
+    rotation_2d,
+    quaternion_rotate,
+    integrate_quaternion
+)
+
+
+import jax
+
 class BoxSDF(SDFObjectBase):
     """
     Axis-aligned Box box centered at state.center_of_mass.
@@ -319,3 +330,132 @@ class StarSDF(SDFObjectBase):
         
         # If cross > 0, we are "above/right" (outside). If < 0, inside.
         return dist * jnp.sign(cross)
+
+
+class CompositeSDF(SDFObjectBase):
+    """
+    Union of multiple SDFs with individual friction properties.
+    """
+    shapes: list[SDFObjectBase]
+    frictions: Float[Array, "num_shapes"]
+
+    def __init__(self, shapes, frictions):
+        self.shapes = shapes
+        self.frictions = jnp.asarray(frictions)
+
+    def signed_distance_local(self, state, p_local):
+        # Evaluate all
+        dists = jnp.stack([s.signed_distance_local(state, p_local) for s in self.shapes])
+        # Union = Min
+        return jnp.min(dists)
+
+    def get_surface_friction_local(self, state, p_local):
+        dists = jnp.stack([s.signed_distance_local(state, p_local) for s in self.shapes])
+        # Friction of the closest surface
+        idx = jnp.argmin(dists)
+        return self.frictions[idx]
+    
+
+class DomainSDF(SDFObjectBase):
+    """
+    A rectangular container defined by min/max coordinates.
+
+    IMPORTANT - THis works only in world space
+    - Inside (Safe): Positive Distance
+    - Outside (Collision): Negative 
+    
+    ignores center_of_mass and orientation of SDFObjectState.
+    
+    Friction order:
+    2D: [Min-X (Left), Min-Y (Bot), Max-X (Right), Max-Y (Top)]
+    3D: [Min-X, Min-Y, Min-Z, Max-X, Max-Y, Max-Z]
+    """
+    bounds_min: Float[Array, "dim"]
+    bounds_max: Float[Array, "dim"]
+    frictions: Float[Array, "num_walls"]
+
+    def __init__(
+        self, 
+        origin: Float[Array, "dim"] | tuple | list, 
+        end: Float[Array, "dim"] | tuple | list, 
+        frictions: float | list = 0.5,
+        wall_offset = 0.0,
+    ):
+        self.bounds_min = jnp.asarray(origin) + wall_offset
+        self.bounds_max = jnp.asarray(end) + wall_offset
+        dim = self.bounds_min.shape[0]
+        num_walls = dim * 2
+
+        # Handle Friction inputs (Broadcast scalar -> array)
+        if isinstance(frictions, (float, int)):
+            self.frictions = jnp.full((num_walls,), frictions)
+        else:
+            self.frictions = jnp.asarray(frictions)
+            if self.frictions.shape[0] != num_walls:
+                raise ValueError(f"Expected {num_walls} frictions, got {self.frictions.shape[0]}")
+
+    def signed_distance_local(self, state, p_local):
+        # We calculate distance from point to all 6 walls (inwards).
+        # d_min = p - min  (Positive if inside)
+        # d_max = max - p  (Positive if inside)
+        
+        d_min = p_local - self.bounds_min
+        d_max = self.bounds_max - p_local
+        
+        
+        # Combine into one array [d_xmin, d_ymin, ..., d_xmax, d_ymax, ...]
+        all_dists = jnp.concatenate([d_min, d_max])
+        
+        # The distance to the boundary is the MINIMUM of these.
+        # If all are positive, we are safely inside. min() is dist to closest wall.
+        # If one is negative, we are outside. min() is the penetration depth.
+        return jnp.min(all_dists)
+    
+    def transform_to_local(self, state, p_world):
+        """
+        Override: The 'Local' space of a DomainSDF is the World Space.
+        We ignore state.center_of_mass and state.rotation.
+        """
+        return p_world
+    
+    def update_kinematics(self,state,dt):
+        return state  # Domain is static
+    
+    def get_world_aabb(self, state=None):
+        return self.bounds_min, self.bounds_max
+
+    def get_surface_friction_local(self, state, p_local):
+        # Which wall are we closest to?
+        d_min = p_local - self.bounds_min
+        d_max = self.bounds_max - p_local
+        all_dists = jnp.concatenate([d_min, d_max])
+        
+        # Argmin gives the index of the closest wall
+        idx = jnp.argmin(all_dists)
+        return self.frictions[idx]
+
+    def get_normal(self, state, p_world):
+        
+        d_min = p_world - self.bounds_min
+        d_max = self.bounds_max - p_world
+        all_dists = jnp.concatenate([d_min, d_max])
+        
+        # Find which wall is closest (or most penetrated)
+        # 0..dim-1 are Min walls, dim..2dim-1 are Max walls
+        idx = jnp.argmin(all_dists)
+        
+        dim = p_world.shape[0]
+        
+        # Determine Axis: 0=x, 1=y, 2=z
+        # If idx=0 (xmin) or idx=3 (xmax, in 3D), axis is 0
+        axis = idx % dim
+        
+        # Determine Sign
+        # If idx < dim (Min wall), Normal points +1 (Inward/Right)
+        # If idx >= dim (Max wall), Normal points -1 (Inward/Left)
+        sign = jnp.where(idx < dim, 1.0, -1.0)
+        
+        # Create Vector (e.g. [1, 0, 0] or [0, -1, 0])
+        normal = jax.nn.one_hot(axis, dim) * sign
+        
+        return normal

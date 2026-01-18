@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """
     Explaination:
-        This module provides the logic and state for a Signed Distance Function (SDF) object.
+        This module provides the logic and sdf_state for a Signed Distance Function (SDF) object.
 
     Features
         - Automatic differentiation for normal calculation. 
@@ -19,7 +19,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
-from typing import Optional, Self
+from typing import Optional, Self, Tuple
 
 from jaxtyping import Float, Array
 
@@ -27,7 +27,9 @@ from ..utils.math_helpers import (
     rotation_2d_inv,
     quaternion_inv,
     quaternion_rotate,
+    integrate_quaternion
 )
+
 
 class SDFObjectState(eqx.Module):
     """
@@ -43,10 +45,9 @@ class SDFObjectState(eqx.Module):
     """
     center_of_mass: Float[Array, "dim"]
     rotation: float | Float[Array, "..."] | Float[Array, "4"]
-    velocity: Float[Array, "dim"]
-    angular_velocity: (
-        float | Float[Array, "..."] | Float[Array, "3"]
-    ) 
+    velocity: Float[Array, "dim"] 
+    angular_velocity: float | Float[Array, "..."] | Float[Array, "3"]
+
 
 
 class SDFObjectBase(eqx.Module):
@@ -85,16 +86,16 @@ class SDFObjectBase(eqx.Module):
         )
 
 
-    def transform_to_local(self, state: SDFObjectState, p_world: Float[Array, "dim"]) -> Float[Array, "dim"]:
-        """Transform world coordinates to local SDF coordinates using state."""
+    def transform_to_local(self, sdf_state: SDFObjectState, p_world: Float[Array, "dim"]) -> Float[Array, "dim"]:
+        """Transform world coordinates to local SDF coordinates using sdf_state."""
         # Relative coordinates to SDF
-        p_local = p_world - state.center_of_mass
+        p_local = p_world - sdf_state.center_of_mass
 
         # Apply rotation
         if p_world.shape[0] == 2:
-            return rotation_2d_inv(state.rotation, p_local)
+            return rotation_2d_inv(sdf_state.rotation, p_local)
         else:
-            return quaternion_rotate(quaternion_inv(state.rotation), p_local)
+            return quaternion_rotate(quaternion_inv(sdf_state.rotation), p_local)
 
     
     def signed_distance_local(self, sdf_state: SDFObjectState,  p_local: Float[Array, "dim"]) -> Float[Array, ""]:
@@ -106,6 +107,29 @@ class SDFObjectBase(eqx.Module):
 
         raise NotImplementedError
 
+
+    def update_kinematics(
+        self,
+        sdf_state: SDFObjectState,
+        dt,
+    ):
+        """Update the SDF object's state based on its velocity and angular velocity."""
+        dim = sdf_state.center_of_mass.shape[0]
+
+        new_pos = sdf_state.center_of_mass + sdf_state.velocity * dt
+
+        if dim == 2:
+            new_rot = sdf_state.rotation + sdf_state.angular_velocity * dt
+        else:
+
+            new_rot = integrate_quaternion(
+                sdf_state.rotation, sdf_state.angular_velocity, dt
+            )
+
+        return eqx.tree_at(
+            lambda s: (s.center_of_mass, s.rotation), sdf_state, (new_pos, new_rot)
+        )
+    
     def signed_distance(self, sdf_state: SDFObjectState,  pos_world: Float[Array, "dim"]) -> Float[Array, ""]:
         """
         Top level function to get signed distance in world coordinates. 
@@ -113,14 +137,19 @@ class SDFObjectBase(eqx.Module):
         return self.signed_distance_local(sdf_state, self.transform_to_local(sdf_state, pos_world))
     
 
+    def get_local_aabb(self, sdf_state:SDFObjectState) -> Tuple[Array, Array]:
+        raise NotImplementedError
     
-    def get_normal(self, state: SDFObjectState, pos_world: Float[Array, "dim"]) -> Float[Array, "dim"]:
+    def get_world_aabb(self, sdf_state) -> Tuple[Array, Array]:
+        raise NotImplementedError
+    
+    def get_normal(self, sdf_state: SDFObjectState, pos_world: Float[Array, "dim"]) -> Float[Array, "dim"]:
         """
         Calculates Normal for a single point using Autograd by default.
         """
         grad_fn = jax.grad(self.signed_distance, argnums=1)
         
-        normal = grad_fn(state, pos_world)
+        normal = grad_fn(sdf_state, pos_world)
         
         # Safe normalization
         norm = jnp.linalg.norm(normal)
@@ -146,16 +175,33 @@ class SDFObjectBase(eqx.Module):
         v_body = sdf_state.velocity + cross
 
         return v_body
+    
+    def get_surface_friction_local(self, sdf_state, p_local: Float[Array, "dim"]) -> Float[Array, ""] | float:
+        """
+        Returns the friction coefficient at this local point.
+        Overridden by complex objects.
+        """
+        return self.friction if hasattr(self, 'friction') else 1.0
+
+    def get_surface_friction(self, sdf_state, p_world: Float[Array, "dim"]) -> Float[Array, ""] | float:
+        """Global wrapper."""
+        return self.get_surface_friction_local(sdf_state, self.transform_to_local(sdf_state, p_world))
+
+
+    def get_surface_friction_stack(self, sdf_state, p_world_stack):
+        """Vectorized wrapper."""
+        return jax.vmap(self.get_surface_friction, in_axes=(None, 0))(sdf_state, p_world_stack)
+    
 
     def get_signed_distance_stack(self, sdf_state: SDFObjectState,  pos_world_stack: Float[Array, "n dim"]) -> Float[Array, "n"]:
         """Vectorized interface for SDF calculation."""
         return jax.vmap(self.signed_distance, in_axes=(None, 0))(sdf_state, pos_world_stack)
 
-    def get_normal_stack(self, state: SDFObjectState, pos_world_stack: Float[Array, "n dim"]) -> Float[Array, "n dim"]:
+    def get_normal_stack(self, sdf_state: SDFObjectState, pos_world_stack: Float[Array, "n dim"]) -> Float[Array, "n dim"]:
         """Vectorized normals calculation."""
-        return jax.vmap(self.get_normal, in_axes=(None, 0))(state, pos_world_stack)
+        return jax.vmap(self.get_normal, in_axes=(None, 0))(sdf_state, pos_world_stack)
     
 
-    def get_velocity_stack(self, state: SDFObjectState, pos_world_stack: Float[Array, "n dim"],dt) -> Float[Array, "n dim"]:
+    def get_velocity_stack(self, sdf_state: SDFObjectState, pos_world_stack: Float[Array, "n dim"],dt) -> Float[Array, "n dim"]:
         """Vectorized Velocity."""
-        return jax.vmap(self.get_velocity, in_axes=(None, 0,None))(state, pos_world_stack, dt)
+        return jax.vmap(self.get_velocity, in_axes=(None, 0,None))(sdf_state, pos_world_stack, dt)

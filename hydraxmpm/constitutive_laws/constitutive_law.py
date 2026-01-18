@@ -18,7 +18,7 @@ class ConstitutiveLaw(eqx.Module):
     requires_F_reset: bool
     
 
-    def remove_accumulated_shear(self, mpm_state, dim):
+    def remove_accumulated_shear(self, mp_state):
         """
         This is necessary for stability in MPM
 
@@ -34,8 +34,9 @@ class ConstitutiveLaw(eqx.Module):
         
         """
         if not self.requires_F_reset:
-            return mpm_state
+            return mp_state
         
+        dim = mp_state.dim
         def compute_cbar(F):
             J = jnp.linalg.det(F)
             if dim == 2:
@@ -49,9 +50,9 @@ class ConstitutiveLaw(eqx.Module):
                 return scale * jnp.eye(3)
             
 
-        new_F_stack = jax.vmap(compute_cbar)(mpm_state.F_stack)
+        new_F_stack = jax.vmap(compute_cbar)(mp_state.F_stack)
             
-        new_mp = eqx.tree_at(lambda m: m.F_stack, mpm_state, new_F_stack)
+        new_mp = eqx.tree_at(lambda m: m.F_stack, mp_state, new_F_stack)
         return new_mp
 # from typing import Optional, Self, Tuple, Union
 

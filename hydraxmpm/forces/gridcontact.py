@@ -54,6 +54,7 @@ class GridContact(Force):
             f_states,
             intr_caches, 
             couplings,
+            sdf_states,
             dt, 
             time
             ):

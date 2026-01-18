@@ -19,50 +19,43 @@ from jaxtyping import Float, Array
 from ..sdf.sdfobject import SDFObjectBase, SDFObjectState
 from .force import Force
 
-from ..utils.math_helpers import integrate_quaternion
 
 class SDFCollider(Force):
     """
     SDF Collider Force for MPM Simulations.
 
     Attributes:
-        sdf_object: The SDF object defining the collider shape.
+        sdf_logic: The SDF object defining the collider shape.
         g_idx_list: List of grid indices to apply the collider on.
         f_idx: Index of the SDF object state in the force states.
         friction: Coefficient of friction for collision response.
         gap: Margin of safety distance for collision detection.
     """
 
-    sdf_object: SDFObjectBase = eqx.field(static=True)
-
-    friction: float = eqx.field(static=True)
-
     # Indices
     g_idx_list: list[int] = eqx.field(static=True)
-    f_idx: int = eqx.field(static=True)
+    sdf_idx: int = eqx.field(static=True)
 
     # margin of safety distance
     gap: float = eqx.field(static=True)
 
+    base_friction: float = eqx.field(static=True, default=1.0)
+
     def __init__(
         self,
-        sdf_object,
-        f_idx: int = 0,
+        sdf_idx: int = 0,
         g_idx_list: list[int] = None,
-        friction: float = 0.0,
         gap: float = 1e-4,
+        friction: float = 1.0
     ):
         """Initialize the SDFCollider with the given parameters."""
         if g_idx_list is None:
             g_idx_list = [0]  # select only first grid
 
-        self.sdf_object = sdf_object
-
         self.g_idx_list = g_idx_list
-        self.f_idx = f_idx
+        self.sdf_idx = sdf_idx
         self.gap = gap
-        friction = jnp.clip(friction, 0.0, 1e9)
-        self.friction = friction
+        self.base_friction = friction
 
     def create_state(
         self,
@@ -71,7 +64,7 @@ class SDFCollider(Force):
         angular_velocity: Optional[float | Float[Array, ""] | Float[Array, "3"]] = None,
         rotation: Optional[float | Float[Array, ""] | Float[Array, "4"]] = None,
     ) -> Self:
-        """ Helper function to create default SDFObjectState """
+        """Helper function to create default SDFObjectState"""
         dim = center_of_mass.shape[0]
         if velocity is None:
             velocity = jnp.zeros(dim)
@@ -93,35 +86,17 @@ class SDFCollider(Force):
             rotation=rotation,
         )
 
-    
-    def apply_kinematics(
-        self, mp_states, grid_states, f_states, intr_caches, couplings, dt, time
-    ):
-        """Update the SDF object's state based on its velocity and angular velocity."""
-        f_state = f_states[self.f_idx]
-        dim = f_state.center_of_mass.shape[0]
-
-        new_pos = f_state.center_of_mass + f_state.velocity * dt
-
-        if dim == 2:
-            new_rot = f_state.rotation + f_state.angular_velocity * dt
-        else:
-
-            new_rot = integrate_quaternion(f_state.rotation, f_state.angular_velocity, dt)
-
-        f_state = eqx.tree_at(
-            lambda s: (s.center_of_mass, s.rotation), f_state, (new_pos, new_rot)
-        )
-        f_states[self.f_idx] = f_state
-        return f_states
-
-    def apply_grid_moments(
-        self, mp_states, grid_states, f_states, intr_caches, couplings, dt, time
-    ):
+    def apply_grid_moments(self, world, mechanics, sdf_logics, couplings, dt, time):
         """
         Projects grid momentum to satisfy the boundary condition.
         """
-        f_state = f_states[self.f_idx]
+        # return world, mechanics
+
+        grid_states = list(world.grids)
+    
+        sdf_logic = sdf_logics[self.sdf_idx]
+        
+        sdf_state = list(world.sdfs)[self.sdf_idx]
 
         for g_idx in self.g_idx_list:
 
@@ -141,20 +116,25 @@ class SDFCollider(Force):
 
             # Compute quantities from SDF object
 
-            # SDF check Penetration 
-            dis_stack = self.sdf_object.get_signed_distance_stack(f_state, flat_coords)
+            # SDF check Penetration
+            dis_stack = sdf_logic.get_signed_distance_stack(sdf_state, flat_coords)
 
             # Uses AD to find normal by default
-            normals_stack = self.sdf_object.get_normal_stack(f_state, flat_coords)
+            normals_stack = sdf_logic.get_normal_stack(sdf_state, flat_coords)
 
             # Handles linear and angular velocity, possibly other velocity like morphing
-            v_object_stack = self.sdf_object.get_velocity_stack(f_state, flat_coords,dt)
+            v_object_stack = sdf_logic.get_velocity_stack(
+                sdf_state, flat_coords, dt
+            )
+
+            # query the SDF for material property at this location (possibly spatial varying)
+            local_friction_stack = sdf_logic.get_surface_friction_stack(sdf_state, flat_coords)
+
+            friction_stack = self.base_friction * local_friction_stack
 
             # Apply contact via vmap over all points to cover while domain
-            new_vel = jax.vmap(self._collide_node,
-                               in_axes =(0,0,0,0,None)
-                               )(
-                dis_stack, vel, normals_stack, v_object_stack, dt
+            new_vel = jax.vmap(self._collide_node, in_axes=(0, 0, 0, 0, 0, None))(
+                dis_stack, vel, normals_stack, v_object_stack, friction_stack, dt
             )
 
             # reconstruct momentum
@@ -166,33 +146,38 @@ class SDFCollider(Force):
             # update global grid state
             grid_states[g_idx] = new_grid
 
-        return grid_states, f_states
+    
+        world = eqx.tree_at(
+            lambda w: (w.grids,),
+            world,
+            (tuple(grid_states),),
+        )
 
-    def _collide_node(self, dist, v_node, normal, v_object,dt):
+        return world, mechanics
+
+    def _collide_node(self, dist, v_node, normal, v_object, friction, dt):
         """
         Calculates collision for a single node.
         """
-
 
         # v_n < 0 means moving INTO the wall
 
         # Check Inside/Touching AND Moving Inward
         # dist <= 0 implies we are behind the plane
-        is_colliding = (dist <= self.gap) 
+        is_colliding = dist <= self.gap
         # & (v_n_mag < 0.0)
 
         def handle_collision(v_in):
-
+            
             # Check if we  are  inside the gap
             # add velocity bias to push us out
             # by next timestep
             # bias = (overlap)/dt * stiffness
             # ensure we dont apply negative bias (suction)
-            bias_factor = 0. # good values (0.1 - 0.5) 
+            bias_factor = 0.0  # good values (0.1 - 0.5)
             overlap = self.gap - dist
             v_bias = (overlap / dt) * bias_factor
             v_bias = jnp.maximum(0.0, v_bias)
-            
 
             # Solve normal velocity
             # Get velocity direction relative Velocity to object
@@ -200,18 +185,14 @@ class SDFCollider(Force):
             v_n_mag = jnp.dot(v_rel, normal)
             delta_v_stop = jnp.maximum(0.0, -v_n_mag)
 
-
             # calculate the impulse to reach v_bias
             # if current velocity is already > v_bias,
             # we are moving fast enough
             delta_v_n = v_bias - v_n_mag
             delta_v_n = jnp.maximum(0.0, delta_v_n)
 
-            
             # apply impuse to velocity
             v_corrected = v_in + delta_v_n * normal
-            
-
 
             # Friction
             # Decompose normal and tangential velocity
@@ -221,25 +202,23 @@ class SDFCollider(Force):
 
             vt_mag = jnp.linalg.norm(v_t_vec)
 
-
             # Friction limits based on the Normal Impulse we just applied
             # The "Normal Force" is proportional to delta_v_n / dt
-            friction_impulse_max = self.friction * delta_v_stop
-            
+            friction_impulse_max = friction * delta_v_stop
+
             # Calculate how much we can reduce tangential velocity
             reduction = jnp.minimum(vt_mag, friction_impulse_max)
-            
+
             # Apply reduction
             v_t_new = v_t_vec * (1.0 - reduction / (vt_mag + 1e-12))
-            
+
             # Reassemble
             return v_object + v_n_new * normal + v_t_new
-        
+
             # Friction limits based on the Normal Impulse we just applied
             # The "Normal Force" is proportional to delta_v_n / dt
             # So we can just scale velocities directly.
             # friction_impulse_max = self.friction * delta_v_n
-
 
             # # Friction (Coulomb)
             # # We apply an impulse to stop normal motion (Delta_vn = -v_n_mag)
@@ -263,7 +242,7 @@ class SDFCollider(Force):
 
         return jax.lax.cond(
             is_colliding,
-            handle_collision, # Updates velocity
+            handle_collision,  # Updates velocity
             lambda v: v,  # No collision, return original velocity
             v_node,
         )

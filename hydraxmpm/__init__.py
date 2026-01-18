@@ -24,7 +24,7 @@ from .material_points.material_points import (
     MaterialPointState,
 )
 
-from .common.simstate import SimState
+from .common.simstate import WorldState, MechanicsState, SimState
 
 try:
     from .common.rerun import RerunVisualizer
@@ -77,12 +77,12 @@ from .sdf.sdfcollection import (
     TorusSDF,
     StarSDF,
     HollowCylinderSDF,
+    DomainSDF
 )
 from .sdf.sdfmorph import ChainMorphSDF,MorphSDF, MorphSDFState
 from .sdf.gridsdf import GridSDF
 
 from .forces.sdf_collider import SDFCollider
-from .forces.boundary import PlanarBoundaries
 from .utils.generate_body import generate_particles_in_sdf
 
 
