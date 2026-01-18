@@ -275,7 +275,7 @@ def simulation_wrapper():
 
     sdf_star = hdx.StarSDF(points=5, inner_radius=1, outer_radius=2)
     sdf_collider_idx = sim_builder.add_sdf_collider(
-        sdf_object=sdf_star,
+        sdf_logic=sdf_star,
         center_of_mass=jnp.array([5.0, 2.5]),
         velocity=jnp.array([0.0, 0.0]),
         rotation=30.0 * jnp.pi / 180.0,

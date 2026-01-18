@@ -594,7 +594,7 @@ def simulation_wrapper():
     )
 
     sdf_collider_idx = sim_builder.add_sdf_collider(
-        sdf_object=chain_sdf,
+        sdf_logic=chain_sdf,
         f_state=mdf_state,
         #         gap = 1e-4,
         # center_of_mass=jnp.array([5.0, 2.5]),

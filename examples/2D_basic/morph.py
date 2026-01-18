@@ -310,9 +310,10 @@ def simulation_wrapper():
     # =========================================================
     # 2. DEFINE Water BODY p_idx 0, g_idx 0
     # =========================================================
-    # sdf_block = hdx.BoxSDF(size=(9.0, 4.0))
+
     sdf_block = hdx.BoxSDF(size=(10.0, 6.0))
-    # sdf = HeartSDF(scale=3.0)
+    
+
     
     position_stack = hdx.generate_particles_in_sdf(
         sdf_obj=sdf_block,
@@ -338,16 +339,8 @@ def simulation_wrapper():
         origin=origin,
         end=end,
         cell_size=cell_size,
+        padding=4,
     )
-
-    # mu_s: float,
-    # mu_d: float,
-    # I_0: float,
-    # d_p: float,
-    # K: float = 1.0e6,
-    # rho_p: float = 2650.0,
-    # alpha: float = 1e-4,
-    # p_min_calc: float = 10.0,
 
     water_c_id = sim_builder.add_constitutive_law(
         law=hdx.NewtonFluid(K=2e6, viscosity=1e-3, beta=7.0),
@@ -358,123 +351,8 @@ def simulation_wrapper():
     )
 
     water_b_idx = sim_builder.couple(
-        # p_idx=water_p_idx,
-        # g_idx=water_g_idx,
-        # c_idx=water_c_id,
         shapefunction="quadratic",
     )
-
-    # =========================================================
-    # clay
-
-    # position_stack = hdx.generate_particles_in_sdf(
-    #     sdf_obj=sdf_block,
-    #      center_of_mass=jnp.array([5.0, 7.0]),
-    #     # center_of_mass=jnp.array([5.5, 0.5]),
-    #     bounds_min=origin,
-    #     bounds_max=end,
-    #     cell_size=cell_size,
-    #     ppc=ppc,
-    #     mode="regular",
-    # )
-
-    # p_stack = jnp.full((position_stack.shape[0],), 10_000.0)  # kPa
-
-    # mcc = hdx.ModifiedCamClay(
-    #     nu=0.3, M=0.9, lam=0.2, kap=0.05, N=2.0, p_ref=1000.0, K_min=100
-    # )
-
-    # mcc_state, stress_ref_stack,density_stack = mcc.create_state_from_ocr(
-    #     p_stack=p_stack,
-    #     ocr_stack =1.0
-    # )
-
-    # clay_p_idx = sim_builder.add_material_points(
-    #     position_stack=position_stack,
-    #     stress_stack=stress_ref_stack,
-    #     density_stack=density_stack,
-    #     cell_size=cell_size,
-    #     ppc=ppc
-    # )
-
-    # clay_g_idx = sim_builder.add_grid(
-    #     origin =origin,
-    #     end =end,
-    #     cell_size=cell_size,
-    # )
-
-    # clay_c_id = sim_builder.add_constitutive_law(
-    #      law = mcc,
-    #      law_state = mcc_state
-    # )
-
-    # clay_b_idx = sim_builder.couple(
-    #     shapefunction="quadratic",
-    # )
-
-    # =========================================================
-
-    # position_stack = hdx.generate_particles_in_sdf(
-    #     sdf_obj=sdf_block,
-    #     center_of_mass=jnp.array([8.0, 7.5]),
-    #     # center_of_mass=jnp.array([5.5, 0.5]),
-    #     bounds_min=origin,
-    #     bounds_max=end,
-    #     cell_size=cell_size,
-    #     ppc=ppc,
-    #     mode="regular",
-    # )
-
-    # density_stack = jnp.full((len(position_stack),), 2000.0)
-    # el_p_idx = sim_builder.add_material_points(
-    #     position_stack=position_stack,
-    #     density_stack=density_stack,
-    #     cell_size=cell_size,
-    #     ppc=ppc,
-    # )
-
-    # el_idx = sim_builder.add_grid(
-    #     origin=origin, end=end, cell_size=cell_size, padding=0
-    # )
-    # elastic_law = hdx.LinearElasticLaw(E=1e6, nu=0.3)
-    # el_c_id = sim_builder.add_constitutive_law(law=elastic_law)
-
-    # el_b_idx = sim_builder.couple(
-    #     shapefunction="quadratic",
-    # )
-
-    # =========================================================
-    # 2. DEFINE Water BODY p_idx 0, g_idx 0
-    # =========================================================
-    # sdf_block_rigid = hdx.BoxSDF(size=(1.0, 4.0))
-
-    # position_stack = hdx.generate_particles_in_sdf(
-    #     sdf_obj = sdf_block,
-    #     center_of_mass=jnp.array([1.5, 2.5]),
-    #     bounds_min=origin,
-    #     bounds_max=end,
-    #     cell_size=cell_size,
-    #     ppc=ppc,
-    #     mode="regular"
-    # )
-
-    # rigid_p_idx = sim_builder.add_material_points(
-    #     position_stack=position_stack,
-    #     is_rigid=True,
-    # )
-
-    # rigid_g_idx = sim_builder.add_grid(
-    #     origin =origin,
-    #     end =end,
-    #     cell_size=cell_size,
-    #     padding=0
-    # )
-    # rigid_b_idx = sim_builder.couple(
-    #     # p_idx=water_p_idx,
-    #     # g_idx=water_g_idx,
-    #     # c_idx=water_c_id,
-    #     shapefunction="quadratic",
-    # )
 
     # =========================================================
     # 3. DEFINE FORCES
@@ -499,21 +377,31 @@ def simulation_wrapper():
         gravity=jnp.array([0.0, -9.8]), is_apply_on_grid=True
     )
 
-    boundary_idx = sim_builder.add_boundary(
-        friction=0.0, origin=origin, end=end, gap=1e-4
+    domain_sdf = hdx.DomainSDF(
+        origin=origin,
+        end = end,
+        frictions = 0.9,
+        wall_offset = 0.5 * cell_size,
+    )
+    domain_idx = sim_builder.add_sdf_object(
+        sdf_logic=domain_sdf,
     )
 
-    sdf_collider_idx = sim_builder.add_sdf_collider(
-        sdf_object=chain_sdf,
-        f_state=mdf_state,
-        #         gap = 1e-4,
-        # center_of_mass=jnp.array([5.0, 2.5]),
-        # velocity=jnp.array([0.0, 0.0]),
-        # rotation=30.0 * jnp.pi / 180.0,
-        # angular_velocity=-180 * (jnp.pi / 180.0),
-        gap=cell_size / 2,
-        friction=0.9,
+    domain_collider_idx = sim_builder.add_sdf_collider(gap=1e-6)
+
+
+
+    sdf_morph_idx = sim_builder.add_sdf_object(
+        sdf_logic=chain_sdf,
+        sdf_state=mdf_state,
     )
+
+    morph_collider_idx = sim_builder.add_sdf_collider(
+        gap=cell_size / 2,
+        friction=0.9
+    )
+
+
     # grid_contact_idx = sim_builder.add_body_contact(
     #     couple_idx_actor= water_b_idx,
     #     couple_idx_receiver= clay_b_idx,
@@ -529,6 +417,7 @@ def simulation_wrapper():
     # 4. DEFINE SIM STATE AND CONTEXT
     # =========================================================
     solver_idx = sim_builder.set_solver(
+        # scheme="usl_aflip",
         scheme="usl_aflip",
         # b_idx_list=[water_b_idx],
         # f_idx_list=[boundary_idx,grav_idx],
@@ -537,9 +426,10 @@ def simulation_wrapper():
 
     mpm_solver, sim_state = sim_builder.build(dt=dt)
 
-    # # =========================================================
-    # # 4. RUN SIMULATION
-    # # =========================================================
+
+    # # # =========================================================
+    # # # 4. RUN SIMULATION
+    # # # =========================================================
 
     vis = hdx.RerunVisualizer(
         origin=origin,
@@ -550,25 +440,30 @@ def simulation_wrapper():
         # root_path="RD",
     )
 
+    vis.log_sdf_boundary(
+        sdf_logic=domain_sdf,
+        sdf_state=sim_state.world.sdfs[domain_idx],
+    )
+
+
     def log_simulation(sim_state: hdx.SimState):
         vis.log_simulation(sim_state)
         vis.log_sdf_boundary(
             sdf_logic=chain_sdf,
-            sdf_state=sim_state.forces[sdf_collider_idx],
+            sdf_state=sim_state.world.sdfs[sdf_morph_idx],
         )
 
     def loop_body(i, sim_state):
-        # sim_state = mpm_solver.step(sim_state)
+        # sim_state = mpm_solver(sim_state)
 
         time = sim_state.time
 
-        sim_forces = list(sim_state.forces)
-        sdf_state = sim_forces[sdf_collider_idx]
-        next_sdf_state = update_morph(time, sdf_state)
-        sim_forces[sdf_collider_idx] = next_sdf_state
+        sdfs = list(sim_state.world.sdfs)
+        sdfs[sdf_morph_idx] = update_morph(time, sdfs[sdf_morph_idx])
 
-        sim_state = eqx.tree_at(lambda s: s.forces, sim_state, tuple(sim_forces))
-        sim_state = mpm_solver.step(sim_state)
+        world = eqx.tree_at(lambda w: w.sdfs, sim_state.world, tuple(sdfs))
+        sim_state = eqx.tree_at(lambda s: s.world, sim_state, world)
+        sim_state = mpm_solver(sim_state)
         jax.lax.cond(
             i % output_step == 0,
             lambda s: jax.debug.callback(log_simulation, s),
