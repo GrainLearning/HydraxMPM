@@ -70,12 +70,13 @@ class InteractionCache(eqx.Module):
 
     node_hashes: UInt[Array, "n_interactions"]
     shape_vals: Float[Array, "n_interactions"]
+    cpic_mask: Float[Array, "n_interactions"]
+
     shape_grads: Float[Array, "n_interactions 3"]
     rel_dist: Float[Array, "n_interactions 3"]
 
     point_ids: UInt[Array, "n_interactions"]
     stencil_ids: UInt[Array, "n_interactions"]
-    _stencil_offsets: Int[Array, "window dim"]
 
     @property
     def dim(self: Self) -> int:
@@ -87,10 +88,6 @@ class InteractionCache(eqx.Module):
         """Get number of interactions"""
         return self.node_hashes.shape[0]
 
-    @property
-    def window_size(self: Self) -> int:
-        """Get stencil window size"""
-        return self._stencil_offsets.shape[0]
 
 
 class ShapeFunctionMapping(eqx.Module):
@@ -104,6 +101,13 @@ class ShapeFunctionMapping(eqx.Module):
 
     shapefunction: str = eqx.field(static=True)
 
+    _stencil_offsets: Int[Array, "window dim"]
+
+    @property
+    def window_size(self: Self) -> int:
+        """Get stencil window size"""
+        return self._stencil_offsets.shape[0]
+
     def __init__(
         self,
         shapefunction: str,
@@ -116,14 +120,6 @@ class ShapeFunctionMapping(eqx.Module):
         self._shapefunction_call = kernels[shapefunction][0]
         self.shapefunction = shapefunction
 
-    def create_cache(
-        self,
-        num_points: int,
-        dim: int,
-    ):
-        """
-        Creates an empty InteractionCache for given number of points and dimension. Used within MPM solver.Re
-        """
 
         window_1d = kernels[self.shapefunction][1]
 
@@ -131,26 +127,39 @@ class ShapeFunctionMapping(eqx.Module):
         mesh = jnp.meshgrid(*[window_1d] * dim, indexing="ij")
 
         # set data fields for stencils
-        _stencil_offsets = jnp.stack(mesh, axis=-1).reshape(-1, dim)
-        window_size = _stencil_offsets.shape[0]
+        self._stencil_offsets = jnp.stack(mesh, axis=-1).reshape(-1, dim)
 
-        # pre-compute indices
-        num_interactions = num_points * window_size
-        flat_indices = jnp.arange(num_interactions)
 
-        # set data fields for point and stencil ids
-        point_ids = (flat_indices // window_size).astype(jnp.uint32)
-        stencil_ids = (flat_indices % window_size).astype(jnp.uint32)
+    # def create_cache(
+    #     self,
+    #     num_points: int,
+    #     dim: int,
+    # ):
+    #     """
+    #     Creates an empty InteractionCache for given number of points and dimension. Used within MPM solver.Re
+    #     """
 
-        return InteractionCache(
-            node_hashes=jnp.zeros((num_interactions,), dtype=jnp.uint32),
-            shape_vals=jnp.zeros((num_interactions,)),
-            shape_grads=jnp.zeros((num_interactions, 3)),
-            rel_dist=jnp.zeros((num_interactions, 3)),
-            point_ids=point_ids,
-            stencil_ids=stencil_ids,
-            _stencil_offsets=_stencil_offsets,
-        )
+
+    #     window_size = _stencil_offsets.shape[0]
+
+    #     # pre-compute indices
+    #     num_interactions = num_points * window_size
+    #     flat_indices = jnp.arange(num_interactions)
+
+    #     # set data fields for point and stencil ids
+    #     point_ids = (flat_indices // window_size).astype(jnp.uint32)
+    #     stencil_ids = (flat_indices % window_size).astype(jnp.uint32)
+
+    #     return InteractionCache(
+    #         node_hashes=jnp.zeros((num_interactions,), dtype=jnp.uint32),
+    #         shape_vals=jnp.zeros((num_interactions,)),
+    #         shape_grads=jnp.zeros((num_interactions, 3)),
+    #         rel_dist=jnp.zeros((num_interactions, 3)),
+    #         cpic_mask=jnp.ones((num_interactions,)),
+    #         point_ids=point_ids,
+    #         stencil_ids=stencil_ids,
+    #         _stencil_offsets=_stencil_offsets,
+    #     )
 
     def compute(
         self,
@@ -158,7 +167,6 @@ class ShapeFunctionMapping(eqx.Module):
         origin: Array | tuple,
         grid_size: Array | tuple,
         inv_cell_size: float,
-        intr_cache: InteractionCache,
     ) -> InteractionCache:
         """
         Calculates hashes, shape values, and gradients from current positions.
@@ -166,7 +174,17 @@ class ShapeFunctionMapping(eqx.Module):
         """
         origin = jnp.array(origin)
 
+        num_points = position_stack.shape[0]
+        
+        window_size = self._stencil_offsets.shape[0]
+        
+        num_interactions = num_points * window_size
 
+
+        # 1. Generate Indices (Fast integer math)
+        flat_indices = jnp.arange(num_interactions)
+        point_ids = (flat_indices // window_size).astype(jnp.uint32)
+        stencil_ids = (flat_indices % window_size).astype(jnp.uint32)
 
         # Quadratic splines require a -0.5 cell shift to align the 3-node stencil
         needs_shift = self.shapefunction == "quadratic"
@@ -178,7 +196,7 @@ class ShapeFunctionMapping(eqx.Module):
             xp = position_stack[p_id]
 
             # interaction offset
-            offset = intr_cache._stencil_offsets[s_id]
+            offset = self._stencil_offsets[s_id]
 
             # normalized grid coordinate to float
             base_pos = (xp - origin) * inv_cell_size
@@ -226,13 +244,18 @@ class ShapeFunctionMapping(eqx.Module):
 
         # vectorized over all interactions
         hashes, vals, grads, dists = jax.vmap(compute_single_interaction)(
-            intr_cache.point_ids, intr_cache.stencil_ids
+            point_ids, stencil_ids
         )
 
-        return eqx.tree_at(
-            lambda s: (s.node_hashes, s.shape_vals, s.shape_grads, s.rel_dist),
-            intr_cache,
-            (hashes, vals, grads, dists),
+        return InteractionCache(
+            node_hashes=hashes,
+            shape_vals=vals,
+            shape_grads=grads,
+            rel_dist=dists,
+            cpic_mask=jnp.ones((num_interactions,)), # Default mask
+            point_ids=point_ids,
+            stencil_ids=stencil_ids,
+            # _stencil_offsets=self._stencil_offsets # this needed later?
         )
 
     # Particle to Grid transfer (P2G, Scatter)

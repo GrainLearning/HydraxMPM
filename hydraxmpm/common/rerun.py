@@ -87,7 +87,7 @@ class RerunVisualizer:
         end: End coordinates of the simulation domain.
 
     """
-
+    ppc: int = 1
     dim: int = None
     cell_size: float = None
     origin: tuple = None
@@ -137,6 +137,7 @@ class RerunVisualizer:
 
         self.cell_size = cell_size
         self.dim = len(origin)
+        self.ppc = ppc
 
         # default colormap
         self.cmap = cmap if cmap is not None else plt.get_cmap("turbo")
@@ -235,12 +236,61 @@ class RerunVisualizer:
         rr.set_time("step", sequence=current_step)
         rr.set_time("sim_time", timestamp=current_time)
         
-        for i, mp in enumerate(state.world.material_points):
-            self._log_particles(mp, f"{self.root_path}/material_{i}")
+        # for i, mp in enumerate(state.world.material_points):
+        #     self._log_particles(mp, f"{self.root_path}/material_{i}")
 
         # Add SDF logging here if needed?
 
-    def _log_particles(self, mp_state, path, cmap=None):
+    # def _log_particles(self, mp_state, path, cmap=None):
+    #     """
+    #     Logs the material points to Rerun. (internal use only)
+    #     """
+    #     # TODO add more flexibility on what to log (e.g., forces, stress, etc.)
+    #     # Also colors 
+    #     if cmap is None:
+    #         cmap = plt.get_cmap("turbo")
+
+    #     positions = np.array(mp_state.position_stack)
+
+    #     # Color by velocity magnitude
+    #     if mp_state.velocity_stack is None:
+    #         colors = np.array([[200, 200, 200]] * positions.shape[0])  # Grey
+    #     else:
+    #         velocities = np.array(mp_state.velocity_stack)
+    #         vel_mag = np.linalg.norm(velocities, axis=1)
+            
+    #         # Normalize (adjust based by physics)
+    #         normalized_vel = np.clip(vel_mag / 2.0, 0, 1)
+    #         colors = cmap(normalized_vel)
+
+    #     # Rerun Logging
+    #     if positions.shape[1] == 2:
+    #         vis_pos = positions.copy()
+    #         # Rerun flips Y axis for 2D visualizations
+    #         vis_pos[:, 1] = -vis_pos[:, 1]
+    #         rr.log(
+    #             path,
+    #             rr.Points2D(
+    #                 vis_pos,
+    #                 colors=colors,
+    #                 radii=self._point_radius,  
+    #             ),
+    #         )
+    #     else:
+    #         rr.log(
+    #             path,
+    #             rr.Points3D(
+    #                 positions,
+    #                 colors=colors,
+    #                 radii=self._point_radius, 
+    #             ),
+    #         )
+    def _log_particles(self, 
+                       mp_state,
+                       label="material_points",
+                       color=None,
+                        property_name="velocity_stack",
+                        cmap=None):
         """
         Logs the material points to Rerun. (internal use only)
         """
@@ -250,25 +300,59 @@ class RerunVisualizer:
             cmap = plt.get_cmap("turbo")
 
         positions = np.array(mp_state.position_stack)
+        num_points = positions.shape[0]
 
-        # Color by velocity magnitude
-        if mp_state.velocity_stack is None:
-            colors = np.array([[200, 200, 200]] * positions.shape[0])  # Grey
+        if color is not None:
+            c_arr = np.array(color)
+            if c_arr.ndim == 1:
+                colors = np.tile(c_arr, (num_points, 1))
+            else:
+                colors = c_arr
+
         else:
-            velocities = np.array(mp_state.velocity_stack)
-            vel_mag = np.linalg.norm(velocities, axis=1)
-            
-            # Normalize (adjust based by physics)
-            normalized_vel = np.clip(vel_mag / 2.0, 0, 1)
-            colors = cmap(normalized_vel)
+            prop_data = getattr(mp_state, property_name, None)
 
+            if prop_data is None:
+                # Fallback if property not found (Grey)
+                print(f"Warning: Property '{property_name}' not found on state.")
+                colors = np.array([[200, 200, 200]] * num_points)
+            else:
+                # Convert JAX array to Numpy
+                values = np.array(prop_data)
+
+                # 2. Reduce Vectors/Tensors to Scalars for visualization
+                # If data is (N, dim) or (N, 3, 3), compute magnitude.
+                # If data is (N,), use as is.
+                if values.ndim > 1:
+                    # Euclidean norm over all dimensions except the particle index (axis 0)
+                    # e.g., for velocity (N, 3) -> axis 1
+                    # e.g., for stress (N, 3, 3) -> axis (1, 2) (Frobenius norm equivalent)
+                    reduce_axes = tuple(range(1, values.ndim))
+                    scalar_field = np.linalg.norm(values, axis=reduce_axes)
+                else:
+                    scalar_field = values
+
+                scalar_field = np.nan_to_num(scalar_field)
+
+                v_min = np.min(scalar_field)
+                v_max = np.max(scalar_field)
+                
+                # Avoid division by zero if field is constant
+                if v_max - v_min < 1e-6:
+                    normalized = np.zeros_like(scalar_field)
+                else:
+                    normalized = (scalar_field - v_min) / (v_max - v_min)
+
+                colors = cmap(normalized)
+
+                
         # Rerun Logging
         if positions.shape[1] == 2:
             vis_pos = positions.copy()
             # Rerun flips Y axis for 2D visualizations
             vis_pos[:, 1] = -vis_pos[:, 1]
             rr.log(
-                path,
+                f"{self.root_path}/{label}",
                 rr.Points2D(
                     vis_pos,
                     colors=colors,
@@ -277,13 +361,14 @@ class RerunVisualizer:
             )
         else:
             rr.log(
-                path,
+                f"{self.root_path}/{label}",
                 rr.Points3D(
                     positions,
                     colors=colors,
                     radii=self._point_radius, 
                 ),
             )
+
 
     def _log_static_domain(self):
         """Logs the bounding box and all grid nodes (timeless)."""
@@ -345,7 +430,15 @@ class RerunVisualizer:
         #     static=True
         # )
 
-    def log_sdf_boundary(self, sdf_logic, sdf_state, resolution=100, label="boundary", static=False):
+    def log_sdf_boundary(self,
+                        sdf_logic,
+                        sdf_state,
+                        resolution=100,
+                        label="boundary", 
+                        static=False,
+                        start = None,
+                        end = None
+                        ):
         """
         Visualizes an SDF object by extracting the zero-level set (surface).
         Args:
@@ -358,15 +451,20 @@ class RerunVisualizer:
             print("Install 'scikit-image' to visualize SDF boundaries.")
             return
 
+        if start is None:
+            start = self.origin
 
+        if end is None:
+            end = self.end
+        
 
         # Here we generate a bunch of points in the domain
-        domain_size = self.end*1.05 - self.origin*0.95
+        domain_size = end*1.05 - start*0.95
         step_size = np.max(domain_size) / resolution
 
         aspect_size = np.ceil(domain_size / step_size).astype(int)
         indices = np.indices(aspect_size)
-        coords = np.moveaxis(indices, 0, -1) * step_size + self.origin
+        coords = np.moveaxis(indices, 0, -1) * step_size + start
         flat_coords = coords.reshape(-1, self.dim)
 
 

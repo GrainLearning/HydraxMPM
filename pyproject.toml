@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "equinox>=0.13.2",
-    "jax>=0.8.2",
+    "jax[cuda]>=0.8.2",
     "jaxtyping>=0.3.5",
     "scikit-image>=0.26.0",
     "typeguard==2.13.3",

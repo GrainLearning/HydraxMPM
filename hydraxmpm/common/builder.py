@@ -1,6 +1,6 @@
 
 from hydraxmpm.solvers.usl import USLSolver
-from ..grid.grid import GridState
+from ..grid.grid import GridDomain
 
 from ..shapefunctions.mapping import InteractionCache, ShapeFunctionMapping
 
@@ -55,7 +55,6 @@ class SimBuilder:
 
         # world state
         self.particle_states = Registry()
-        self.grid_states = Registry()
         self.sdf_states = Registry()
 
         # world logics
@@ -65,9 +64,9 @@ class SimBuilder:
         self.force_states = Registry()
         self.law_states = Registry()
         self.solver_states = Registry()
-        self.intr_caches = {}
 
         # mechanics logics
+        self.grid_domains = Registry()
         self.solver_logics = Registry()
         self.couplings = Registry()
         self.force_logics = Registry()
@@ -76,9 +75,10 @@ class SimBuilder:
     def add_grid(
         self,
         *,
-        origin: tuple | Float[Array, "dim"],
-        end: tuple | Float[Array, "dim"],
-        cell_size: float | Float[Array, "..."],
+        grid_domain: GridDomain =None,
+        origin: tuple | Float[Array, "dim"] = None,
+        end: tuple | Float[Array, "dim"] = None,
+        cell_size: float | Float[Array, "..."] = None,
         padding: int = 3,
     ) -> int:
         """Defines a physical domain.
@@ -89,9 +89,11 @@ class SimBuilder:
             cell_size: The size of each cell in the grid.
             padding: Ghost cells. 1 for Linear/Quadratic, 2 for Cubic.
         """
+        if grid_domain is None:
 
-        grid_state = GridState.create(origin, end, cell_size, padding=padding)
-        return self.grid_states.add(grid_state)
+            grid_domain = GridDomain.create(origin, end, cell_size, padding=padding)
+            
+        return self.grid_domains.add(grid_domain)
 
     def add_material_points(
         self,
@@ -186,12 +188,12 @@ class SimBuilder:
         if p_idx is None:
             p_idx = len(self.particle_states) - 1
         if g_idx is None:
-            g_idx = len(self.grid_states) - 1
+            g_idx = len(self.grid_domains) - 1
         if c_idx is None:
             c_idx = len(self.law_logics) - 1
 
         mp_state = self.particle_states[p_idx]
-        grid_state = self.grid_states[g_idx]
+        grid_state = self.grid_domains[g_idx]
 
         skip_mpm_logic = isinstance(mp_state, RigidMaterialPointState)
 
@@ -220,10 +222,6 @@ class SimBuilder:
             skip_mpm_logic=skip_mpm_logic,
         )
 
-        intr_cache = shp.create_cache(num_points=num_particles, dim=dim)
-
-        self.intr_caches[(p_idx, g_idx)] = intr_cache
-
         couple_idx = self.couplings.add(couple)  # making sure index is correct
 
         return couple_idx
@@ -239,7 +237,7 @@ class SimBuilder:
     ) -> int:
         """Adds gravity force to the simulation."""
         g_idx_list = (
-            list(range(len(self.grid_states))) if g_idx_list is None else g_idx_list
+            list(range(len(self.grid_domains))) if g_idx_list is None else g_idx_list
         )
         p_idx_list = (
             list(range(len(self.particle_states))) if p_idx_list is None else p_idx_list
@@ -279,12 +277,15 @@ class SimBuilder:
         sdf_idx_list = (
             list(range(len(self.sdf_logics))) if sdf_idx_list is None else sdf_idx_list
         )
-
+        
         couplings = tuple(self.couplings[i] for i in b_idx_list)
         forces = tuple(self.force_logics[i] for i in f_idx_list)
         sdf_logics = tuple(self.sdf_logics[i] for i in sdf_idx_list)
 
-        # caw can be None if rigid particles are used
+
+        grid_domains = tuple(self.grid_domains[coupling.g_idx] for coupling in couplings)
+
+        # law can be None if rigid particles are used
         laws = tuple(
             self.law_logics[coupling.c_idx] if coupling.c_idx is not None else None
             for coupling in couplings
@@ -296,6 +297,7 @@ class SimBuilder:
                 couplings=couplings,
                 forces=forces,
                 sdf_logics=sdf_logics,
+                grid_domains=grid_domains,
                 **solver_params,
             )
         elif scheme.lower() == "usl_aflip":
@@ -304,6 +306,7 @@ class SimBuilder:
                 forces=forces,
                 couplings=couplings,
                 sdf_logics=sdf_logics,
+                grid_domains=grid_domains,
                 **solver_params,
             )
 
@@ -335,12 +338,10 @@ class SimBuilder:
 
         world_state = WorldState(
             material_points=tuple(self.particle_states),
-            grids=tuple(self.grid_states),
             sdfs=tuple(self.sdf_states),
         )
         mechanics_state = MechanicsState(
             constitutive_laws=tuple(self.law_states),
-            interactions=self.intr_caches,
             solvers=tuple(self.solver_states),
             forces=tuple(self.force_states),
         )
@@ -396,7 +397,7 @@ class SimBuilder:
             sdf_idx = len(self.sdf_states) - 1
 
         g_idx_list = (
-            list(range(len(self.grid_states))) if g_idx_list is None else g_idx_list
+            list(range(len(self.grid_domains))) if g_idx_list is None else g_idx_list
         )
 
         sdf_collider = SDFCollider(

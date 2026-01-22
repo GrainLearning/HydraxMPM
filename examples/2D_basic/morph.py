@@ -391,16 +391,26 @@ def simulation_wrapper():
 
 
 
-    sdf_morph_idx = sim_builder.add_sdf_object(
-        sdf_logic=chain_sdf,
-        sdf_state=mdf_state,
-    )
+    # sdf_morph_idx = sim_builder.add_sdf_object(
+    #     sdf_logic=chain_sdf,
+    #     sdf_state=mdf_state,
+    # )
 
-    morph_collider_idx = sim_builder.add_sdf_collider(
-        gap=cell_size / 2,
-        friction=0.9
-    )
+    # morph_collider_idx = sim_builder.add_sdf_collider(
+    #     gap=cell_size / 2,
+    #     friction=0.9
+    # )
 
+    cloud_logic = hdx.ParticleCloudSDF(smooth_k=10.0)
+
+    cloud_state = cloud_logic.create_state(
+        points = position_stack,
+        radii = jnp.full((len(position_stack),), 2* cell_size),
+    )
+    sdf_cloud_idx = sim_builder.add_sdf_object(
+        sdf_logic=cloud_logic,
+        sdf_state=cloud_state,
+    )
 
     # grid_contact_idx = sim_builder.add_body_contact(
     #     couple_idx_actor= water_b_idx,
@@ -448,10 +458,21 @@ def simulation_wrapper():
 
     def log_simulation(sim_state: hdx.SimState):
         vis.log_simulation(sim_state)
+        # vis.log_sdf_boundary(
+        #     sdf_logic=chain_sdf,
+        #     sdf_state=sim_state.world.sdfs[sdf_morph_idx],
+        # )
+
+  
+
+ 
         vis.log_sdf_boundary(
-            sdf_logic=chain_sdf,
-            sdf_state=sim_state.world.sdfs[sdf_morph_idx],
+            sdf_logic=cloud_logic,
+            sdf_state=sim_state.world.sdfs[sdf_cloud_idx],
+            resolution=60, 
         )
+
+
 
     def loop_body(i, sim_state):
         # sim_state = mpm_solver(sim_state)
@@ -459,7 +480,16 @@ def simulation_wrapper():
         time = sim_state.time
 
         sdfs = list(sim_state.world.sdfs)
-        sdfs[sdf_morph_idx] = update_morph(time, sdfs[sdf_morph_idx])
+        # sdfs[sdf_morph_idx] = update_morph(time, sdfs[sdf_morph_idx])
+
+
+        current_sdf_state = sim_state.world.sdfs[sdf_cloud_idx]
+        current_mp_state = sim_state.world.material_points[water_p_idx]
+
+        sdfs[sdf_cloud_idx] = cloud_logic.update_cloud_from_mps(
+            sdf_state=current_sdf_state,
+            mp_state=current_mp_state,
+        )
 
         world = eqx.tree_at(lambda w: w.sdfs, sim_state.world, tuple(sdfs))
         sim_state = eqx.tree_at(lambda s: s.world, sim_state, world)

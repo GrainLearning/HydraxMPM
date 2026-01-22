@@ -38,7 +38,7 @@ except ImportError:
 
 from .common.sim_io import SimIO
 
-from .grid.grid import GridState
+from .grid.grid import GridDomain
 
 from .shapefunctions.mapping import InteractionCache, ShapeFunctionMapping
 
@@ -77,7 +77,8 @@ from .sdf.sdfcollection import (
     TorusSDF,
     StarSDF,
     HollowCylinderSDF,
-    DomainSDF
+    DomainSDF,
+    MaterialPointCloudSDF
 )
 from .sdf.sdfmorph import ChainMorphSDF,MorphSDF, MorphSDFState
 from .sdf.gridsdf import GridSDF
@@ -97,6 +98,7 @@ from .utils.math_helpers import (
     # get_pressure,
     # get_von_mises_stress,
     # get_volumetric_strain,
+    safe_norm,
     get_volumetric_strain_stack,
 )
 

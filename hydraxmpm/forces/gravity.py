@@ -31,7 +31,7 @@ import equinox as eqx
 
 from ..material_points.material_points import BaseMaterialPointState
 
-from ..grid.grid import GridState
+from ..grid.grid import GridDomain
 
 
 class GravityState(BaseForceState):
@@ -90,39 +90,41 @@ class Gravity(Force):
         """Helper function to create the state for the gravity force."""
         return GravityState(gravity=gravity)
 
-    def apply_grid_forces(self, world, mechanics, sdf_logics, couplings, dt, time):
+    def apply_grid_forces(
+        self, world, mechanics, sim_cache, sdf_logics, couplings, grid_domains, dt, time
+    ):
         """
         Apply gravity on grid forces
         """
-        grid_states = list(world.grids)
+        grids = list(sim_cache.grids)
         f_states = list(mechanics.forces)
 
         if not self.is_apply_on_grid:
-            return world, mechanics
+            return world, mechanics, sim_cache
 
         f_state = f_states[self.f_idx]
 
         # Loop over all grid ids
         for g_idx in self.g_idx_list:
 
-            grid_state = grid_states[g_idx]
+            grid_cache = grids[g_idx]
 
             # F = m * g
             # Add to existing grid force directly
-            gravity_impulse = grid_state.mass_stack[:, None] * f_state.gravity
+            gravity_impulse = grid_cache.mass_stack[:, None] * f_state.gravity
 
-            new_force_stack = grid_state.force_stack + gravity_impulse
+            new_force_stack = grid_cache.force_stack + gravity_impulse
 
-            grid_states[g_idx] = eqx.tree_at(
-                lambda g: g.force_stack, grid_state, new_force_stack
+            grids[g_idx] = eqx.tree_at(
+                lambda g: g.force_stack, grid_cache, new_force_stack
             )
 
         f_states[self.f_idx] = f_state
 
-        world = eqx.tree_at(
-            lambda w: (w.grids,),
-            world,
-            (tuple(grid_states),),
+        sim_cache = eqx.tree_at(
+            lambda s: (s.grids,),
+            sim_cache,
+            (tuple(grids),),
         )
 
         mechanics = eqx.tree_at(
@@ -131,9 +133,11 @@ class Gravity(Force):
             (tuple(f_states),),
         )
 
-        return world, mechanics
+        return world, mechanics, sim_cache
 
-    def apply_pre_p2g(self, world, mechanics, sdf_logics, couplings, dt, time):
+    def apply_pre_p2g(
+        self, world, mechanics, sim_cache, sdf_logics, couplings, grid_domains, dt, time
+    ):
         """
         Apply gravity on particle forces
         """
@@ -143,7 +147,7 @@ class Gravity(Force):
         f_states = list(mechanics.forces)
 
         if self.is_apply_on_grid:
-            return world, mechanics
+            return world, mechanics, sim_cache
 
         f_state = f_states[self.f_idx]
 
@@ -151,7 +155,6 @@ class Gravity(Force):
         for p_idx in self.p_idx_list:
 
             mp_state = mp_states[p_idx]
-
 
             gravity_impulse = mp_state.mass_stack[:, None] * f_state.gravity
 
@@ -165,7 +168,6 @@ class Gravity(Force):
 
         f_states[self.f_idx] = f_state
 
-
         world = eqx.tree_at(
             lambda w: (w.material_points,),
             world,
@@ -178,5 +180,4 @@ class Gravity(Force):
             (tuple(f_states),),
         )
 
-
-        return world, mechanics
+        return world, mechanics, sim_cache

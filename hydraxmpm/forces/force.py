@@ -18,12 +18,13 @@ if TYPE_CHECKING:
     # fixes circular import with SimState
     from ..common.simstate import WorldState, MechanicsState
 
-from ..grid.grid import GridState
 from ..material_points.material_points import MaterialPointState
 from ..solvers.coupling import BodyCoupling
 
 
 from ..sdf.sdfobject import SDFObjectBase
+
+from ..grid.grid import GridDomain
 
 
 
@@ -55,22 +56,26 @@ class Force(eqx.Module):
         self,
         world: WorldState,
         mechanics: MechanicsState,
+        sim_cache,
         sdf_logics: Tuple[SDFObjectBase, ...],
         couplings: Tuple[BodyCoupling, ...],
+        grid_domains: Tuple[GridDomain, ...],
         dt,
         time
     ):
         """
         Apply hook 2 nefore particle to grid transfer, acting on particles.
         """
-        return world, mechanics
+        return world, mechanics, sim_cache
 
     def apply_grid_forces(
         self: Self,
         world: WorldState,
         mechanics: MechanicsState,
+        sim_cache,
         sdf_logics: Tuple[SDFObjectBase, ...],
         couplings: Tuple[BodyCoupling, ...],
+        grid_domains: Tuple[GridDomain, ...],
         dt,
         time
     ):
@@ -80,14 +85,16 @@ class Force(eqx.Module):
         Modify grid forces here directly.
 
         """
-        return world, mechanics
+        return world, mechanics, sim_cache
 
     def apply_grid_moments(
         self: Self,
         world: WorldState,
         mechanics: MechanicsState,
+        sim_cache,
         sdf_logics: Tuple[SDFObjectBase, ...],
         couplings: Tuple[BodyCoupling, ...],
+        grid_domains: Tuple[GridDomain, ...],
         dt,
         time
     ):
@@ -97,4 +104,4 @@ class Force(eqx.Module):
         The grid momentum can be modified here.
 
         """
-        return world, mechanics
+        return world, mechanics, sim_cache

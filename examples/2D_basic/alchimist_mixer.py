@@ -38,7 +38,7 @@ def simulation_wrapper():
         scale: float
         rounding: float
 
-        def __init__(self, scale=1.0, rounding =0.1):
+        def __init__(self, scale=1.0, rounding=0.1):
 
             self.rounding = rounding
             self.scale = scale
@@ -174,7 +174,7 @@ def simulation_wrapper():
     #         dphi_dt = dphi_dblend * sdf_state.blend_rate
 
     #         # prevent artificial suction
-    #         dphi_dt_clamped = jnp.minimum(dphi_dt, 0.0) 
+    #         dphi_dt_clamped = jnp.minimum(dphi_dt, 0.0)
 
     #         # C. Compute Morph Velocity Vector
     #         # v_morph = - ( dphi_dt / |grad phi|^2 ) * grad phi
@@ -220,47 +220,61 @@ def simulation_wrapper():
     #         lambda s: (s.blend_factor, s.blend_rate), sdf_state, (b_factor, b_rate)
     #     )
 
-
-
-
     class ChainMorphSDF(hdx.SDFObjectBase):
         shapes: list[hdx.SDFObjectBase]
 
         def __init__(self, shapes: list[hdx.SDFObjectBase]):
             self.shapes = shapes
 
-        def create_state(self, center_of_mass, rotation=None, blend_factor=0.0, blend_rate=0.0, velocity=None, angular_velocity=None):
-            base = super().create_state(center_of_mass, velocity, angular_velocity, rotation)
+        def create_state(
+            self,
+            center_of_mass,
+            rotation=None,
+            blend_factor=0.0,
+            blend_rate=0.0,
+            velocity=None,
+            angular_velocity=None,
+        ):
+            base = super().create_state(
+                center_of_mass, velocity, angular_velocity, rotation
+            )
             return MorphSDFState(
                 center_of_mass=base.center_of_mass,
                 rotation=base.rotation,
                 velocity=base.velocity,
                 angular_velocity=base.angular_velocity,
                 blend_factor=jnp.asarray(blend_factor),
-                blend_rate=jnp.asarray(blend_rate)
+                blend_rate=jnp.asarray(blend_rate),
             )
 
         def signed_distance_local(self, state, p_local):
             # Compute distances for all shapes
-            dists = jnp.stack([s.signed_distance_local(state, p_local) for s in self.shapes])
-            
+            dists = jnp.stack(
+                [s.signed_distance_local(state, p_local) for s in self.shapes]
+            )
+
             T = state.blend_factor
             num_segments = len(self.shapes) - 1
             T = jnp.clip(T, 0.0, num_segments)
-            
+
             # Identify segment
             idx = jnp.minimum(jnp.floor(T).astype(int), num_segments - 1)
             t = T - idx
-            
+
             d_start = dists[idx]
-            d_end   = dists[idx + 1]
-            
+            d_end = dists[idx + 1]
+
             return (1.0 - t) * d_start + t * d_end
 
         def get_velocity(self, sdf_state, pos_world, dt):
             p_local = pos_world - sdf_state.center_of_mass
             if p_local.shape[0] == 2:
-                cross = jnp.array([-sdf_state.angular_velocity * p_local[1], sdf_state.angular_velocity * p_local[0]])
+                cross = jnp.array(
+                    [
+                        -sdf_state.angular_velocity * p_local[1],
+                        sdf_state.angular_velocity * p_local[0],
+                    ]
+                )
             else:
                 cross = jnp.cross(sdf_state.angular_velocity, p_local)
 
@@ -272,7 +286,7 @@ def simulation_wrapper():
 
             dphi_dblend = state_grads.blend_factor
             dphi_dt = dphi_dblend * sdf_state.blend_rate
-            dphi_dt_clamped = jnp.minimum(dphi_dt, 0.0) 
+            dphi_dt_clamped = jnp.minimum(dphi_dt, 0.0)
 
             norm_sq = jnp.sum(spatial_grad**2)
             v_morph = -(dphi_dt_clamped / (norm_sq + 1e-12)) * spatial_grad
@@ -281,105 +295,110 @@ def simulation_wrapper():
 
     def update_morph(sim_time, sdf_state):
         # Configuration
-        hold_time = 1.5   # Seconds to stay as one shape
+        hold_time = 1.5  # Seconds to stay as one shape
         morph_time = 1.5  # Seconds to transition
         step_time = hold_time + morph_time
-        max_shape_idx = 3.0 # Star(0) -> Heart(1) -> Sphere(2) -> Plank(3)
-        
+        max_shape_idx = 3.0  # Star(0) -> Heart(1) -> Sphere(2) -> Plank(3)
+
         # We want to go 0 -> 1 -> 2 -> 3 -> 2 -> 1 -> 0 ...
         # Total cycle time for one full back-and-forth
         full_cycle_duration = step_time * max_shape_idx * 2
-        
+
         def compute_blend(t):
             # 1. Ping-Pong Time
             # Map time to a 0 -> Max -> 0 triangle, but stretched to account for steps
             # This creates a value 'p' that goes 0..3..0 continuously
-            
+
             # Triangle wave logic:
             # Normalized 0..1
-            norm_t = (t % full_cycle_duration) / full_cycle_duration 
+            norm_t = (t % full_cycle_duration) / full_cycle_duration
             # 0..2
-            norm_t = norm_t * 2.0 
+            norm_t = norm_t * 2.0
             # 0..1..0 (Linear triangle)
             ping_pong = 1.0 - jnp.abs(norm_t - 1.0)
-            
+
             # Map to total number of steps (0..3.0)
             # This 'p' represents the continuous fractional shape index
             p = ping_pong * max_shape_idx
-            
+
             # 2. Add Pauses (Stepping)
             # We separate 'p' into integer part (shape index) and fractional part
             idx = jnp.floor(p)
             frac = p - idx
-            
+
             # We want 'frac' to stay at 0 for 'hold_time', then go 0->1 during 'morph_time'
             # Calculate the ratio of hold vs morph in the generic 0..1 window
             pause_ratio = hold_time / step_time
-            
+
             # Remap fractional part:
             # If frac < pause_ratio: Output 0 (Hold)
             # If frac > pause_ratio: Smoothstep 0->1
-            
+
             # (frac - start) / (end - start)
             active_t = (frac - pause_ratio) / (1.0 - pause_ratio)
             active_t = jnp.clip(active_t, 0.0, 1.0)
-            
+
             # Smoothstep (3t^2 - 2t^3) ensures velocity starts and ends at 0
             smooth_t = active_t * active_t * (3.0 - 2.0 * active_t)
-            
+
             return idx + smooth_t
 
         # Use AD to get Value and Rate
         b_val, b_rate = jax.value_and_grad(compute_blend)(sim_time)
 
         # --- EFFECTS LOGIC ---
-        
+
         # 1. Rotation Speed (Mixer Effect)
         # Star (0.0): Fast Spin (5.0)
         # Heart (1.0): Still (0.0)
         # Sphere (2.0): Reverse Spin (-3.0)
         # Plank (3.0): Still (0.0)
-        
+
         # We define a continuous function for omega based on the blend value
         # Using simple Gaussian-like bumps or Lerps
-        
+
         # Is close to Star? (1 at 0.0, 0 at 1.0)
-        w_star = jnp.exp(-2.0 * (b_val - 0.0)**2) * 5.0
+        w_star = jnp.exp(-2.0 * (b_val - 0.0) ** 2) * 5.0
         # Is close to Sphere?
-        w_sphere = jnp.exp(-2.0 * (b_val - 2.0)**2) * -3.0
-        
+        w_sphere = jnp.exp(-2.0 * (b_val - 2.0) ** 2) * -3.0
+
         target_omega = w_star + w_sphere
-        
+
         # 2. Vertical Movement (The Crusher)
-        # Move up and down. 
+        # Move up and down.
         # When b_val is near 3 (Plank), we want to be LOW to crush particles.
         # When b_val is near 0 (Star), we want to be MIDDLE.
-        
-        target_y = 6.0 - 2.5 * jnp.exp(-2.0 * (b_val - 3.0)**2)
-        
+
+        target_y = 6.0 - 2.5 * jnp.exp(-2.0 * (b_val - 3.0) ** 2)
+
         # Use AD for Velocity Consistency again!
-        # If we just set position, velocity is wrong. Let AD compute velocity of the Y motion.  
-            
+        # If we just set position, velocity is wrong. Let AD compute velocity of the Y motion.
+
         def compute_y_pos(t):
             bv = compute_blend(t)
-            
+
             # Start at 2.5.
             # When blend is near 3.0 (Plank), drop down by 1.5 units (to y=1.0)
             base_y = 2.5
             drop_amount = 1.5
-            
-            return base_y - drop_amount * jnp.exp(-2.0 * (bv - 3.0)**2)
 
+            return base_y - drop_amount * jnp.exp(-2.0 * (bv - 3.0) ** 2)
 
         y_pos, y_vel = jax.value_and_grad(compute_y_pos)(sim_time)
-        
+
         new_com = sdf_state.center_of_mass.at[1].set(y_pos)
         new_vel = jnp.array([0.0, y_vel])
 
         return eqx.tree_at(
-            lambda s: (s.blend_factor, s.blend_rate, s.angular_velocity, s.center_of_mass, s.velocity), 
-            sdf_state, 
-            (b_val, b_rate, target_omega, new_com, new_vel)
+            lambda s: (
+                s.blend_factor,
+                s.blend_rate,
+                s.angular_velocity,
+                s.center_of_mass,
+                s.velocity,
+            ),
+            sdf_state,
+            (b_val, b_rate, target_omega, new_com, new_vel),
         )
 
     # =========================================================
@@ -393,8 +412,8 @@ def simulation_wrapper():
 
     sim_builder = hdx.SimBuilder()
 
-    dt = 0.5e-3
-    total_steps = int(20.0 / dt) 
+    dt = 0.5e-4
+    total_steps = int(40.0 / dt)
     output_step = int(0.016 / dt)
 
     # =========================================================
@@ -403,7 +422,7 @@ def simulation_wrapper():
     # sdf_block = hdx.BoxSDF(size=(9.0, 4.0))
     sdf_block = hdx.BoxSDF(size=(10.0, 6.0))
     # sdf = HeartSDF(scale=3.0)
-    
+
     position_stack = hdx.generate_particles_in_sdf(
         sdf_obj=sdf_block,
         center_of_mass=jnp.array([5.0, 7.0]),
@@ -441,9 +460,7 @@ def simulation_wrapper():
 
     water_c_id = sim_builder.add_constitutive_law(
         # law=hdx.NewtonFluid(K=2e6, viscosity=1e-3, beta=7.0),
-        law = hdx.MuI_LC(
-            K=2e6, mu_s=0.4, mu_d=1.41, I_0=1e-4,  d_p=0.025, alpha=1e-4
-        ),
+        law=hdx.MuI_LC(K=2e6, mu_s=0.4, mu_d=1.41, I_0=1e-4, d_p=0.025, alpha=1e-4),
         density_stack=density_stack,
     )
 
@@ -570,47 +587,47 @@ def simulation_wrapper():
     # 3. DEFINE FORCES
     # =========================================================
 
-    sdf_star = hdx.StarSDF(points=5, inner_radius=1.0, outer_radius=2.0)
-    sdf_heart = HeartSDF(scale=4.0)
-    sdf_sphere = hdx.SphereSDF(radius=3.5)
-    sdf_plank = hdx.BoxSDF(size=(5.0, 1.0))
-    chain_sdf = ChainMorphSDF(shapes=[sdf_star, sdf_heart, sdf_sphere, sdf_plank ])
-
-    mdf_state = chain_sdf.create_state(
-        center_of_mass=jnp.array([5.0, 2.5]), # Centered
-        velocity=jnp.array([0.0, 0.0]),
-        rotation=0.0,
-        angular_velocity=1.0, # Slow spin
-        blend_factor=0.0,
-        blend_rate=0.0
-    )
-
     grav_idx = sim_builder.add_gravity(
         gravity=jnp.array([0.0, -9.8]), is_apply_on_grid=True
     )
 
-    boundary_idx = sim_builder.add_boundary(
-        friction=0.0, origin=origin, end=end, gap=1e-4
+    sdf_star = hdx.StarSDF(points=5, inner_radius=1.0, outer_radius=2.0)
+    sdf_heart = HeartSDF(scale=4.0)
+    sdf_sphere = hdx.SphereSDF(radius=3.5)
+    sdf_plank = hdx.BoxSDF(size=(5.0, 1.0))
+    chain_sdf = ChainMorphSDF(shapes=[sdf_star, sdf_heart, sdf_sphere, sdf_plank])
+
+    mdf_state = chain_sdf.create_state(
+        center_of_mass=jnp.array([5.0, 2.5]),  # Centered
+        velocity=jnp.array([0.0, 0.0]),
+        rotation=0.0,
+        angular_velocity=1.0,  # Slow spin
+        blend_factor=0.0,
+        blend_rate=0.0,
     )
 
-    sdf_collider_idx = sim_builder.add_sdf_collider(
+    morph_idx = sim_builder.add_sdf_object(
         sdf_logic=chain_sdf,
-        f_state=mdf_state,
-        #         gap = 1e-4,
-        # center_of_mass=jnp.array([5.0, 2.5]),
-        # velocity=jnp.array([0.0, 0.0]),
-        # rotation=30.0 * jnp.pi / 180.0,
-        # angular_velocity=-180 * (jnp.pi / 180.0),
-        # gap=cell_size / 2,
+        sdf_state=mdf_state,
+    )
+    morph_collider_idx = sim_builder.add_sdf_collider(
         gap=1e-3,
         friction=0.9,
     )
-    # grid_contact_idx = sim_builder.add_body_contact(
-    #     couple_idx_actor= water_b_idx,
-    #     couple_idx_receiver= clay_b_idx,
-    #     is_reaction=True,
-    #     # is_rigid= True,
-    # )
+
+    domain_sdf = hdx.DomainSDF(
+        origin=origin,
+        end=end,
+        frictions=0.9,
+        wall_offset=0.75 * cell_size,
+    )
+    domain_idx = sim_builder.add_sdf_object(
+        sdf_logic=domain_sdf,
+    )
+    domain_collider_idx = sim_builder.add_sdf_collider(
+        gap=1e-3,
+        friction=0.9,
+    )
 
     # =========================================================
     # Morph SDF test
@@ -640,12 +657,22 @@ def simulation_wrapper():
         # recording_id="CompareModels",
         # root_path="RD",
     )
+    color = jnp.ones(len(position_stack)) * jnp.where(position_stack[:, 0] > 5.0, 1.0, 0.0)
+    
+    from matplotlib import cm
+    cmap = cm.get_cmap("RdYlBu")
+    color = cmap(color)
 
     def log_simulation(sim_state: hdx.SimState):
         vis.log_simulation(sim_state)
+        vis._log_particles(
+            sim_state.world.material_points[water_p_idx],
+            # property_name="pressure_stack",
+            color=color
+            )
         vis.log_sdf_boundary(
             sdf_logic=chain_sdf,
-            sdf_state=sim_state.forces[sdf_collider_idx],
+            sdf_state=sim_state.world.sdfs[morph_idx],
         )
 
     def loop_body(i, sim_state):
@@ -653,13 +680,12 @@ def simulation_wrapper():
 
         time = sim_state.time
 
-        sim_forces = list(sim_state.forces)
-        sdf_state = sim_forces[sdf_collider_idx]
-        next_sdf_state = update_morph(time, sdf_state)
-        sim_forces[sdf_collider_idx] = next_sdf_state
+        sdfs = list(sim_state.world.sdfs)
 
-        sim_state = eqx.tree_at(lambda s: s.forces, sim_state, tuple(sim_forces))
-        sim_state = mpm_solver.step(sim_state)
+        sdfs[morph_idx] = update_morph(time, sdfs[morph_idx])
+
+        sim_state = eqx.tree_at(lambda s: s.world.sdfs, sim_state, tuple(sdfs))
+        sim_state = mpm_solver(sim_state)
         jax.lax.cond(
             i % output_step == 0,
             lambda s: jax.debug.callback(log_simulation, s),

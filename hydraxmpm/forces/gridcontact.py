@@ -20,6 +20,8 @@ import jax
 import jax.numpy as jnp
 from .force import Force
 
+from ..sdf.sdfcollection import MaterialPointCloudSDF
+
 from typing_extensions import Optional
 
 class GridContact(Force):
@@ -46,18 +48,7 @@ class GridContact(Force):
     
     # stability
     mass_ratio_limit: float = eqx.field(static=True, default=2.0)
-
-    def apply_grid_moments(
-            self,
-            mp_states,
-            grid_states,
-            f_states,
-            intr_caches, 
-            couplings,
-            sdf_states,
-            dt, 
-            time
-            ):
+    def apply_grid_moments(self, world, mechanics, sim_cache, sdf_logics, couplings, dt, time):
         """"
         Apply grid contact between two grids.
         """
@@ -68,8 +59,8 @@ class GridContact(Force):
         p_idx_receiver = couplings[self.couple_idx_receiver].p_idx
         g_idx_receiver = couplings[self.couple_idx_receiver].g_idx
 
-        grid_state_act = grid_states[g_idx_actor] 
-        grid_state_rec = grid_states[g_idx_receiver]
+        grid_state_act = world.grids[g_idx_actor] 
+        grid_state_rec = world.grids[g_idx_receiver]
 
         # Buffers for actor quantities (Mass, Momentum, Normal)
         # We work on copies/buffers because we might alter rigid Body data
@@ -82,8 +73,8 @@ class GridContact(Force):
         # update actor grid if its rigid body
         if self.is_rigid:
             # Here we calculate rigid momentum and mass
-            rb_mp_state = mp_states[p_idx_actor]
-            rb_intr_cache = intr_caches[(p_idx_actor, g_idx_actor)]
+            rb_mp_state = world.material_points[p_idx_actor]
+            rb_intr_cache = mechanics.interactions[(p_idx_actor, g_idx_actor)]
             
             rb_intr_masses_stack = rb_mp_state.mass_stack.at[rb_intr_cache.point_ids].get()
             rb_intr_mom_nt_stack = (rb_mp_state.mass_stack[:, None] * rb_mp_state.velocity_stack).at[rb_intr_cache.point_ids].get()
@@ -110,14 +101,35 @@ class GridContact(Force):
                     )
           
         else:
-            act_normal_stack = -self._compute_mass_gradient(grid_state_act)
+            # act_normal_stack = -self._compute_mass_gradient(grid_state_act)
+            particle_cloud = MaterialPointCloudSDF(smooth_k=0.0)
             
+            indices = jnp.indices(grid_state_act.grid_size, dtype=jnp.float32)
+            coords = jnp.moveaxis(indices, 0, -1) * grid_state_act.cell_size + jnp.array(
+                grid_state_act.origin
+            )
+            flat_coords = coords.reshape(-1, grid_state_act.dim)
+
+            dis_stack = particle_cloud.get_signed_distance_stack(
+                flat_coords,
+                world.material_points[p_idx_actor],
+            )
+            act_normal_stack = particle_cloud.get_normal_stack(
+                    flat_coords,
+                    world.material_points[p_idx_actor],
+                )
+            # act_normal_stack = particle_cloud.get_normal_stack(
+            #     particle_cloud_state,
+            #     flat_coords
+            # )
+            # dis_stack = particle_cloud.get_signed_distance_stack(particle_cloud_state, flat_coords)
+
 
         # Calculate grid velocities of actor and receiver
-        norm_mag = jnp.linalg.norm(act_normal_stack, axis=1, keepdims=True) + 1e-12
+        # norm_mag = jnp.linalg.norm(act_normal_stack, axis=1, keepdims=True) + 1e-12
 
         # ensure unit length
-        act_normal_stack = jnp.where(norm_mag > 1e-4, act_normal_stack / norm_mag, 0.0)
+        # act_normal_stack = jnp.where(norm_mag > 1e-4, act_normal_stack / norm_mag, 0.0)
 
 
         new_rec_mom, new_act_mom = jax.vmap(self._solve_node_collision)(
@@ -125,10 +137,11 @@ class GridContact(Force):
             grid_state_rec.mass_stack, 
             act_mom_stack,
             act_mass_stack,     
-            act_normal_stack  
+            act_normal_stack,
+            dis_stack
         )
 
-        new_grids = list(grid_states)
+        new_grids = list(world.grids)
         
         # always update receiver moments
         new_grids[g_idx_receiver] = eqx.tree_at(
@@ -140,8 +153,12 @@ class GridContact(Force):
             new_grids[g_idx_actor] = eqx.tree_at(
                 lambda g: g.moment_nt_stack, grid_state_act, new_act_mom
             )
-
-        return new_grids, f_states
+        world =  eqx.tree_at(
+            lambda w: (w.grids,),
+            world,
+            (tuple(new_grids),),
+        )
+        return world, mechanics, sim_cache
 
     def _compute_mass_gradient(self, grid_state,mass_grid= None ):
         """
@@ -169,13 +186,14 @@ class GridContact(Force):
             
         return jnp.stack(grads, axis=-1)
 
-    
-    def _solve_node_collision(self, mom_rec, mass_rec, mom_act, mass_act, normal_act):
+    def _solve_node_collision(self, mom_rec, mass_rec, mom_act, mass_act, normal_act, dist):
         """
         Compute node-level collision response between receiver and actor.
         """
         # Check if mass is sufficient
-        has_contact = (mass_rec > 1e-9) & (mass_act > 1e-9)
+        # has_contact = (mass_rec > 1e-9) & (mass_act > 1e-9)
+
+        has_contact = dist <= 1e-6
         
         def apply_collision(_):
             # Get velocities, relative Velocity (Rec - Act)
@@ -197,11 +215,12 @@ class GridContact(Force):
                 if self.is_rigid:
                     # Rigid Wall. Wall doesn't move, so receiver does 100% of the correction.
                     v_rec_new = v_rec - (v_n * normal_act)
-                    v_act_new = v_act # Unchanged
+                    v_act_new = v_act 
                 else:
                     # With two soft bodies.We distribute correction based on mass.
                     m_ratio = mass_rec / (mass_act + 1e-12)
-                    safe_ratio = jnp.minimum(m_ratio, self.mass_ratio_limit)
+                    # safe_ratio = jnp.minimum(m_ratio, self.mass_ratio_limit)
+                    safe_ratio = m_ratio
                     
                     # Impulse                     
                     v_rec_new = v_rec - (v_n * normal_act)

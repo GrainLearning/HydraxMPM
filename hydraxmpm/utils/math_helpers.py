@@ -587,12 +587,12 @@ def inv_2x2_robust(m, gradient_clip_val=1e6):
     return inv
 
 
-def safe_norm(x, eps=1e-12):
+def safe_norm(x, eps=1e-12, axis=None):
     """
     Computes euclidean norm safely for AutoDiff.
     Prevents NaN gradients when x is the zero vector.
     """
-    return jnp.sqrt(jnp.sum(x**2) + eps)
+    return jnp.sqrt(jnp.sum(x**2, axis=axis) + eps)
 
 
 def quaternion_rotate(q, v):

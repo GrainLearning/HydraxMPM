@@ -31,7 +31,7 @@ from typing import Self, Tuple
 
 import jax.numpy as jnp
 
-from ..grid.grid import GridState
+from ..grid.grid import GridDomain
 from ..material_points.material_points import MaterialPointState
 
 from .solver import BaseSolver, BaseSolverState
@@ -113,7 +113,8 @@ class USLAFLIP(USLSolver):
     constitutive_laws: Tuple[ConstitutiveLaw, ...]
     forces: Tuple[Force, ...]
     sdf_logics: Tuple[SDFObjectBase, ...]
-
+    grid_domains: Tuple[GridDomain, ...] = eqx.field(static=True)
+    
     active_p_ids: Tuple[int, ...] = eqx.field(static=True)
     active_g_ids: Tuple[int, ...] = eqx.field(static=True)
 
@@ -124,6 +125,7 @@ class USLAFLIP(USLSolver):
     def __init__(
         self,
         *,
+        grid_domains: Tuple[GridDomain, ...],
         constitutive_laws: Tuple[Optional[ConstitutiveLaw], ...],
         couplings: Tuple[BodyCoupling, ...] = (),
         forces: Tuple[Optional[Force], ...] = (),
@@ -170,17 +172,26 @@ class USLAFLIP(USLSolver):
         self.active_p_ids = tuple(p_set)
         self.active_g_ids = tuple(g_set)
 
+        self.grid_domains = grid_domains
 
-    def _p2g(self, world, mechanics, dt, time):
+    def _p2g(self, world, mechanics, sim_cache, dt, time):
         """Particle to Grid Transfer (AFLIP/APIC)."""
 
         for force in self.forces:
-            world, mechanics = force.apply_pre_p2g(
-                world, mechanics, self.sdf_logics, self.couplings, dt, time
+            world, mechanics, sim_cache = force.apply_pre_p2g(
+                world,
+                mechanics,
+                sim_cache,
+                self.sdf_logics,
+                self.couplings,
+                self.grid_domains,
+                dt,
+                time,
             )
 
-        grid_states = list(world.grids)
+        grids = list(sim_cache.grids)
         mp_states = list(world.material_points)
+        grid_domains = self.grid_domains
 
         solver_states = list(mechanics.solvers)
 
@@ -189,8 +200,9 @@ class USLAFLIP(USLSolver):
             if c.skip_mpm_logic:
                 continue
             mp_state = mp_states[c.p_idx]
-            grid_state = grid_states[c.g_idx]
-            intr_cache = mechanics.interactions[(c.p_idx, c.g_idx)]
+            grid_cache = grids[c.g_idx]
+            grid_domain = grid_domains[c.g_idx]
+            intr_cache = sim_cache.interactions[(c.p_idx, c.g_idx)]
             solver_state = solver_states[c.s_idx]
 
             # --- Operations in interaction space ---
@@ -206,15 +218,19 @@ class USLAFLIP(USLSolver):
             # AFLIP compute affine velocity contribution,  C * (x_node - x_p)
             # with C @ dist over N interactions (batched matmul)
             intr_Bp = solver_state.Bp_stack.at[intr_cache.point_ids].get()
-            dist_vec_phys = -1.0 * intr_cache.rel_dist * grid_state.cell_size
+            dist_vec_phys = -1.0 * intr_cache.rel_dist * grid_domain.cell_size
             affine_vel = jnp.einsum("nij,nj->ni", intr_Bp, dist_vec_phys)
 
+
+            # CPIC modification: apply cpic mask to shape vals
+            effective_shape_vals = intr_cache.shape_vals * intr_cache.cpic_mask
+            
             # Compute weighted momentum and mass contributions
-            weighted_mass_stack = intr_cache.shape_vals * intr_masses_stack
+            weighted_mass_stack = effective_shape_vals * intr_masses_stack
 
             # For AFLIP modification, we add affine part to velocity
             total_intr_velocities_stack = (
-                intr_velocities_stack + affine_vel[:, : grid_state.dim]
+                intr_velocities_stack + affine_vel[:, : grid_domain.dim]
             )
 
             # Make affine part same dimension as velocity
@@ -225,34 +241,35 @@ class USLAFLIP(USLSolver):
             # Compute forces contributions
             # External forces
             weighted_ext_force_stack = (
-                intr_cache.shape_vals[:, None] * intr_ext_forces_stack
+                effective_shape_vals[:, None] * intr_ext_forces_stack
             )
             # Internal forces
             intern_force_term_stack = (
                 intr_stress_stack @ intr_cache.shape_grads[..., None]
             ).squeeze(-1)
-            intern_force_term_stack = intern_force_term_stack[:, : grid_state.dim]
+            intern_force_term_stack = intern_force_term_stack[:, : grid_cache.dim]
             weighted_intern_force_stack = (
                 -1.0 * intr_volume_stack[:, None] * intern_force_term_stack
-            )
+            ) * intr_cache.cpic_mask[:, None] # Explicit mask on force vector
+
             total_intr_force = weighted_intern_force_stack + weighted_ext_force_stack
 
             # --- Scatter to grid ---
-            grid_mass_stack = grid_state.mass_stack.at[intr_cache.node_hashes].add(
+            grid_mass_stack = grid_cache.mass_stack.at[intr_cache.node_hashes].add(
                 weighted_mass_stack
             )
-            grid_moment_stack = grid_state.moment_stack.at[intr_cache.node_hashes].add(
+            grid_moment_stack = grid_cache.moment_stack.at[intr_cache.node_hashes].add(
                 weighted_moment_stack
             )
             grid_force_stack = (
-                jnp.zeros_like(grid_state.moment_stack)
+                jnp.zeros_like(grid_cache.moment_stack)
                 .at[intr_cache.node_hashes]
                 .add(total_intr_force)
             )
 
-            grid_states[c.g_idx] = eqx.tree_at(
+            grids[c.g_idx] = eqx.tree_at(
                 lambda s: (s.mass_stack, s.moment_stack, s.force_stack),
-                grid_state,
+                grid_cache,
                 (
                     grid_mass_stack,
                     grid_moment_stack,
@@ -260,44 +277,44 @@ class USLAFLIP(USLSolver):
                 ),
             )
 
-        world = eqx.tree_at(
-            lambda w: (w.grids,),
-            world,
-            (tuple(grid_states),),
+        sim_cache = eqx.tree_at(
+            lambda s: s.grids,
+            sim_cache,
+            tuple(grids),
         )
-        return world, mechanics
+        return world, mechanics, sim_cache
 
     def _g2p(
         self,
         world,
         mechanics,
+        sim_cache,
         dt,
         time,
     ):
         """Grid to Particle Transfer (AFLIP/APIC with Position Correction and Dynamic Alpha)."""
         # Apply forces hook 4 to modify grid moments, e.g., grid contact
-        for force in self.forces:
-            world, mechanics = force.apply_grid_moments(
-                world, mechanics, self.sdf_logics, self.couplings, dt, time
-            )
 
-        grid_states = list(world.grids)
+        grids = list(sim_cache.grids)
         mp_states = list(world.material_points)
         solver_states = list(mechanics.solvers)
 
         for c in self.couplings:
             if c.skip_mpm_logic:
                 continue
-            grid_state = grid_states[c.g_idx]
+            grid_cache = grids[c.g_idx]
+            grid_domain = self.grid_domains[c.g_idx]
             mp_state = mp_states[c.p_idx]
-            intr_cache = mechanics.interactions[(c.p_idx, c.g_idx)]
+            intr_cache = sim_cache.interactions[(c.p_idx, c.g_idx)]
             solver_state = solver_states[c.p_idx]
 
             # --- Operations in interaction space ---
             # Gather grid data
-            intr_mass_stack = grid_state.mass_stack.at[intr_cache.node_hashes].get()
-            intr_momement_stack = grid_state.moment_stack.at[intr_cache.node_hashes].get()
-            intr_momement_nt_stack = grid_state.moment_nt_stack.at[
+            intr_mass_stack = grid_cache.mass_stack.at[intr_cache.node_hashes].get()
+            intr_momement_stack = grid_cache.moment_stack.at[
+                intr_cache.node_hashes
+            ].get()
+            intr_momement_nt_stack = grid_cache.moment_nt_stack.at[
                 intr_cache.node_hashes
             ].get()
 
@@ -313,9 +330,43 @@ class USLAFLIP(USLSolver):
             # Get new velocity from grid
             intr_vels_nt = jnp.where(mask, intr_momement_nt_stack / safe_masses, 0.0)
 
+
+            # --- 2. CPIC Ghost Velocity Logic ---
+            # We need this to calculate min_dist for the ASFLIP safety switch later
+            min_dist_to_wall = jnp.full((mp_state.num_points,), 1e9)
+
+            if len(self.sdf_logics) > 0:
+                # Stack distances
+                num_sdfs = len(self.sdf_logics)
+                dists_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].dists.squeeze() for s in range(num_sdfs)])
+                norms_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].normals for s in range(num_sdfs)])
+                vels_stack  = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].wall_vels for s in range(num_sdfs)])
+
+                # Find closest
+                closest_idx = jnp.argmin(dists_stack, axis=0, keepdims=True)
+                
+                # Store min dist for ASFLIP safety
+                min_dist_to_wall = jnp.take_along_axis(dists_stack, closest_idx, axis=0).squeeze(0)
+
+                p_normal_best = jnp.take_along_axis(norms_stack, closest_idx[..., None], axis=0).squeeze(0)
+                p_wall_vel_best = jnp.take_along_axis(vels_stack, closest_idx[..., None], axis=0).squeeze(0)
+
+                # Project Ghost Velocity
+                v_rel = mp_state.velocity_stack - p_wall_vel_best
+                v_dot_n = jnp.einsum("ij,ij->i", v_rel, p_normal_best)[:, None]
+                v_rel_slip = v_rel - jnp.minimum(0.0, v_dot_n) * p_normal_best
+                v_ghost_p = p_wall_vel_best + v_rel_slip
+
+                # Blend
+                v_ghost_intr = v_ghost_p.at[intr_cache.point_ids].get()
+                cpic_mask = intr_cache.cpic_mask[:, None]
+
+                intr_vels = intr_vels * cpic_mask + v_ghost_intr * (1.0 - cpic_mask)
+                intr_vels_nt = intr_vels_nt * cpic_mask + v_ghost_intr * (1.0 - cpic_mask)
+
             # Apply padding to velocities to compute shape function gradients in 3D
             # considering plane strain case
-            padding = (0, 3 - grid_state.dim)
+            padding = (0, 3 - grid_cache.dim)
             intr_vels_nt_3d = jnp.pad(intr_vels_nt, ((0, 0), padding))
             weighted_vels = intr_cache.shape_vals[:, None] * intr_vels
             weighted_vels_nt = intr_cache.shape_vals[:, None] * intr_vels_nt
@@ -327,7 +378,7 @@ class USLAFLIP(USLSolver):
                 )
             else:
                 # classic apic update
-                dist_vec_phys = -1.0 * intr_cache.rel_dist * grid_state.cell_size
+                dist_vec_phys = -1.0 * intr_cache.rel_dist *grid_domain.cell_size
 
                 # shape_vals (N,) * outer(v (N,3), dist (N,3)) -> (N,3,3)
                 weighted_Bp_term = intr_cache.shape_vals[:, None, None] * jnp.einsum(
@@ -338,13 +389,13 @@ class USLAFLIP(USLSolver):
 
             # Old velocity (gathered from grid)
             p_vel = (
-                jnp.zeros((mp_state.num_points, grid_state.dim))
+                jnp.zeros((mp_state.num_points, grid_cache.dim))
                 .at[intr_cache.point_ids]
                 .add(weighted_vels)
             )
             # New particles
             p_vel_nt = (
-                jnp.zeros((mp_state.num_points, grid_state.dim))
+                jnp.zeros((mp_state.num_points, grid_cache.dim))
                 .at[intr_cache.point_ids]
                 .add(weighted_vels_nt)
             )
@@ -370,12 +421,10 @@ class USLAFLIP(USLSolver):
                 else:
                     coeff = 1.0 / 4.0
 
-                Dp_inv = (1.0 / (coeff * grid_state.cell_size**2)) * jnp.eye(3)
+                Dp_inv = (1.0 / (coeff * grid_domain.cell_size**2)) * jnp.eye(3)
 
                 p_Bp = p_Bp_intpol @ Dp_inv
-                p_L_next = (
-                    p_Bp  # Approximation (Strictly L should be grad, but Bp is often used)
-                )
+                p_L_next = p_Bp  # Approximation (Strictly L should be grad, but Bp is often used)
 
             # Get velocity velocity fluctuation from grid
             vel_adj = mp_state.velocity_stack - p_vel
@@ -405,35 +454,46 @@ class USLAFLIP(USLSolver):
 
             # --- CFL Clamping ---
             # Clamp velocity magnitude to prevent particles crossing >50% of a cell in one step
-            max_speed = self.cfl_limit * grid_state.cell_size / dt
+            max_speed = self.cfl_limit * grid_domain.cell_size / dt
             speed = jnp.linalg.norm(p_velocity_next, axis=1, keepdims=True)
             clamp_factor = jnp.minimum(1.0, max_speed / (speed + 1e-12))
             p_velocity_next = p_velocity_next * clamp_factor
 
             # --- Position Update with Separable Correction ---
             I = jnp.eye(3)
-            if grid_state.dim == 2:
+            if grid_cache.dim == 2:
                 p_L_next = p_L_next.at[:, 2, 2].set(0.0)
 
             # Deformation Gradient and volume update
             F_inc = I + p_L_next * dt
             p_F_next = jnp.einsum("ijk,ikl->ijl", F_inc, mp_state.F_stack)
 
-            if grid_state.dim == 2:
+            if grid_cache.dim == 2:
                 p_F_next = p_F_next.at[:, 2, 2].set(1.0)
 
             J_next = jnp.linalg.det(p_F_next)
 
-            p_volume_next = (J_next[:, None] * mp_state.volume0_stack[:, None]).squeeze()
+            p_volume_next = (
+                J_next[:, None] * mp_state.volume0_stack[:, None]
+            ).squeeze()
 
             # Separable correction to avoid avoid positional trap
             # Use a mix of PIC and FLIP specifically for position to avoid noise
             # If J < 1 (compression), use beta_min (usually 0 -> PIC) to prevent particle crossing
             # If J > 1 (expansion), use beta_max
             beta_p = jnp.where(J_next < 1.0, self.beta_min, self.beta_max)
+
+            # CPIC safety: disable correction when near wall
+            is_near_wall = min_dist_to_wall < grid_domain.cell_size
+            beta_p = jnp.where(is_near_wall, 0.0, beta_p)
+            
+
+
             correction_term = self.alpha * beta_p[:, None] * vel_adj
 
-            p_position_next = mp_state.position_stack + dt * (p_vel_nt + correction_term)
+            p_position_next = mp_state.position_stack + dt * (
+                p_vel_nt + correction_term
+            )
 
             mp_states[c.p_idx] = eqx.tree_at(
                 lambda s: (
@@ -447,7 +507,9 @@ class USLAFLIP(USLSolver):
                 (p_velocity_next, p_position_next, p_volume_next, p_F_next, p_L_next),
             )
 
-            solver_states[c.p_idx] = eqx.tree_at(lambda s: s.Bp_stack, solver_state, p_Bp)
+            solver_states[c.p_idx] = eqx.tree_at(
+                lambda s: s.Bp_stack, solver_state, p_Bp
+            )
 
         world = eqx.tree_at(
             lambda w: (w.material_points,),
@@ -460,4 +522,4 @@ class USLAFLIP(USLSolver):
             mechanics,
             (tuple(solver_states),),
         )
-        return world, mechanics
+        return world, mechanics, sim_cache

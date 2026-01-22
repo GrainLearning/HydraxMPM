@@ -15,14 +15,11 @@ Explaination:
 import equinox as eqx
 
 
-from typing import Tuple,Optional, Dict
+from typing import Tuple,Optional, Dict, List
 
 from ..material_points.material_points import (
     BaseMaterialPointState
 )
-from ..grid.grid import GridState
-
-from ..shapefunctions.mapping import InteractionCache
 
 from ..solvers.solver import BaseSolverState
 
@@ -37,7 +34,8 @@ from ..solvers.coupling import BodyCoupling
 
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..sdf.sdfobject import SDFObjectState
-
+from ..shapefunctions.mapping import InteractionCache
+from ..grid.grid import GridArrays
 
 
 class WorldState(eqx.Module):
@@ -53,7 +51,6 @@ class WorldState(eqx.Module):
     
     """
     material_points: Tuple[BaseMaterialPointState, ...] = ()
-    grids: Tuple[Optional[GridState], ...] = ()
     sdfs: Tuple[Optional[SDFObjectState], ...] = ()
 
 
@@ -69,9 +66,6 @@ class MechanicsState(eqx.Module):
     """
     # Constitutive law history variables (e.g. plastic strain)
     constitutive_laws: Tuple[Optional[ConstitutiveLawState], ...] = ()
-    
-    # Interaction caches (for e.g., P2G, G2P mappings)
-    interactions: Dict[Tuple[int, int], InteractionCache] = eqx.field(default_factory=dict)
     
     # solver internal states (e.g. AFLIP affine matrices)
     solvers: Tuple[Optional[BaseSolverState], ...] = ()
@@ -97,8 +91,39 @@ class SimState(eqx.Module):
     world: WorldState
     mechanics: MechanicsState
 
-
     # Global
     time: Float[Array, ""] | float = 0.0
     step: Int[Array, ""] | int = 0
     dt:   Float[Array, ""] | float = 0.0
+
+
+
+class ParticleGeometry(eqx.Module):
+    """Transient geometry for particles relative to SDFs."""
+
+    dists: Float[Array, "num_points"]
+    normals: Float[Array, "num_points dim"]
+    wall_vels: Float[Array, "num_points dim"]
+
+
+class NodeGeometry(eqx.Module):
+    """Transient geometry for grid nodes relative to SDFs."""
+
+    dists: Float[Array, "num_nodes"]
+    normals: Float[Array, "num_nodes dim"]
+    wall_vels: Float[Array, "num_nodes dim"]
+    friction: Float[Array, "num_nodes"]
+
+
+class SimCache(eqx.Module):
+    # Interaction caches (for e.g., P2G, G2P mappings)
+    interactions: Dict[Tuple[int, int], InteractionCache]
+
+    grids: List[GridArrays]
+
+    # Geometry - Computed in Connectivity, used in Collider & G2P
+    # Key: (p_idx, sdf_idx)
+    mp_geoms: Dict[Tuple[int, int], ParticleGeometry]
+
+    # keys are (g_idx, sdf_idx)
+    node_geoms: Dict[Tuple[int, int], NodeGeometry]
