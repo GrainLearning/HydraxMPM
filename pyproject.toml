@@ -15,6 +15,7 @@ dependencies = [
     "optax>=0.2.6",
     "trimesh>=4.11.0",
     "mesh-to-sdf>=0.0.15",
+    "mujoco-mjx>=3.4.0",
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},

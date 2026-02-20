@@ -247,9 +247,8 @@ class MaterialPointState(BaseMaterialPointState):
     @property
     def KE_stack(self):
         """Kinetic energy of material points."""
-        NotImplementedError("KE_stack property not implemented yet.")
-        pass
-        # return get_KE_stack(self.mass_stack, self.velocity_stack)
+        # NotImplementedError("KE_stack property not implemented yet.")
+        return 0.5 * self.mass_stack * jnp.sum(self.velocity_stack ** 2, axis=-1)
 
     @property
     def q_stack(self):

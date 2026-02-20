@@ -26,7 +26,7 @@ def generate_particles_in_sdf(
     "regular" - uniform grid sampling (requires cell_size and ppc)
     "gauss_legendre - gauss legendre quadrature sampling (requires cell_size and ppc)
     """
-    dim = bounds_min.shape[0]
+    dim = len(bounds_min)
 
     if sdf_state is None:
         if center_of_mass is None:

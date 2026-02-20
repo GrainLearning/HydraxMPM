@@ -100,6 +100,7 @@ from .utils.math_helpers import (
     # get_volumetric_strain,
     safe_norm,
     get_volumetric_strain_stack,
+    quaternion_rotate,
 )
 
 # JMP journal (remove later maybe?)

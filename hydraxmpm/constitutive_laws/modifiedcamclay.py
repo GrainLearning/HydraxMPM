@@ -37,6 +37,30 @@ from .constitutive_law import ConstitutiveLawState, ConstitutiveLaw
 from jaxtyping import Float, Array
 
 
+
+
+
+############ Move this to later
+
+def get_spin_tensor(L):
+    """Computes the Spin Tensor W (Skew-symmetric part of L)."""
+    return 0.5 * (L - L.T)
+
+def get_sym_tensor(L):
+    """Computes the Rate of Deformation D (Symmetric part of L)."""
+    return 0.5 * (L + L.T)
+
+def apply_jaumann_increment(tensor, W, dt):
+    """
+    Rotates a tensor by the spin W over timestep dt.
+    Increment = (W * A - A * W) * dt
+    """
+    # Note: A @ W.T is equivalent to - (A @ W) for skew-symmetric W
+    # Using commutator brackets [W, A] = WA - AW
+    return tensor + (W @ tensor - tensor @ W) * dt
+
+####################
+
 def yield_function(p, p_c, q, M):
     return ((q * q) / (M * M)) + p * p - p_c * p
 
@@ -393,8 +417,29 @@ class ModifiedCamClay(ConstitutiveLaw):
         specific_volume,
         dt
     ):
+
+        # Decompose L into D (Strain Rate) and W (Spin)
+        D = get_sym_tensor(L) # symmetric part
+        W = get_spin_tensor(L) # skew-symmetric part
+
+        # Strain increment (Pure deformation)
+        deps_next = D * dt
+
+        ### OBJECTIVE STRESS UPDATE (JAUMANN) ###
+        # We rotate the *previous* tensors to align with the current 
+        # configuration before adding the new strain increment.
+        # This prevents rigid rotation from generating false stress.
+        
+        stress_prev_rot = apply_jaumann_increment(stress_prev, W, dt)
+        eps_e_prev_rot  = apply_jaumann_increment(eps_e_prev, W, dt)
+        
+        # Use these rotated values for the rest of the calculation
+        stress_prev = stress_prev_rot
+        eps_e_prev = eps_e_prev_rot 
+
+
         # strain increment via symmetric part of velocity gradient L
-        deps_next = 0.5 * (L + L.T)*dt
+        # deps_next = 0.5 * (L + L.T)*dt
 
         # reference stresses
         p_0 = get_pressure(stress_ref)

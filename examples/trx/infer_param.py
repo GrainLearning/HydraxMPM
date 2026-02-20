@@ -103,6 +103,9 @@ class LoadingProcedure(eqx.Module):
 
 
 TRUE_PARAMS = jnp.array([1.2, 0.086]) # [M, lambda]
+
+
+
 # We will calibrate against 3 different confining pressures to be robust
 confine_levels = jnp.array([50_000.0, 100_000.0, 200_000.0]) 
 
