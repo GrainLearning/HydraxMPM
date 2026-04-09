@@ -5,16 +5,18 @@
 
 # -*- coding: utf-8 -*-
 
-from typing import Optional, Self, Tuple
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from ..common.types import TypeFloat, TypeFloatMatrix3x3, TypeInt
-from ..material_points.material_points import MaterialPoints
-from ..utils.math_helpers import get_sym_tensor_stack
+from .constitutive_law import ConstitutiveLawState
 from .constitutive_law import ConstitutiveLaw
+
+from ..material_points.material_points import MaterialPointState
+
+from jaxtyping import Float, Array
+
+from typing import Any, Tuple, Optional, Self
 
 
 def get_bulk_modulus(E, nu):
@@ -29,7 +31,20 @@ def get_lame_modulus(E, nu):
     return E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
 
 
-class LinearIsotropicElastic(ConstitutiveLaw):
+class LinearElasticState(ConstitutiveLawState):
+    """
+    State for Linear Elasticity.
+
+    We store 'stress_ref' here.
+    In an incremental formulation, this usually represents the Initial Stress (sigma_0)
+    (e.g., geostatic stress) that the material started with.
+    """
+
+    stress_ref_stack: Float[Array, "num_points 3 3"]
+    pass
+
+
+class LinearElasticLaw(ConstitutiveLaw):
     """Isotropic linear elastic material solved in incremental form.
 
     Attributes:
@@ -40,70 +55,98 @@ class LinearIsotropicElastic(ConstitutiveLaw):
         lam: Lame modulus.
     """
 
-    E: TypeFloat
-    nu: TypeFloat
-    G: TypeFloat = eqx.field(init=False)
-    K: TypeFloat = eqx.field(init=False)
-
-    lam: TypeFloat
+    E: float | Float[Array, ""]
+    nu: float | Float[Array, ""]
+    G: float | Float[Array, ""]
+    K: float | Float[Array, ""]
+    lam: float | Float[Array, ""]
 
     def __init__(
         self: Self,
-        E: TypeFloat,
-        nu: TypeFloat,
-        **kwargs,
+        E: float | Float[Array, ""],
+        nu: float | Float[Array, ""],
+        requires_F_reset: bool = True,
     ) -> Self:
         """Initialize the isotropic linear elastic material."""
 
         self.E = E
+
         self.nu = nu
 
-        # post init
         self.K = get_bulk_modulus(E, nu)
         self.G = get_shear_modulus(E, nu)
         self.lam = get_lame_modulus(E, nu)
 
-        super().__init__(**kwargs)
+        self.requires_F_reset = requires_F_reset
 
-    def update(
-        self: Self,
-        material_points: MaterialPoints,
-        dt: TypeFloat,
-        dim: Optional[TypeInt] = 3,
-    ) -> Tuple[MaterialPoints, Self]:
-        """Update the material state and particle stresses for MPM solver."""
+    def create_state(
+        self,
+        material_points: MaterialPointState = None,
+        stress_ref_stack: Optional[Float[Array, "num_points 3 3"]] = None,
+        density_stack: Optional[Float[Array, "num_points"]] = None,
+    ) -> LinearElasticState:
+        """Create the constitutive law state for the given material points."""
 
-        vmap_update_ip = jax.vmap(fun=self.update_ip, in_axes=(None, 0, 0, 0))
+        if material_points is not None:
+            stress_ref_stack = material_points.stress_stack
+        elif density_stack is not None:
+            num_points = density_stack.shape[0]
+            stress_ref_stack = jnp.zeros((num_points, 3, 3))
 
-        deps_dt_stack = material_points.deps_dt_stack
-        new_stress_stack = vmap_update_ip(
-            dim,
-            material_points.stress_stack,
-            material_points.F_stack,
-            deps_dt_stack * dt,
-            # material_points.deps_stack,
+        return LinearElasticState(
+            stress_ref_stack=stress_ref_stack,
         )
 
-        new_material_points = eqx.tree_at(
-            lambda state: (state.stress_stack),
-            material_points,
-            (new_stress_stack),
-        )
-        # new_self = self.post_update(new_stress_stack, deps_dt_stack, dt)
-        return new_material_points, self
+    def _update_stress(
+        self,
+        L: Float[Array, "3 3"],  # Velocity Gradient
+        stress_prev: Float[Array, "3 3"],
+        dt,
+    ) -> Float[Array, "3 3"]:
 
-    def update_ip(
-        self: Self,
-        dim: TypeInt,
-        stress_prev: TypeFloatMatrix3x3,
-        F: TypeFloatMatrix3x3,
-        deps: TypeFloatMatrix3x3,
-    ) -> TypeFloatMatrix3x3:
-        """Update stress on a single integration point"""
+        # Strain rate symmetric part of velocity gradient L
+        deps_dt = 0.5 * (L + L.T)
 
-        if dim == 2:
-            deps = deps.at[:, [2, 2]].set(0.0)
+        deps = deps_dt * dt
 
         return (
             stress_prev + self.lam * jnp.trace(deps) * jnp.eye(3) + 2.0 * self.G * deps
         )
+
+    def update(
+        self, material_points_state: MaterialPointState, law_state, dt
+    ) -> Tuple[MaterialPointState, Any]:
+
+        new_stress_stack = jax.vmap(self._update_stress, in_axes=(0, 0, None))(
+            material_points_state.L_stack, material_points_state.stress_stack, dt
+        )
+
+        new_material_points_state = eqx.tree_at(
+            lambda s: s.stress_stack, material_points_state, new_stress_stack
+        )
+
+        return new_material_points_state, law_state
+
+    def get_dt_crit(
+        self: Self,
+        material_points_state: MaterialPointState,
+        cell_size: float,
+        alpha: float = 0.5,
+    ) -> Float[Array, ""]:
+        """
+        CFL condition based on P-wave speed.
+        v_p = sqrt( (K + 4/3G) / rho )
+        """
+        rho = material_points_state.mass_stack / material_points_state.volume_stack
+
+        # Dilational wave speed
+        # constrained modulus M = K + 4/3G
+        M = self.K + (4.0 / 3.0) * self.G
+        c_dil = jnp.sqrt(M / rho)
+
+        # Particle velocity
+        vel_mag = jnp.linalg.norm(material_points_state.velocity_stack, axis=1)
+
+        max_signal_speed = jnp.max(c_dil + vel_mag)
+
+        return (alpha * cell_size) / (max_signal_speed + 1e-9)

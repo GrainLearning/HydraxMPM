@@ -8,66 +8,81 @@
 import jax
 import jax.numpy as jnp
 
-from ..common.types import (
-    TypeFloat,
-    TypeFloatMatrix3x3,
-    TypeFloatMatrix3x3AStack,
-    TypeFloatMatrixAStack,
-    TypeFloatScalarAStack,
-    TypeFloatVector,
-    TypeFloatVectorAStack,
-)
+from jaxtyping import Float, Array
+from typing import Any, Tuple
+
+def get_spin_tensor(L):
+    """Get the Spin Tensor W"""
+    return 0.5 * (L - L.T)
+
+
+def get_sym_tensor(L):
+    """Get the Rate of Deformation D"""
+    return 0.5 * (L + L.T)
+
+
+def get_jaumann_increment(tensor, W, dt):
+    """
+    Rotates a tensor by the spin W over timestep dt.
+    """
+    return tensor + (W @ tensor - tensor @ W) * dt
+
+
+def inv_3x3_robust(m, gradient_clip_val=1e6):
+    """Inverts a 3x3 matrix using universal robust scalar inverse."""
+    a, b, c = m[0, 0], m[0, 1], m[0, 2]
+    d, e, f = m[1, 0], m[1, 1], m[1, 2]
+    g, h, i = m[2, 0], m[2, 1], m[2, 2]
+
+    A = e * i - f * h
+    B = -(d * i - f * g)
+    C = d * h - e * g
+    D = -(b * i - c * h)
+    E = a * i - c * g
+    F = -(a * h - b * g)
+    G = b * f - c * e
+    H = -(a * f - c * d)
+    I_ = a * e - b * d
+
+    det = a * A + b * B + c * C
+    inv_det = safe_inv_scalar_clamped(det, gradient_clip_val)
+
+    inv = jnp.array([[A, D, G], [B, E, H], [C, F, I_]]) * inv_det
+    return inv
 
 
 def get_double_contraction(A, B):
-    return jnp.trace(A @ B.T)
+    """"
+    Computes tensor double contraction A:B = trace(A@ B.T)
 
+    Rank-agnostic: works for single tensors or stacks (3,3), (N,3,3), (B,T,3,3) etc
+    """
+    return jnp.einsum("...ij,...ij->...", A, B)
 
-def get_double_contraction_stack(A_stack, B_stack):
-    return jax.vmap(get_double_contraction)(A_stack, B_stack)
-
-
-def get_pressure(stress: TypeFloatMatrix3x3, dim: int = 3) -> TypeFloat:
+def get_pressure(stress):
     """Get compression positive pressure from the cauchy stress tensor.
+    (Plane strain)
+
+    Rank-agnostic: works for single tensors or stacks (3,3), (N,3,3), (B,T,3,3) etc.
+
 
     $$
-    p = -\\mathrm{trace} ( \\boldsymbol \\sigma ) / \\mathrm{dim}
+    p = \\mathrm{trace} ( \\boldsymbol \\sigma ) / \\mathrm{dim}
     $$
 
-    Args:
-        stress: Cauchy stress tensor
-        dim: Dimension. Defaults to 3.
-
-    Returns:
-        pressure
     """
-    return -(1 / dim) * jnp.trace(stress)
+    # axis1=-2, axis2=-1 takes last two dimensions as stress tensor 3x3
+    return (1 / 3) * jnp.trace(stress, axis1=-2, axis2=-1)
 
 
-def get_pressure_stack(
-    stress_stack: TypeFloatMatrix3x3AStack, dim: int = 3
-) -> TypeFloatScalarAStack:
-    """Vectorized version of [get_pressure][utils.math_helpers.get_pressure]
-    for a stack of stress tensors.
-
-    Args:
-        stress_stack: stack of cauchy stress tensors
-        dim: dimension. Defaults to 3.
-
-    Returns:
-        stack of pressures
-    """
-
-    vmap_get_pressure = jax.vmap(get_pressure, in_axes=(0, None))
-    return vmap_get_pressure(stress_stack, dim)
-
-
-def get_dev_stress(stress, pressure=None, dim=3):
+def get_dev_stress(stress, pressure=None):
     """Get deviatoric part of the cauchy stress tensor.
-
+    (compression positive)
     $$
     \\boldsymbol s = \\boldsymbol \\sigma - p \\mathbf{I}
     $$
+
+    Rank-agnostic: works for single tensors or stacks (3,3), (N,3,3), (B,T,3,3) etc.
 
     Args:
         stress: cauchy stress tensor
@@ -78,29 +93,31 @@ def get_dev_stress(stress, pressure=None, dim=3):
         deviatoric stress tensor
     """
     if pressure is None:
-        pressure = get_pressure(stress, dim)
-    return stress + jnp.eye(3) * pressure
+        pressure = get_pressure(stress)
+
+    # Expand pressure to broadcast against stress (...,1,1) dimension
+    # to match (...,3,3)
+    p_expanded = pressure[..., None, None]
+
+    return stress - jnp.eye(3) * p_expanded
 
 
-def get_dev_stress_stack(stress_stack, pressure_stack=None, dim=3):
-    """Vectorized version of [get_dev_stress][utils.math_helpers.get_dev_stress]
-    for a  stress tensors.
-
-    Args:
-        stress_stack: stack of cauchy stress tensors
-        dim: dimension. Defaults to 3.
-
-    Returns:
-        stack of deviatoric stress tensors
+def get_J2(stress=None, dev_stress=None, pressure=None):
     """
-    if pressure_stack is None:
-        pressure_stack = get_pressure_stack(stress_stack, dim)
-    vmap_get_dev_stress = jax.vmap(get_dev_stress, in_axes=(0, 0, None))
-    return vmap_get_dev_stress(stress_stack, pressure_stack, dim)
+    Get the second invariant of the deviatoric stress tensor.
+
+    J2 = 0.5 * s_ij * s_ji
+    """
+    if dev_stress is None:
+        if stress is None:
+             raise ValueError("Must provide either 'stress' or 'dev_stress'")
+        dev_stress = get_dev_stress(stress, pressure)
+    #  trace(s @ s.T) that preserves the leading dimension
+    return 0.5 * get_double_contraction(dev_stress, dev_stress)
 
 
-def get_q_vm(stress=None, dev_stress=None, pressure=None, dim=3):
-    """Get the scalar von-Mises shear stress from the cauchy stress tensor.
+def get_q_vm(stress=None, dev_stress=None, pressure=None):
+    """Get the scalar trx shear stress from the Cauchy stress tensor.
 
     $$
     q = \\sqrt{3/2 J_2}
@@ -118,100 +135,173 @@ def get_q_vm(stress=None, dev_stress=None, pressure=None, dim=3):
         scalar von-Mises shear stress
     """
 
-    if dev_stress is None:
-        dev_stress = get_dev_stress(stress, pressure, dim)
-    return jnp.sqrt(3 * 0.5 * jnp.trace(dev_stress @ dev_stress.T))
+    J2 = get_J2(stress, dev_stress, pressure)
+    return jnp.sqrt(3 * J2)
 
-
-def get_q_vm_stack(
-    stress_stack,
-    dev_stress_stack=None,
-    pressure_stack=None,
-    dim=3,
-):
-    """Vectorized version of [get_q_vm][utils.math_helpers.get_q_vm]
-    for a stack of stress tensors.
-
-    Args:
-        stress_stack: stack of cauchy stress tensors.
-        dev_stress_stack: stack of deviatoric stress tensors tensors.
-        dev_stress_stack: stack of pressures.
-        dim: dimension. Defaults to 3.
-
-    Returns:
-        stack of scalar von-Mises stresses
+def get_scalar_shear_stress(stress, dev_stress, pressure):
     """
-    if dev_stress_stack is None:
-        dev_stress_stack = get_dev_stress_stack(stress_stack, pressure_stack, dim)
-    vmap_get_q_vm = jax.vmap(get_q_vm, in_axes=(0, 0, None, None))
-
-    return vmap_get_q_vm(stress_stack, dev_stress_stack, pressure_stack, dim)
-
-
-def get_J2(stress=None, dev_stress=None, pressure=None, dim=3):
-    """Get the second invariant of the deviatoric stress tensor."""
-    if dev_stress is None:
-        dev_stress = get_dev_stress(stress, pressure, dim)
-    return 0.5 * jnp.trace(dev_stress @ dev_stress.T)
-
-
-def get_J2_stack(
-    stress_stack: jax.Array, dev_stress_stack=None, pressure_stack=None, dim=3
-):
-    """Get the J2 from a stack of stress (or its deviatoric) tensors."""
-    if dev_stress_stack is None:
-        dev_stress_stack = get_dev_stress_stack(stress_stack, pressure_stack, dim)
-    vmap_get_J2 = jax.vmap(get_J2, in_axes=(0, 0, None, None))
-
-    return vmap_get_J2(stress_stack, dev_stress_stack, pressure_stack, dim)
-
-
-def get_scalar_shear_stress(stress, dev_stress=None, pressure=None, dim=3):
-    """Get the shear stress tau=sqrt(1/2 J2)."""
-    if dev_stress is None:
-        dev_stress = get_dev_stress(stress, pressure, dim)
-    return jnp.sqrt(0.5 * jnp.trace(dev_stress @ dev_stress.T))
-
-
-def get_scalar_shear_stress_stack(
-    stress_stack, dev_stress_stack=None, pressure_stack=None, dim=3
-):
-    """Get the shear stress tau=sqrt(1/2 J2) from a stack of stress tensors."""
-    if dev_stress_stack is None:
-        dev_stress_stack = get_dev_stress_stack(stress_stack, pressure_stack, dim)
-    vmap_get_scalar_shear_stress = jax.vmap(
-        get_scalar_shear_stress, in_axes=(0, 0, None, None)
-    )
-
-    return vmap_get_scalar_shear_stress(
-        stress_stack, dev_stress_stack, pressure_stack, dim
-    )
+    Get shear stress tau = sqrt(J2).
+    """
+    J2 = get_J2(stress=stress, dev_stress=dev_stress, pressure=pressure)
+    return jnp.sqrt(J2)
 
 
 def get_volumetric_strain(strain):
     "Get compressive positive volumetric strain."
-    return -jnp.trace(strain)
+    return jnp.trace(strain, axis1=-2, axis2=-1)
 
 
-def get_volumetric_strain_stack(strain_stack: jax.Array):
-    """Get compressive positive volumetric strain from a stack strain tensors."""
-    vmap_get_volumetric_strain = jax.vmap(get_volumetric_strain, in_axes=(0))
-    return vmap_get_volumetric_strain(strain_stack)
+
+def get_hencky_strain(F):
+    """Get Hencky strain from the deformation gradient.
+
+    Do Singular Value Decomposition (SVD) of the deformation gradient $F$ to get the
+    singular values, left stretch tensor $U$ and right stretch tensor $V^T$. After, take
+    the matrix logarithm of the singular values to get the Hencky strain.
+
+    issues with forward mode AD.
+    https://github.com/jax-ml/jax/issues/2011
+
+    Args:
+        F (chex.Array): deformation gradient
+
+    Returns:
+        Tuple[chex.Array, chex.Array, chex.Array]: strain tensor, left stretch tensor,
+        right stretch tensor
+    """
+    u, s, vh = jnp.linalg.svd(F, full_matrices=False)
+
+    # avoid log(0) numerical issues
+    s = jnp.clip(s, 1e-12, None)
+
+    # principal Strains
+    # note, here we have compression positive!
+    log_s = -jnp.log(s)
+
+    # rotate back to global frame
+    # Spatial Hencky Strain: eps = U @ diag(ln(s)) @ U.T
+    # rank agnostic  jnp.diag(log_s), then u @ eps_principal @ u.T
+    eps_spatial = jnp.einsum('...ik,...k,...jk->...ij', u, log_s, u)
 
 
-def get_dev_strain(strain, volumetric_strain=None, dim=3):
-    """Get deviatoric strain tensor."""
-    if volumetric_strain is None:
-        volumetric_strain = get_volumetric_strain(strain)
-    return strain + (1.0 / dim) * jnp.eye(3) * volumetric_strain
+    return eps_spatial
+
+def get_strain_rate_tensor(L):
+    """Get strain rate tensor from velocity gradient."""
+    L_T = jnp.swapaxes(L, -1, -2)
+    # rank_agnostic symmpetric part
+    return 0.5 * (L + L_T)
+
+def get_shear_strain_vm(strain=None, dev_strain=None):
+    """
+    Get the scalar von-Mises equivalent shear strain.
+    
+    This is the work-conjugate variable to the von-Mises shear stress q.
+    
+    $$
+    \\varepsilon_q = \\sqrt{\\frac{2}{3} \\mathbf{e} : \\mathbf{e}}
+    $$
+    where $\\mathbf{e}$ is the deviatoric strain tensor.
+
+    Args:
+        strain: Hencky (or small) strain tensor. Shape (..., 3, 3).
+        dev_strain: Deviatoric strain tensor. Shape (..., 3, 3).
+
+    Returns:
+        Scalar equivalent shear strain. Shape (...,).
+    """
+    if dev_strain is None:
+        if strain is None:
+            raise ValueError("Must provide either 'strain' or 'dev_strain'")
+        dev_strain = get_dev_strain(strain)
+
+    # Double contraction e:e (rank agnostic)
+    # This is equivalent to sum(e_ij * e_ij)
+    e_contraction = jnp.einsum('...ij,...ij->...', dev_strain, dev_strain)
+    
+    return jnp.sqrt((2.0 / 3.0) * (e_contraction ) +1e-16)
 
 
-def get_dev_strain_stack(strain_stack, volumetric_strain_stack=None, dim=3):
-    """Get deviatoric strain tensor from a stack of strain tensors."""
-    if volumetric_strain_stack is None:
-        volumetric_strain_stack = get_volumetric_strain_stack(strain_stack)
-    vmap_get_dev_strain = jax.vmap(get_dev_strain, in_axes=(0))
-    return vmap_get_dev_strain(strain_stack, volumetric_strain_stack)
+def get_dev_strain(strain, vol_strain=None):
+    """
+    Get deviatoric strain tensor (Rank Agnostic).
+    
+    e = eps - (tr(eps)/3) * I
+    """
+    # Calculate trace over the last two dimensions (matrix dims)
+    if vol_strain is None:
+        vol_strain = get_volumetric_strain(strain)
+        
+    return strain - (vol_strain[..., None, None] / 3.0) *jnp.eye(3)
+
+
+# --------------------------------------------------------------
+# Stack Aliases (Backward Compatibility)
+# --------------------------------------------------------------
+
+def get_double_contraction_stack(A_stack, B_stack):
+    return get_double_contraction(A_stack, B_stack)
+
+def get_pressure_stack(stress_stack):
+    return get_pressure(stress_stack)
+
+
+def get_dev_stress_stack(stress_stack, pressure_stack=None):
+    return get_dev_stress(stress_stack, pressure_stack)
+
+def get_q_vm_stack(stress_stack, dev_stress_stack=None, pressure_stack=None):
+    return get_q_vm(stress=stress_stack, dev_stress=dev_stress_stack, pressure=pressure_stack)
+
+
+def get_J2_stack(stress_stack, dev_stress_stack=None, pressure_stack=None):
+    return get_J2(stress=stress_stack, dev_stress=dev_stress_stack, pressure=pressure_stack)
+
+def get_scalar_shear_stress_stack(stress_stack, dev_stress_stack=None, pressure_stack=None):
+    return get_scalar_shear_stress(stress=stress_stack, dev_stress=dev_stress_stack, pressure=pressure_stack)
+
+def get_scalar_shear_stress_stack(stress_stack, dev_stress_stack=None, pressure_stack=None):
+    return get_scalar_shear_stress(stress=stress_stack, dev_stress=dev_stress_stack, pressure=pressure_stack)
+
+
+def get_volumetric_strain_stack(strain_stack):
+    return get_volumetric_strain(strain_stack)
+
+
+
+def get_hencky_strain_stack(F_stack):
+    """Vectorized version of get Hencky strain from a stack of deformation gradients.
+
+    See [get_hencky_strain][utils.math_helpers.get_hencky_strain] for more details.
+
+    Args:
+        F_stack: deformation gradient stack
+
+    Returns:
+        strain tensor, left stretch tensor (stacked)
+    """
+    vmap_get_hencky = jax.vmap(get_hencky_strain)
+    return vmap_get_hencky(F_stack)
+
+
+
+def get_dev_strain_stack(strain_stack):
+    """Get strain rate tensor from a stack of velocity gradients."""
+    return get_dev_strain_stack(strain_stack)
+
+def get_strain_rate_tensor_stack(L_stack):
+    """Get strain rate tensor from a stack of velocity gradients."""
+    return get_strain_rate_tensor(L_stack)
+
+
+def get_shear_strain_vm_stack(strain_stack, dev_strain_stack=None):
+    return get_shear_strain_vm(strain_stack,dev_strain_stack)
+
+
+
+# --------------------------------------------------------------
+# TODO
+# --------------------------------------------------------------
+
 
 
 def get_scalar_shear_strain(
@@ -237,21 +327,19 @@ def get_scalar_shear_strain_stack(
     )
 
 
-def get_KE(mass: TypeFloat, velocity: TypeFloatVector) -> TypeFloat:
+def get_KE(mass, velocity):
     """Get kinetic energy."""
     return 0.5 * mass * jnp.dot(velocity, velocity)
 
 
-def get_KE_stack(
-    masses: TypeFloatScalarAStack, velocities: TypeFloatVectorAStack
-) -> TypeFloatScalarAStack:
+def get_KE_stack(masses, velocities):
     """Get kinetic energy from a stack of masses and velocities."""
     vmap_get_KE = jax.vmap(get_KE, in_axes=(0, 0))
     return vmap_get_KE(masses, velocities)
 
 
 def get_inertial_number(pressure, dgamma_dt, p_dia, rho_p):
-    """Get MiDi inertial number.
+    """Get inertial number (e.g., mu(I) rheology).
 
     Microscopic pressure time scale over macroscopic shear rate timescale
 
@@ -263,7 +351,9 @@ def get_inertial_number(pressure, dgamma_dt, p_dia, rho_p):
         p_dia: particle diameter
         rho_p: particle density [kg/m^3]
     """
-    return (dgamma_dt * p_dia) / jnp.sqrt(pressure / rho_p)
+    # Add small value to pressure to avoid sqrt(0) and division by zero
+    p_safe = jnp.maximum(pressure, 1e-6)
+    return (dgamma_dt * p_dia) / jnp.sqrt(p_safe / rho_p)
 
 
 def get_inertial_number_stack(pressure_stack, dgamma_dt_stack, p_dia, rho_p):
@@ -281,7 +371,7 @@ def get_plastic_strain(
     strain,
     elastic_strain,
 ):
-    """Get the plastic strain."""
+    """Get the plastic strain from additive decomposition."""
     return strain - elastic_strain
 
 
@@ -302,20 +392,13 @@ def get_small_strain_stack(F_stack):
     return vmap_get_small_strain(F_stack)
 
 
-def get_strain_rate_from_L(L):
-    """Get strain rate tensor from velocity gradient."""
-    return 0.5 * (L + L.T)
 
-
-def get_strain_rate_from_L_stack(L_stack):
-    """Get strain rate tensor from a stack of velocity gradients."""
-    vmap_get_strain_rate_from_L = jax.vmap(get_strain_rate_from_L)
-    return vmap_get_strain_rate_from_L(L_stack)
 
 
 def phi_to_e(phi):
     """Solid volume fraction to void ratio."""
-    return (1.0 - phi) / phi
+    v = 1.0 / phi
+    return v - 1
 
 
 def phi_to_e_stack(phi_stack):
@@ -339,8 +422,8 @@ def e_to_phi(e):
     Returns:
         (jnp.float32): solid volume fraction
     """
-
-    return 1.0 / (1.0 + e)
+    v = 1.0 + e
+    return 1.0 / v
 
 
 def e_to_phi_stack(e_stack):
@@ -351,7 +434,7 @@ def e_to_phi_stack(e_stack):
         e_stack (chex.Array): void ratio stack
 
     Returns:
-        (chex.Array): solid volume fraction stack
+        (jnp.float32): solid volume fraction stack
     """
     vmap_e_to_phi = jax.vmap(e_to_phi)
     return vmap_e_to_phi(e_stack)
@@ -457,78 +540,177 @@ def get_phi_from_bulk_density_stack(absolute_density_stack, bulk_density_stack):
     return vmap_get_phi_from_bulk_density(absolute_density_stack, bulk_density_stack)
 
 
-def get_hencky_strain(F):
-    """Get Hencky strain from the deformation gradient.
-
-    Do Singular Value Decomposition (SVD) of the deformation gradient $F$ to get the
-    singular values, left stretch tensor $U$ and right stretch tensor $V^T$. After, take
-    the matrix logarithm of the singular values to get the Hencky strain.
-
-    issues with forward mode AD.
-    https://github.com/jax-ml/jax/issues/2011
-
-    Args:
-        F (chex.Array): deformation gradient
-
-    Returns:
-        Tuple[chex.Array, chex.Array, chex.Array]: strain tensor, left stretch tensor,
-        right stretch tensor
+def precondition_from_lithostatic(
+    density_stack: Float[Array, "num_points"],
+    depth_stack: Float[Array, "num_points"],
+    gravity,
+    slope_angle_deg: float = 0.0,
+    k0=0.5,
+):
     """
-    u, s, vh = jnp.linalg.svd(F, full_matrices=False)
-
-    eps = jnp.zeros((3, 3)).at[[0, 1, 2], [0, 1, 2]].set(jnp.log(s))
-    return eps, u, vh
-
-
-def get_hencky_strain_stack(F_stack):
-    """Vectorized version of get Hencky strain from a stack of deformation gradients.
-
-    See [get_hencky_strain][utils.math_helpers.get_hencky_strain] for more details.
-
-    Args:
-        F_stack: deformation gradient stack
-
-    Returns:
-        strain tensor, left stretch tensor (stacked)
+    Initializes the state of the model based on lithostatic lithostatic gravity loading and input density.
     """
-    vmap_get_hencky = jax.vmap(get_hencky_strain, in_axes=(0))
-    return vmap_get_hencky(F_stack)
+
+    theta = jnp.radians(slope_angle_deg)
+
+    # calculate vertical stress (lithostatic)
+    # sigma_v = rho * g * z
+    sigma_v_stack = density_stack * gravity * depth_stack*jnp.cos(theta)
+
+    tau_stack = density_stack * gravity * depth_stack * jnp.sin(theta)
+
+    # calculate horizontal stress (K0 assumption)
+    sigma_h_stack = k0 * sigma_v_stack
+
+    # convert to invariants (p, q)
+    # assuming triaxial symmetry (sigma_x = sigma_y = sigma_h)
+    p_stack = (sigma_v_stack + 2.0 * sigma_h_stack) / 3.0
+
+    q_stack = jnp.sqrt((sigma_v_stack - sigma_h_stack)**2 + 3.0 * tau_stack**2)
+
+    return p_stack, q_stack
 
 
-def get_k0_stress(
-    height: jnp.float32,
-    gravity: jnp.float32,
-    rho_0: jnp.float32,
-    mu: jnp.float32,
-    axis_vertical: jnp.int32 = 3,
-) -> jnp.float32:
-    """Get k0 stress tensor.
+def reconstruct_stress_from_triaxial(
+    p_stack,
+    q_stack,
+):
+    """
+    Reconstructs the stress tensor from triaxial stress invariants (p, q).
+    """
+    p_stack = p_stack
+    q_stack = q_stack
 
-    ??? warning
-        This function is still being developed and may not work as expected.
+    sig_v = p_stack + (2.0 / 3.0) * q_stack
+    sig_h = p_stack - (1.0 / 3.0) * q_stack
+
+    def make_tensor(sv, sh):
+        return jnp.diag(jnp.array([sh, sh, sv]))  # Assuming Z is vertical
+
+    stress0_stack = jax.vmap(make_tensor)(sig_v, sig_h)
+
+    return stress0_stack
+
+
+def safe_inv_scalar_clamped(d, gradient_clip_val=1e6):
+    """
+    Computes 1/d with gradient clipping.
+    Works for both Forward (jacfwd) and Reverse (grad) modes automatically.
+    """
+    # 1. Primal Safety: Avoid division by zero
+    d_safe = d + 1e-20 * jnp.where(d >= 0, 1.0, -1.0)
+    inv_d = 1.0 / d_safe
+
+    # 2. Gradient Clipping Trick so the derivative does not explode.
+    true_grad = -1.0 / (d_safe * d_safe)
+
+    grad_mag = jnp.abs(true_grad)
+    scale = jnp.minimum(1.0, gradient_clip_val / (grad_mag + 1e-12))
+
+    effective_grad = true_grad * scale
+
+    # 3. Construct the output with modified gradients
+    # Use stop_gradient to treat 'effective_grad' as a constant slope.
+    # Formula: y = x * m + (y_true - x * m)
+    # Value: y_true
+    # Derivative: m
+    slope = jax.lax.stop_gradient(effective_grad)
+    res = d * slope + jax.lax.stop_gradient(inv_d - d * slope)
+
+    return res
+
+
+def inv_2x2_robust(m, gradient_clip_val=1e6):
+    """
+    Inverts a 2x2 matrix using the universal robust scalar inverse.
+    """
+    a, b = m[0, 0], m[0, 1]
+    c, d = m[1, 0], m[1, 1]
+
+    det = a * d - b * c
+
+    # Use the safe scalar inverse for the determinant
+    inv_det = safe_inv_scalar_clamped(det, gradient_clip_val)
+
+    inv = jnp.array([[d, -b], [-c, a]]) * inv_det
+    return inv
+
+
+def safe_norm(x, eps=1e-12, axis=None):
+    """
+    Computes euclidean norm safely for AutoDiff.
+    Prevents NaN gradients when x is the zero vector.
+    """
+    return jnp.sqrt(jnp.sum(x**2, axis=axis) + eps)
+
+
+def quaternion_rotate(q, v):
+    """
+    Rotate vector v by quaternion q.
+    q: [w, x, y, z]
+    v: [x, y, z]
+    """
+    q_vec = q[1:]
+    uv = jnp.cross(q_vec, v)
+    uuv = jnp.cross(q_vec, uv)
+    return v + 2 * (q[0] * uv + uuv)
+
+
+def quaternion_inv(q):
+    """Inverse of unit quaternion."""
+    return jnp.array([q[0], -q[1], -q[2], -q[3]])
+
+
+def rotation_2d(theta, v):
+    """Returns a 2D rotation matrix for angle theta."""
+    c, s = jnp.cos(theta), jnp.sin(theta)
+    x_new = c * v[0] - s * v[1]
+    y_new = s * v[0] + c * v[1]
+    return jnp.stack([x_new, y_new])
+
+
+def rotation_2d_inv(theta, v):
+    """Returns the inverse 2D rotation matrix for angle theta."""
+    c, s = jnp.cos(theta), jnp.sin(theta)
+    x_new = c * v[0] + s * v[1]
+    y_new = -s * v[0] + c * v[1]
+    return jnp.stack([x_new, y_new])
+
+
+def integrate_quaternion(q, w, dt):
+    """
+    Integrates a unit quaternion with an angular velocity vector.
 
     """
-    import warnings
+    # create quaternion from angular velocity: [0, wx, wy, wz]
+    w_quat = jnp.concatenate([jnp.array([0.0]), w])
 
-    warnings.warn(
-        "This function is still being developed and may not work as expected."
+    # Quaternion multiplication: dq/dt = 0.5 * w_quat * q
+
+    # q_new = q + 0.5 * w_quat * q * dt
+    # Explicit multiplication for w_quat * q
+    # w_quat = [0, bx, by, bz], q = [aw, ax, ay, az]
+    bx, by, bz = w
+    aw, ax, ay, az = q
+
+    dq = (
+        0.5
+        * dt
+        * jnp.array(
+            [
+                -bx * ax - by * ay - bz * az,
+                bx * aw + by * az - bz * ay,
+                -bx * az + by * aw + bz * ax,
+                bx * ay - by * ax + bz * aw,
+            ]
+        )
     )
 
-    fric_angle = jnp.arctan(mu)
+    q_new = q + dq
 
-    K0 = 1 - jnp.sin(fric_angle)
+    # Normalize to prevent drift
+    return q_new / (jnp.linalg.norm(q_new) + 1e-12)
 
-    factor = height * gravity * rho_0
 
-    stress = jnp.zeros((3, 3))
-    stress = jnp.zeros((3, 3)).at[[0, 1, 2], [0, 1, 2]].set(factor * K0)
-
-    stress = stress.at[axis_vertical, axis_vertical].set(factor)
-
-    p = get_pressure(stress, dim=2)
-
-    q = get_q_vm(stress, dim=2)
-
-    mu = (q / p) / jnp.sqrt(3)
-
-    return stress
+def rotate_2d_update(theta, omega, dt):
+    return theta + omega * dt

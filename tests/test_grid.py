@@ -1,60 +1,52 @@
-"""Unit tests for the grid"""
-
-import equinox as eqx
+import pytest
 import jax.numpy as jnp
-import numpy as np
+import equinox as eqx
+from hydraxmpm.grid.grid import GridState
 
-import hydraxmpm as hdx
+class TestGridTopology:
+    def test_initialization_2d(self):
+        origin = (0.0, 0.0)
+        end = (1.0, 1.0)
+        cell_size = 0.1
+        grid = GridState.create(origin, end, cell_size)
+        
+        assert grid.dim == 2
+        assert grid.origin == origin
+        assert grid.end == end
+        assert grid.cell_size == cell_size
+        
+        # (1.0 - 0.0) / 0.1 + 1 = 11
+        expected_grid_size = (11, 11)
+        assert grid.grid_size == expected_grid_size
+        assert grid.num_cells == 121
 
+    def test_initialization_3d(self):
+        origin = (0.0, 0.0, 0.0)
+        end = (1.0, 1.0, 1.0)
+        cell_size = 0.5
+        grid = GridState.create(origin, end, cell_size)
+        
+        assert grid.dim == 3
+        expected_grid_size = (3, 3, 3)
+        assert grid.grid_size == expected_grid_size
+        assert grid.num_cells == 27
 
-def test_create():
-    """Unit test to create grid nodes over multiple dimensions."""
+class TestGridState:
+    def test_create_basic(self):
+        origin = (0.0, 0.0)
+        end = (1.0, 1.0)
+        cell_size = 0.5
+        # grid size should be (3, 3), num_cells = 9
+        state = GridState.create(origin, end, cell_size)
 
-    grid = hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1)
+        
+        assert state.num_cells == 9
+        assert state.dim == 2
+        assert state.mass_stack.shape == (9,)
+        assert state.moment_stack.shape == (9, 2)
+        assert state.moment_nt_stack.shape == (9, 2)
+        
+        # Check initialization to zeros
+        assert jnp.all(state.mass_stack == 0)
+        assert jnp.all(state.moment_stack == 0)
 
-    assert isinstance(grid, hdx.Grid)
-
-    assert grid.num_cells == 121
-
-
-test_create()
-
-
-def test_post_init():
-    # test grid padding outside of the domain
-    grid = hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1)
-    assert grid.num_cells == 121
-    assert grid._is_padded == False
-    grid = grid.init_padding("linear")
-    assert grid.num_cells == 169
-    assert grid._is_padded == True
-    # grid must already be padded so it should not be padded again
-    grid = grid.init_padding("linear")
-    assert grid.num_cells == 169
-    assert grid._is_padded == True
-
-
-# test_post_init()
-# def test_refresh():
-#     """Unit test to reset node state."""
-
-#     grid = hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1)
-
-#     grid = eqx.tree_at(
-#         lambda state: (state.mass_stack), grid, (jnp.ones(9).astype(jnp.float32))
-#     )
-#     np.testing.assert_allclose(grid.mass_stack, jnp.ones(9))
-
-#     grid = grid.refresh()
-
-#     np.testing.assert_allclose(grid.mass_stack, jnp.zeros(9))
-
-
-# def test_properties():
-#     """Unit test to create grid nodes over multiple dimensions."""
-
-#     grid = hdx.Grid(origin=[0.0, 0.0], end=[1.0, 1.0], cell_size=0.1)
-
-#     position_stack = grid.position_stack
-
-#     np.testing.assert_allclose(position_stack.shape, (121, 2))

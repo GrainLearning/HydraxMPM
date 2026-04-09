@@ -1,4 +1,6 @@
 NoInclude/
+
+
 # Project specific
 poetry.lock
 output_vid.avi
@@ -6,11 +8,16 @@ frames.*
 *.vtp
 *.vtk
 *.npz
+*.png
+*.pdf
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
+old/
+projects/unified_elasto_plastic_inertial_mcc/data/
+projects/mcc_trx_inverse/data/
 core.*
 uv.lock
 imgui.ini

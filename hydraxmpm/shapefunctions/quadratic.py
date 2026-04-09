@@ -4,34 +4,59 @@
 # Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
 
 # -*- coding: utf-8 -*-
+"""
+Explanation:
+    This module handles quadratic shape functions for MPM simulations.
+    It provides a function to compute the shape function values and gradients
+    based on the relative distance from particles to grid nodes.
+    
+    The function is stored as a `Callable` within the ShapeFunctionMapping class
+
+    It has a support of [-1.5, 1.5].
+
+    References:
+    - De Vaucorbeil, Alban, et al. "Material point method after 25 years: Theory, implementation, and applications." Adva
+    - Jiang, Chenfanfu, et al. "The affine particle-in-cell method."
+
+"""
 
 from functools import partial
-from typing import Tuple
+from typing import Tuple, Any
 
-import jax
 import jax.numpy as jnp
-
-from ..common.types import TypeInt, TypeFloat, TypeFloat3, TypeFloatVector
-
+from jaxtyping import Array, Float
 
 def vmap_quadratic_shapefunction(
-    intr_dist: TypeFloatVector,
-    inv_cell_size: TypeFloat,
-    dim: TypeInt,
+    intr_dist: Float[Array, "dim"],
+    inv_cell_size: float,
+    dim: int,
     padding: Tuple[int, int],
-    intr_node_type: TypeInt,
-    **kwargs,
-) -> Tuple[TypeFloat, TypeFloat3]:
+    intr_node_type, # Kept for API consistency, unused in standard quadratic
+    **kwargs: Any,
+) ->  Tuple[Float[Array, ""], Float[Array, "3"]]:
+    """
+    Quadratic B-Spline shape function.
+
+    """
+    # Pre-define conditions for piecewise construction
+    # Note: These are boolean masks on the static shape of intr_dist
     condlist = [
         (intr_dist >= -3 / 2) * (intr_dist <= -1 / 2),
         (intr_dist > -1 / 2) * (intr_dist <= 1 / 2),
         (intr_dist > 1 / 2) * (intr_dist <= 3 / 2),
     ]
 
+    # helper for cleaner code
     _piecewise = partial(jnp.piecewise, x=intr_dist, condlist=condlist)
-
     h = jnp.array(inv_cell_size)
 
+    
+    # spline definitions for different node types
+
+    # Range 1: 0.5(x + 1.5)^2  ->  0.5x^2 + 1.5x + 1.125
+    # Range 2: 0.75 - x^2      -> -x^2 + 0.75
+    # Range 3: 0.5(1.5 - x)^2  ->  0.5x^2 - 1.5x + 1.125
+    
     def quadratic_splines():
         basis = _piecewise(
             funclist=[
@@ -77,6 +102,7 @@ def vmap_quadratic_shapefunction(
 
     shapef = jnp.prod(basis)
 
+    # pad gradients to 3D
     shapef_grad_padded = jnp.pad(
         shapef_grad,
         padding,

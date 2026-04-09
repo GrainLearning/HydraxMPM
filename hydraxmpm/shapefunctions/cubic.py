@@ -4,24 +4,43 @@
 # Part of HydraxMPM: https://github.com/GrainLearning/HydraxMPM
 
 # -*- coding: utf-8 -*-
+"""
+Explanation:
+    This module handles cubic shape functions for MPM simulations.
+    It provides a function to compute the shape function values and gradients
+    based on the relative distance from particles to grid nodes.
+    
+    The function is stored as a `Callable` within the ShapeFunctionMapping class
+
+    It has a support of [-2, 2].
+    
+    References:
+    - De Vaucorbeil, Alban, et al. "Material point method after 25 years: Theory, implementation, and applications." Adva
+
+"""
 
 from functools import partial
-from typing import Tuple
+from typing import Tuple, Any
 
 import jax
 import jax.numpy as jnp
-
-from ..common.types import TypeInt, TypeFloat, TypeFloat3, TypeFloatVector
+from jaxtyping import Array, Float, Int
 
 
 def vmap_cubic_shapefunction(
-    intr_dist: TypeFloatVector,
-    inv_cell_size: TypeFloat,
-    dim: TypeInt,
+    intr_dist: Float[Array, "dim"],
+    inv_cell_size: float,
+    dim: int,
     padding: Tuple[int, int],
-    intr_node_type: TypeInt,
-    **kwargs,
-) -> Tuple[TypeFloat, TypeFloat3]:
+    intr_node_type: Int[Array, ""] | int,  # Dynamic integer scalar (0, 1, 2, 3)
+    **kwargs: Any,
+) -> Tuple[Float[Array, ""], Float[Array, "3"]]:
+    
+    """
+    Cubic B-Spline shape function with boundary conditions.
+    """
+    # Pre-define conditions for piecewise construction
+    # Note: These are boolean masks on the static shape of intr_dist
     condlist = [
         (intr_dist >= -2) * (intr_dist < -1),
         (intr_dist >= -1) * (intr_dist < 0),
@@ -29,11 +48,12 @@ def vmap_cubic_shapefunction(
         (intr_dist >= 1) * (intr_dist < 2),
     ]
 
+    # helper for cleaner code
     _piecewise = partial(jnp.piecewise, x=intr_dist, condlist=condlist)
-
     h = inv_cell_size
 
-    # type 1 nodes - left / right boundary
+    # spline definitions for different node types
+    # Case 1: Boundary Nodes (Left/Right Edge)
     def boundary_splines():
         # checked
         basis = _piecewise(
@@ -63,7 +83,7 @@ def vmap_cubic_shapefunction(
         )
         return basis, dbasis
 
-    # type 2 nodes - left boundary + h
+    # Case 2: Near Boundary Left (0 + h)
     def boundary_0_p_h():
         # checked
         basis = _piecewise(
@@ -91,8 +111,7 @@ def vmap_cubic_shapefunction(
         )
         return basis, dbasis
 
-    # type 3 nodes middle
-    # checked
+    # Case 0: Internal Nodes (Standard B-Spline)
     def middle_splines():
         basis = _piecewise(
             funclist=[
@@ -120,7 +139,7 @@ def vmap_cubic_shapefunction(
         )
         return basis, dbasis
 
-    # type 4 nodes - right boundary - h
+    # Case 3: Near Boundary Right (L - h)
     def boundary_N_m_h():
         # checked
         basis = _piecewise(
@@ -148,13 +167,8 @@ def vmap_cubic_shapefunction(
         )
         return basis, dbasis
 
-    # 0th index is middle
-    # 1st index is boundary 0 or N
-    # 3rd index is left side of closes boundary 0 + h
-    # 4th index is right side of closes boundary N -h
-
+    # Selects the correct spline function based on node type
     basis, dbasis = jax.lax.switch(
-        # index=0,
         index=intr_node_type,
         branches=[
             middle_splines,
@@ -180,10 +194,12 @@ def vmap_cubic_shapefunction(
             ]
         )
     else:
+        # 1D fallback
         shapef_grad = dbasis
 
     shapef = jnp.prod(basis)
 
+    # pad gradients to 3D
     shapef_grad_padded = jnp.pad(
         shapef_grad,
         padding,
