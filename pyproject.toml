@@ -12,6 +12,7 @@ dependencies = [
     "vtk>=9.5.2",
     "rerun-sdk>=0.28.1",
     "optax>=0.2.6",
+    "readme-md>=2018.11.23",
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},

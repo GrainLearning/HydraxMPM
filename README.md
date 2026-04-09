@@ -28,6 +28,7 @@ The software is built on the JAX-ecosystem. It leverages automatic differentiati
    uv sync --extra cpu
    
    # for GPU
+   uv sync --extra 
    ```
 
 3. **Run Example:**
