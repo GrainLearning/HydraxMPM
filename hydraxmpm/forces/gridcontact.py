@@ -118,18 +118,8 @@ class GridContact(Force):
                     flat_coords,
                     world.material_points[p_idx_actor],
                 )
-            # act_normal_stack = particle_cloud.get_normal_stack(
-            #     particle_cloud_state,
-            #     flat_coords
-            # )
-            # dis_stack = particle_cloud.get_signed_distance_stack(particle_cloud_state, flat_coords)
 
 
-        # Calculate grid velocities of actor and receiver
-        # norm_mag = jnp.linalg.norm(act_normal_stack, axis=1, keepdims=True) + 1e-12
-
-        # ensure unit length
-        # act_normal_stack = jnp.where(norm_mag > 1e-4, act_normal_stack / norm_mag, 0.0)
 
 
         new_rec_mom, new_act_mom = jax.vmap(self._solve_node_collision)(
