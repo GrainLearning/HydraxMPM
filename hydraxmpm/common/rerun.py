@@ -159,7 +159,7 @@ class RerunVisualizer:
         rr.set_time("step", sequence=current_step)
         rr.set_time("sim_time", timestamp=current_time)
 
-    def log_particles(
+    def log_material_points(
         self,
         mp_state,
         label="material_points",
@@ -169,6 +169,8 @@ class RerunVisualizer:
         # recording_stream=None,
         ppc=1,
         scale_radius=1.0,
+        v_min=None,
+        v_max=None
     ):
         """
         Logs the material points to Rerun. (internal use only)
@@ -221,8 +223,10 @@ class RerunVisualizer:
 
                 scalar_field = np.nan_to_num(scalar_field)
 
-                v_min = np.min(scalar_field)
-                v_max = np.max(scalar_field)
+                if v_min is None:
+                    v_min = np.min(scalar_field)
+                if v_max is None:
+                    v_max = np.max(scalar_field)
 
                 # Avoid division by zero if field is constant
                 if v_max - v_min < 1e-6:
@@ -275,7 +279,6 @@ class RerunVisualizer:
                 rr.Boxes2D(
                     mins=[origin],
                     sizes=[sizes],
-                    # labels=["Simulation Domain"],
                     colors=[[100, 100, 100]],  # Grey
                 ),
                 static=True,
@@ -288,7 +291,7 @@ class RerunVisualizer:
                 rr.Boxes3D(
                     mins=[origin],
                     sizes=[sizes],
-                    # labels=[f"{label} Simulation Domain"],
+
                     colors=[[100, 100, 100]],
                     fill_mode="wireframe",  # Wireframe box
                 ),
@@ -344,6 +347,7 @@ class RerunVisualizer:
 
             # collect all line strips
             all_strips = []
+            # print(f"Extracted {len(contours)} contour(s) for SDF boundary visualization.")
             for i, contour in enumerate(contours):
 
                 # Get world coordinates
@@ -397,32 +401,3 @@ class RerunVisualizer:
                 # Happens if object is fully outside or fully inside (no surface found)
                 pass
 
-    # def log_scalar(self, label: str, value: float | Array, group="metrics"):
-    #     # 1. Convert JAX/Numpy to float
-    #     if hasattr(value, "item"):
-    #         val_float = float(value.item())
-    #     else:
-    #         val_float = float(value)
-
-    #     path = f"{self.root_path}/{group}/{label}"
-
-    #     # 2. Dynamic Dispatch based on installed version
-    #     if hasattr(rr, "Scalar"):
-    #         # Rerun 0.11+ (The Modern Standard)
-    #         rr.log(path, rr.Scalar(val_float))
-
-    #     elif hasattr(rr, "TimeSeriesScalar"):
-    #         # Rerun 0.10 and older
-    #         rr.log(path, rr.TimeSeriesScalar(val_float))
-
-    #     else:
-    #         # Fallback for very old or future-breaking versions
-    #         # Some versions might allow direct logging, though deprecated
-    #         try:
-    #             rr.log_scalar(path, val_float)
-    #         except AttributeError:
-    #             print(f"Rerun Error: Cannot log scalar '{label}'. Update rerun-sdk.")
-
-    # def log_distribution(self, label: str, array: Array):
-    #     data = np.array(array)
-    #     rr.log(f"{self.root_path}/plots/{label}", rr.BarChart(data))

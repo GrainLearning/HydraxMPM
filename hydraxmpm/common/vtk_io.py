@@ -7,14 +7,16 @@ import pyvista as pv
 from .simstate import SimState
 
 
-
+try:
+    from skimage import measure
+    HAS_SKIMAGE = True
+except ImportError:
+    HAS_SKIMAGE = False
 
 class VTKVisualizer:
     
     def __init__(self, 
                  output_dir="output_vtk", 
-                 grid_topology=None, 
-                 ppc=1,
                  relative_dir = None
                  ):
         """
@@ -33,107 +35,181 @@ class VTKVisualizer:
             # Default behavior: Relative to where you ran the terminal command
             self.output_dir = output_dir
 
-        self.grid_topology = grid_topology
-        self.ppc = ppc
+    def _save_vtk(self, mesh, label, filename):
+
+        target_dir = os.path.join(self.output_dir, label)
+        os.makedirs(target_dir, exist_ok=True)
         
-        # 1. Setup Output Directory
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-            print(f"📁 Created VTK output directory: {self.output_dir}")
-
-        # 2. Pre-calculate Radius (as a data attribute for ParaView Glyphs)
-        if grid_topology is not None:
-            cell_size = grid_topology.cell_size 
-            dim = len(grid_topology.origin)
-            cell_vol = cell_size ** dim
-            volume_per_particle = cell_vol / ppc
-            
-            if dim == 2:
-                self._point_radius = np.sqrt(volume_per_particle / np.pi) 
-            elif dim == 3:
-                self._point_radius = (3 * volume_per_particle / (4 * np.pi)) ** (1 / 3)
-        else:
-            self._point_radius = 0.05
-
-        # 3. Log the Static Domain (Grid) once at the start
-        if self.grid_topology is not None:
-            self._write_static_domain()
-
-    def log_simulation(self, state: SimState):
+        # Construct full file path
+        full_path = os.path.join(target_dir, filename)
+        mesh.save(full_path)
+        return full_path
+    
+    def log_particles(
+        self,
+        mp_state,
+        label="material_points",
+        property_name="velocity_stack",
+        scale_radius=1.0,
+        time=None,
+        step=None
+    ):
         """
         Called every step. Writes one file per material per step.
         Example: output_vtk/material_0/step_00100.vtp
         """
-        step = int(state.step)
-        time = float(state.time)
 
-        # Iterate through material points just like Rerun
-        for i, mp in enumerate(state.material_points):
-            self._write_particles(mp, material_id=i, step=step, time=time)
+        positions = np.array(mp_state.position_stack)
+        num_points, dim = positions.shape
+        volumes = np.array(mp_state.volume0_stack)
 
-    def _write_particles(self, mp, material_id, step, time):
-        # 1. Prepare Data (Convert JAX -> Numpy)
-        positions = np.array(mp.position_stack)
-        velocities = np.array(mp.velocity_stack)
+        if dim == 2:
+            _point_radius = np.sqrt(volumes / np.pi)
+        elif dim == 3:
+            _point_radius = (3 * volumes / (4 * np.pi)) ** (1 / 3)
+
+        _point_radius = _point_radius * scale_radius
         
-        # VTK/ParaView requires 3D points. 
-        # If 2D (N, 2), pad with z=0 to make (N, 3).
+        if property_name is not None:
+            prop_data = getattr(mp_state, property_name, None)
         if positions.shape[1] == 2:
             zeros = np.zeros((positions.shape[0], 1))
             positions_3d = np.hstack([positions, zeros])
-            velocities_3d = np.hstack([velocities, zeros])
+         
         else:
             positions_3d = positions
-            velocities_3d = velocities
 
-        # 2. Create PyVista Cloud
-        # PolyData is best for unstructured particle clouds
+        # print(prop_data.mean())
+
+        prop_data = np.array(prop_data)
+        # print(prop_data.shape)
+
+        if prop_data is not None:
+            if len(prop_data.shape) > 1:
+                if  prop_data.shape[1] == 2:
+                    zeros = np.zeros((prop_data.shape[0], 1))
+                    prop_data = np.hstack([prop_data, zeros])
+            else:
+                prop_data = prop_data
+
         cloud = pv.PolyData(positions_3d)
 
-        # 3. Add Attributes (Fields)
-        # These appear in ParaView as "Point Data"
-        cloud.point_data["Velocity"] = velocities_3d
-        cloud.point_data["Velocity_Magnitude"] = np.linalg.norm(velocities_3d, axis=1)
-        cloud.point_data["Radius"] = np.full(len(positions), self._point_radius)
-        
-        # Add Time as FieldData (Global)
-        cloud.field_data["TimeValue"] = np.array([time])
+        cloud.point_data[property_name] = prop_data
 
-        # 4. Save to Disk
-        # Structure: output/material_X/step_YYYYY.vtp
-        mat_dir = os.path.join(self.output_dir, f"material_{material_id}")
-        if not os.path.exists(mat_dir):
-            os.makedirs(mat_dir)
-
-        filename = os.path.join(mat_dir, f"step_{step:05d}.vtp")
-        print(filename)
-        cloud.save(filename)
-
-    def _write_static_domain(self):
-        """Writes the grid definition as a .vti (Uniform Grid) file."""
-        topo = self.grid_topology
-        origin = np.array(topo.origin)
-        end = np.array(topo.end)
+        cloud.point_data["Radius"] = np.full(len(positions), _point_radius)
         
-        # Determine dimensions (number of nodes = cells + 1 usually, depending on definition)
-        # Assuming topo.grid_size is number of cells
-        dims = np.array(topo.grid_size) + 1
-        spacing = (end - origin) / np.array(topo.grid_size)
+        if time is not None:
+            time = float(time)
+            cloud.field_data["TimeValue"] = np.array([time])
+
+
+        step_val = int(step) if step is not None else 0
+        path = self._save_vtk(cloud, label, f"step_{step_val:05d}.vtp")
+        print(f"Material Points saved: {path}")
+
+
+    def log_static_domain(self, origin, end, cell_size, label="domain"):
+        """
+        Creates a wireframe box representing the simulation domain.
+        """
+        origin = np.array(origin)
+
+        end = np.array(end) + cell_size 
         
-        # Handle 2D -> 3D conversion for VTK
-        if len(dims) == 2:
-            dims = np.append(dims, 1)        # 1 layer thick in Z
-            spacing = np.append(spacing, 0.1) # Arbitrary Z thickness
-            origin_3d = np.append(origin, 0.0)
+
+        # pyvista Box bounds: (xmin, xmax, ymin, ymax, zmin, zmax)
+        if len(origin) == 2:
+            bounds = (origin[0], end[0], origin[1], end[1], -0.01, 0.01)
         else:
-            origin_3d = origin
+            bounds = (origin[0], end[0], origin[1], end[1], origin[2], end[2])
 
-        # Create Uniform Grid
-        grid = pv.ImageData()
-        grid.dimensions = dims
-        grid.spacing = spacing
-        grid.origin = origin_3d
+        grid_box = pv.Box(bounds=bounds)
+        
+        path = self._save_vtk(grid_box, label, "bounds.vtp")
+        print(f"Domain saved: {path}")
+        
+    def log_sdf(
+            self,
+            sdf_logic,
+            sdf_state,
+            start,
+            end,
+            resolution=100,
+            label="boundary",
+            step=None,
+            time=None
+        ):
+            """
+            Extracts the zero-level set of an SDF and saves it as a VTK mesh.
+            """
+            if not HAS_SKIMAGE:
+                print("Install 'scikit-image' to visualize SDF boundaries in VTK.")
+                return
 
-        # Save
-        filename = os.path.join(self.output_dir, "domain_grid.vti")
-        grid.save(filename)
+            dim = len(start)
+            start = np.array(start)
+            end = np.array(end)
+            
+            # Setup sampling grid
+            domain_size = end * 1.05 - start * 0.95
+            step_size = np.max(domain_size) / resolution
+            aspect_size = np.ceil(domain_size / step_size).astype(int)
+            
+            indices = np.indices(aspect_size)
+            coords = np.moveaxis(indices, 0, -1) * step_size + start
+            flat_coords = coords.reshape(-1, dim)
+
+            # valuate SDF using JAX
+            sdf_values = sdf_logic.get_signed_distance_stack(
+                sdf_state, jnp.array(flat_coords)
+            )
+            sdf_grid = np.array(sdf_values).reshape(*aspect_size)
+
+            mesh = None
+
+            if dim == 2:
+                # Extract Contours (2D)
+                contours = measure.find_contours(sdf_grid, level=0.0)
+                if len(contours) > 0:
+                    all_points = []
+                    all_lines = []
+                    offset = 0
+                    
+                    for contour in contours:
+                        # Convert to world coordinates
+                        world_x = start[0] + contour[:, 0] * step_size
+                        world_y = start[1] + contour[:, 1] * step_size
+                        world_z = np.zeros_like(world_x)
+                        pts = np.stack([world_x, world_y, world_z], axis=1)
+                        
+                        # Create connectivity: [num_pts, id0, id1, id2, ...]
+                        num_pts = len(pts)
+                        connectivity = np.hstack(([num_pts], np.arange(num_pts) + offset))
+                        
+                        all_points.append(pts)
+                        all_lines.append(connectivity)
+                        offset += num_pts
+                    
+                    # Combine all contours into one PolyData object
+                    mesh = pv.PolyData(np.vstack(all_points), lines=np.hstack(all_lines))
+
+            elif dim == 3:
+                # Extract Surface (3D Marching Cubes)
+                try:
+                    verts, faces, normals, _ = measure.marching_cubes(sdf_grid, level=0.0)
+                    world_verts = start + verts * step_size
+                    # Faces connectivity: [3, v1, v2, v3, ...]
+                    faces_vtk = np.hstack(np.c_[np.full(len(faces), 3), faces])
+                    
+                    mesh = pv.PolyData(world_verts, faces_vtk)
+                    mesh.point_data["normals"] = normals
+                except (RuntimeError, ValueError):
+                    return
+
+            if mesh is not None:
+                if time is not None:
+                    mesh.field_data["TimeValue"] = np.array([float(time)])
+
+                suffix = f"step_{int(step):05d}" if step is not None else "static"
+                # Standardized save via your _save_vtk method
+                path = self._save_vtk(mesh, label, f"step_{int(step):05d}.vtp")

@@ -16,7 +16,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 old/
-unified_elasto_plastic_inertial_mcc/data/
+projects/unified_elasto_plastic_inertial_mcc/data/
+projects/mcc_trx_inverse/data/
 core.*
 uv.lock
 imgui.ini

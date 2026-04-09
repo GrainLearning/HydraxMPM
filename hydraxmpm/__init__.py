@@ -49,8 +49,10 @@ from .constitutive_laws.constitutive_law import (
 
 from .constitutive_laws.newtonfluid import NewtonFluid, NewtonFluidState
 from .constitutive_laws.mu_i_rheology import MuI_LC, MuIState
-
+from .constitutive_laws.modifiedcamclay import ModifiedCamClay, ModifiedCamClayState
 from .constitutive_laws.linearelastic import LinearElasticLaw, LinearElasticState
+from .constitutive_laws.druckerprager import DruckerPrager, DruckerPragerState
+
 
 from .solvers.usl import USLSolver, USLSolverState
 
@@ -60,12 +62,13 @@ from .forces.force import Force, BaseForceState
 
 from .forces.gravity import Gravity, GravityState
 
+from .forces.damping import Damping, DampingState
+
 from .forces.gridcontact import GridContact
 
 
 from .solvers.coupling import BodyCoupling
 
-from .constitutive_laws.modifiedcamclay import ModifiedCamClay, ModifiedCamClayState
 
 from .sdf.sdfobject import SDFObjectBase, SDFObjectState
 from .sdf.sdfcollection import (
@@ -78,9 +81,9 @@ from .sdf.sdfcollection import (
     StarSDF,
     HollowCylinderSDF,
     DomainSDF,
-    MaterialPointCloudSDF
+    MaterialPointCloudSDF,
 )
-from .sdf.sdfmorph import ChainMorphSDF,MorphSDF, MorphSDFState
+
 from .sdf.gridsdf import GridSDF
 
 from .forces.sdf_collider import SDFCollider
@@ -94,17 +97,22 @@ from .element_tests.triaxial_test import TriaxialTest
 from .common.builder import SimBuilder
 
 from .utils.math_helpers import (
-    # get_deviatoric_stress,
-    # get_pressure,
-    # get_von_mises_stress,
-    # get_volumetric_strain,
     safe_norm,
     get_volumetric_strain_stack,
     quaternion_rotate,
+    precondition_from_lithostatic,
+    reconstruct_stress_from_triaxial,
+    get_sym_tensor,
+    get_spin_tensor,
+    get_jaumann_increment,
+    get_pressure,
+    get_dev_stress,
+    get_dev_strain,
+    get_volumetric_strain,
+    get_q_vm,
+    inv_2x2_robust
 )
 
-# JMP journal (remove later maybe?)
-from .constitutive_laws.JMPS import ParamMCCInertia, ParamMCCInertiaState
 
 hook.uninstall()
 del hook

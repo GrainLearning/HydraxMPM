@@ -104,6 +104,7 @@ class ParticleGeometry(eqx.Module):
     dists: Float[Array, "num_points"]
     normals: Float[Array, "num_points dim"]
     wall_vels: Float[Array, "num_points dim"]
+    friction: Float[Array, "num_points"]
 
 
 class NodeGeometry(eqx.Module):

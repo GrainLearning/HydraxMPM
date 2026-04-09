@@ -142,11 +142,11 @@ def load_simulation(directory, solver_skeleton, state_skeleton, step):
     to ensure compatibility.
 
     """
-    # 1. Load Solver
+    # Load Solver
     solver_path = os.path.join(directory, "solver_config.eqx")
     loaded_solver = eqx.tree_deserialise_leaves(solver_path, solver_skeleton)
     
-    # 2. Load State
+    # Load State
     state_path = os.path.join(directory, f"state_{int(step):05d}.eqx")
     loaded_state = eqx.tree_deserialise_leaves(state_path, state_skeleton)
     

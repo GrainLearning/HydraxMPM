@@ -1,4 +1,6 @@
 
+import jax
+
 from hydraxmpm.solvers.usl import USLSolver
 from ..grid.grid import GridDomain
 
@@ -18,6 +20,7 @@ from ..forces.gridcontact import GridContact
 
 from ..forces.sdf_collider import SDFCollider
 
+from ..forces.damping import Damping
 
 from ..forces.force import BaseForceState, Force
 
@@ -102,6 +105,7 @@ class SimBuilder:
         is_rigid: Optional[bool] = False,
         **particle_kwargs,
     ) -> int:
+        
 
         if is_rigid:
             rigid_mp_state = RigidMaterialPointState.create(
@@ -252,6 +256,34 @@ class SimBuilder:
         )
         f_idx = self.force_logics.add(gravity_force)
         self.force_states.append(gravity_force.create_state(gravity=gravity))
+
+        return f_idx
+
+    def add_damping(
+        self,
+        *,
+        alpha: Float[Array, "dim"] | float,
+        g_idx_list: Optional[List[int]] = None,
+        p_idx_list: Optional[List[int]] = None,
+        is_apply_on_grid: bool = True,
+    ) -> int:
+        """Adds damping force to the simulation."""
+        g_idx_list = (
+            list(range(len(self.grid_domains))) if g_idx_list is None else g_idx_list
+        )
+        p_idx_list = (
+            list(range(len(self.particle_states))) if p_idx_list is None else p_idx_list
+        )
+
+        f_idx = len(self.force_logics)
+        damping_force = Damping(
+            is_apply_on_grid=is_apply_on_grid,
+            g_idx_list=g_idx_list,
+            p_idx_list=p_idx_list,
+            f_idx=f_idx,
+        )
+        f_idx = self.force_logics.add(damping_force)
+        self.force_states.append(damping_force.create_state(alpha=alpha))
 
         return f_idx
 
