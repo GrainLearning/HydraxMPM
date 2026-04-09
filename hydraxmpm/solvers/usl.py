@@ -162,8 +162,7 @@ class USLSolver(BaseSolver):
         )
 
         # Particle to Grid Transfer
-        world, mechanics, sim_cache = self._p2g(
-            world, mechanics, sim_cache, dt, time)
+        world, mechanics, sim_cache = self._p2g(world, mechanics, sim_cache, dt, time)
 
         # # Integrate grid forces
         world, mechanics, sim_cache = self._integrate_grid(
@@ -256,7 +255,10 @@ class USLSolver(BaseSolver):
             for s_idx, sdf_logic in enumerate(self.sdf_logics):
                 sdf_state = world.sdfs[s_idx]
 
-                dists = sdf_logic.get_signed_distance_stack(sdf_state, node_pos) - domain.cell_size * 1.0
+                dists = (
+                    sdf_logic.get_signed_distance_stack(sdf_state, node_pos)
+                    - domain.cell_size * 1.0
+                )
                 normals = sdf_logic.get_normal_stack(sdf_state, node_pos)
                 wall_vels = sdf_logic.get_velocity_stack(sdf_state, node_pos, dt)
                 friction = sdf_logic.get_surface_friction_stack(sdf_state, node_pos)
@@ -291,9 +293,15 @@ class USLSolver(BaseSolver):
                 wall_vels = sdf_logic.get_velocity_stack(
                     sdf_state, mp_state.position_stack, dt
                 )
+                frictions = sdf_logic.get_surface_friction_stack(
+                    sdf_state, mp_state.position_stack
+                )
 
                 sim_cache.mp_geoms[(p_idx, s_idx)] = ParticleGeometry(
-                    dists=dists, normals=normals, wall_vels=wall_vels
+                    dists=dists,
+                    normals=normals,
+                    wall_vels=wall_vels,
+                    friction=frictions,
                 )
 
                 # C. Accumulate Union (For CPIC)
@@ -399,8 +407,12 @@ class USLSolver(BaseSolver):
             compatible_mask = (1.0 - incompatible).reshape(-1)
 
             new_interactions = sim_cache.interactions.copy()
+            # new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
+            #     lambda i: i.cpic_mask, intr_cache, compatible_mask
+            # )
+
             new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
-                lambda i: i.cpic_mask, intr_cache, compatible_mask
+                lambda i: i.cpic_mask, intr_cache, jnp.ones_like(compatible_mask)
             )
             sim_cache = eqx.tree_at(
                 lambda s: s.interactions, sim_cache, new_interactions
@@ -467,8 +479,9 @@ class USLSolver(BaseSolver):
             ).squeeze(-1)
             intern_force_term_stack = intern_force_term_stack[:, : grid_cache.dim]
 
+            # compression positive for forces
             weighted_intern_force_stack = (
-                -1.0 * intr_volume_stack[:, None] * intern_force_term_stack
+                1.0 * intr_volume_stack[:, None] * intern_force_term_stack
             ) * intr_cache.cpic_mask[:, None]
 
             # --- Scatter to grid ---
@@ -655,11 +668,12 @@ class USLSolver(BaseSolver):
 
             # Outer product to find velocity gradients (n_intr, 3, 3)
             # As L_ij = v_i * grad_j
+            # compression positive convention for L, 
             weighted_L = jnp.einsum(
-                "ij,ik->ijk", intr_cache.shape_grads, intr_vels_nt_3d
+                "ij,ik->ijk", intr_cache.shape_grads, -intr_vels_nt_3d
             )
 
-            # --- Gather operations to material points ---
+  
             # Particle velocity differences on grid
             p_delta_vel = (
                 jnp.zeros((mp_state.num_points, grid_cache.dim))
@@ -692,7 +706,8 @@ class USLSolver(BaseSolver):
             if grid_cache.dim == 2:
                 p_L = p_L.at[:, 2, 2].set(0.0)
 
-            F_inc = I + p_L * dt
+            # compression positive
+            F_inc = I - p_L * dt
             p_F_next = jnp.einsum("ijk,ikl->ijl", F_inc, mp_state.F_stack)
 
             if grid_cache.dim == 2:

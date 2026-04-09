@@ -44,6 +44,8 @@ from .coupling import BodyCoupling
 
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 
+from ..forces.sdf_collider import apply_frictional_contact
+
 from ..shapefunctions.mapping import InteractionCache
 
 from ..sdf.sdfobject import SDFObjectBase
@@ -53,7 +55,7 @@ from jaxtyping import Float, Array
 from typing import Tuple, Optional
 
 from .usl import USLSolver
-
+import jax
 
 class USLAFLIPState(BaseSolverState):
     """
@@ -229,8 +231,9 @@ class USLAFLIP(USLSolver):
             weighted_mass_stack = effective_shape_vals * intr_masses_stack
 
             # For AFLIP modification, we add affine part to velocity
+            # compression positive for B_p
             total_intr_velocities_stack = (
-                intr_velocities_stack + affine_vel[:, : grid_domain.dim]
+                intr_velocities_stack - affine_vel[:, : grid_domain.dim]
             )
 
             # Make affine part same dimension as velocity
@@ -248,8 +251,10 @@ class USLAFLIP(USLSolver):
                 intr_stress_stack @ intr_cache.shape_grads[..., None]
             ).squeeze(-1)
             intern_force_term_stack = intern_force_term_stack[:, : grid_cache.dim]
+            
+            # Compression positive
             weighted_intern_force_stack = (
-                -1.0 * intr_volume_stack[:, None] * intern_force_term_stack
+                1.0 * intr_volume_stack[:, None] * intern_force_term_stack
             ) * intr_cache.cpic_mask[:, None] # Explicit mask on force vector
 
             total_intr_force = weighted_intern_force_stack + weighted_ext_force_stack
@@ -335,34 +340,56 @@ class USLAFLIP(USLSolver):
             # We need this to calculate min_dist for the ASFLIP safety switch later
             min_dist_to_wall = jnp.full((mp_state.num_points,), 1e9)
 
-            if len(self.sdf_logics) > 0:
-                # Stack distances
-                num_sdfs = len(self.sdf_logics)
-                dists_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].dists.squeeze() for s in range(num_sdfs)])
-                norms_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].normals for s in range(num_sdfs)])
-                vels_stack  = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].wall_vels for s in range(num_sdfs)])
+            # if len(self.sdf_logics) > 0:
+            #     # Stack distances
+            #     num_sdfs = len(self.sdf_logics)
+            #     dists_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].dists.squeeze() for s in range(num_sdfs)])
+            #     norms_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].normals for s in range(num_sdfs)])
+            #     vels_stack  = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].wall_vels for s in range(num_sdfs)])
 
-                # Find closest
-                closest_idx = jnp.argmin(dists_stack, axis=0, keepdims=True)
+            #     fric_stack = jnp.stack([sim_cache.mp_geoms[(c.p_idx, s)].friction for s in range(num_sdfs)])
+
+
+            #     # Find closest
+            #     closest_idx = jnp.argmin(dists_stack, axis=0, keepdims=True)
                 
-                # Store min dist for ASFLIP safety
-                min_dist_to_wall = jnp.take_along_axis(dists_stack, closest_idx, axis=0).squeeze(0)
+            #     # Store min dist for ASFLIP safety
+            #     min_dist_to_wall = jnp.take_along_axis(dists_stack, closest_idx, axis=0).squeeze(0)
 
-                p_normal_best = jnp.take_along_axis(norms_stack, closest_idx[..., None], axis=0).squeeze(0)
-                p_wall_vel_best = jnp.take_along_axis(vels_stack, closest_idx[..., None], axis=0).squeeze(0)
+            #     p_normal_best = jnp.take_along_axis(norms_stack, closest_idx[..., None], axis=0).squeeze(0)
+            #     p_wall_vel_best = jnp.take_along_axis(vels_stack, closest_idx[..., None], axis=0).squeeze(0)
+            #     p_fric_best = jnp.take_along_axis(fric_stack, closest_idx, axis=0).squeeze(0)
+            #     # Debug print shapes
+            #     # jax.debug.print("min_dist_to_wall shape: {}", min_dist_to_wall.shape)
+            #     # jax.debug.print("p_normal_best shape: {}", p_normal_best.shape)
+            #     # jax.debug.print("p_wall_vel_best shape: {}", p_wall_vel_best.shape)
+            #     # jax.debug.print("p_fric_best mean: {}", p_fric_best.mean())
 
-                # Project Ghost Velocity
-                v_rel = mp_state.velocity_stack - p_wall_vel_best
-                v_dot_n = jnp.einsum("ij,ij->i", v_rel, p_normal_best)[:, None]
-                v_rel_slip = v_rel - jnp.minimum(0.0, v_dot_n) * p_normal_best
-                v_ghost_p = p_wall_vel_best + v_rel_slip
 
-                # Blend
-                v_ghost_intr = v_ghost_p.at[intr_cache.point_ids].get()
-                cpic_mask = intr_cache.cpic_mask[:, None]
+                
+            #     # v_ghost_p = jax.vmap(apply_frictional_contact, in_axes=(0, 0, 0, 0, 0, None, None, None))(
+            #     #         mp_state.velocity_stack, 
+            #     #         min_dist_to_wall, 
+            #     #         p_normal_best, 
+            #     #         p_wall_vel_best, 
+            #     #         p_fric_best,
+            #     #         dt, 
+            #     #         0.0, 
+            #     #         0.0
+            #     #     )
 
-                intr_vels = intr_vels * cpic_mask + v_ghost_intr * (1.0 - cpic_mask)
-                intr_vels_nt = intr_vels_nt * cpic_mask + v_ghost_intr * (1.0 - cpic_mask)
+            # #     # Project Ghost Velocity
+            #     v_rel = mp_state.velocity_stack - p_wall_vel_best
+            #     v_dot_n = jnp.einsum("ij,ij->i", v_rel, p_normal_best)[:, None]
+            #     v_rel_slip = v_rel - jnp.minimum(0.0, v_dot_n) * p_normal_best
+            #     v_ghost_p = p_wall_vel_best + v_rel_slip
+
+            # #     # Blend
+            #     v_ghost_intr = v_ghost_p.at[intr_cache.point_ids].get()
+            #     cpic_mask = intr_cache.cpic_mask[:, None]
+
+            #     intr_vels = intr_vels * cpic_mask + v_ghost_intr * (1.0 - cpic_mask)
+            #     intr_vels_nt = intr_vels_nt * cpic_mask + v_ghost_intr * (1.0 - cpic_mask)
 
             # Apply padding to velocities to compute shape function gradients in 3D
             # considering plane strain case
@@ -372,8 +399,9 @@ class USLAFLIP(USLSolver):
             weighted_vels_nt = intr_cache.shape_vals[:, None] * intr_vels_nt
 
             # Update the affine term which relates to the velocity gradient
+            # compression positive for L
             if self.use_mls_update:
-                weighted_Bp_term = jnp.einsum(
+                weighted_Bp_term = -jnp.einsum(
                     "ij,ik->ijk", intr_vels_nt_3d, intr_cache.shape_grads
                 )
             else:
@@ -465,7 +493,8 @@ class USLAFLIP(USLSolver):
                 p_L_next = p_L_next.at[:, 2, 2].set(0.0)
 
             # Deformation Gradient and volume update
-            F_inc = I + p_L_next * dt
+            # compression positive for L
+            F_inc = I - p_L_next * dt
             p_F_next = jnp.einsum("ijk,ikl->ijl", F_inc, mp_state.F_stack)
 
             if grid_cache.dim == 2:

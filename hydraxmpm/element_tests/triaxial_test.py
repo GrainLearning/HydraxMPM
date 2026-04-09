@@ -47,12 +47,7 @@ class TriaxialTest(eqx.Module):
                 if (hasattr(self.dt, "ndim") and self.dt.ndim > 0)
                 else self.dt
             )
-            # if self.start_static:
-            #     rate, d_t = jax.lax.cond(
-            #         idx == 0,
-            #         lambda: (1e-1, 1e-16),
-            #         lambda: (rate, d_t),
-            #     )
+
             return rate, d_t
 
         def scan_outer(carry, idx):
@@ -62,40 +57,33 @@ class TriaxialTest(eqx.Module):
 
             def get_L_drained():
                 def residual(lateral_rate):
+                    
                     L = jnp.zeros((1, 3, 3))
                     L = L.at[0, 0, 0].set(lateral_rate)  # L_11
                     L = L.at[0, 1, 1].set(lateral_rate)  # L_22
-                    L = L.at[0, 2, 2].set(-curr_rate)  # L_33
+                    L = L.at[0, 2, 2].set(curr_rate)  # L_33
 
-                    # Trial Step
+       
                     mp_out, _ = self.solver.step(mp, law, L, curr_dt)
-                    # Error: Current Stress - Target
-                    # sigma sigma_11
+   
+ 
                     sigma_xx = mp_out.stress_stack[0, 0, 0]
-                    # jax.debug.print("L: {sigma_xx}", sigma_xx=sigma_xx)
-                    return sigma_xx + self.confine
+
+                    return sigma_xx - self.confine
 
                 def step_fn(carry, _):
                     x = carry
 
-                    # Here we compute the Jacobian via AD
-                    # TODO can be optimized further via analytical Jacobian...
-                    # R_func = lambda v: residuals(v, None)[0]
-
-                    # Using forward-mode AD for Jacobian (fast for 2x2)
-                    # J = jax.jacfwd(R_func)(x)
-                    # R = R_func(x)
+  
                     R = residual(x)
                     J = jax.grad(residual)(x)
 
                     dx = -R / J
 
-                    # Damping (0.8 is safer... could be a parameter?)
+                    # Damping (0.8 safe?... could be a parameter?)
                     x_new = x + 0.8 * dx
 
-                    # --- NAN GUARD ---
-                    # If Jacobian was singular or update exploded, dx might be NaN.
-                    # In that case, ignore the update (x_new = x).
+
                     is_bad = jnp.any(jnp.isnan(x_new)) | jnp.any(jnp.isinf(x_new))
                     x_new = jnp.where(is_bad, x, x_new)
 
@@ -108,31 +96,29 @@ class TriaxialTest(eqx.Module):
                     length=self.num_newton_iters,
                 )
 
-                # --- FINAL STEP ---
                 # Run the step for real with the optimized rate
                 L_final = jnp.zeros((1, 3, 3))
                 L_final = L_final.at[0, 0, 0].set(x_final)
                 L_final = L_final.at[0, 1, 1].set(x_final)
-                L_final = L_final.at[0, 2, 2].set(-curr_rate)
+                L_final = L_final.at[0, 2, 2].set(curr_rate)
                 return L_final
 
             def get_L_undrained():
-                lateral_rate = 0.5 * curr_rate
+                lateral_rate = -0.5 * curr_rate
 
                 L_final = jnp.zeros((1, 3, 3))
                 L_final = L_final.at[0, 0, 0].set(lateral_rate)
                 L_final = L_final.at[0, 1, 1].set(lateral_rate)
-                L_final = L_final.at[0, 2, 2].set(-curr_rate)
+                L_final = L_final.at[0, 2, 2].set(curr_rate)
                 return L_final
 
             L_next = jax.lax.cond(self.is_undrained, get_L_undrained, get_L_drained)
             mp_next, law_next = self.solver.step(mp, law, L_next, curr_dt)
 
-            return (mp_next, law_next), (mp_next, law_next)  # Carry, Output
+            return (mp_next, law_next), (mp_next, law_next)  # carry, output
 
-        # 2. Define the Inner Loop (The Strided Segment)
+
         # This runs 'stride' steps and returns the final state of that segment
-
         def static_run(carry, idx):
             if self.start_static:
                 return jax.lax.cond(
@@ -144,12 +130,10 @@ class TriaxialTest(eqx.Module):
 
         def run_inner(carry, indices_chunk):
 
-            # Run physics_step 'stride' times without recording history
+
             segment_final_state, _ = jax.lax.scan(static_run, carry, indices_chunk)
 
-            # Return:
-            # 1. New Carry (start state for next segment)
-            # 2. Stack Output (the state at the end of this segment)
+
             return segment_final_state, segment_final_state
 
         num_steps = (
@@ -162,11 +146,11 @@ class TriaxialTest(eqx.Module):
         num_snapshots = num_steps // self.stride
         reshaped_indices = all_indices.reshape((num_snapshots, self.stride))
 
-        # Run Loop
+
         _, trajectory = jax.lax.scan(run_inner, (mp_init, law_init), reshaped_indices)
 
         if mp_init.num_points == 1:
-            # Squeeze singleton particle dimension (axis=1) if present
+
             def _squeeze_axis1(x):
                 try:
                     if hasattr(x, "ndim") and x.ndim >= 2 and x.shape[1] == 1:
