@@ -24,14 +24,14 @@ from ..grid.grid import GridDomain
 
 class DampingState(BaseForceState):
     """State for the Cundall damping force"""
-    alpha: Float[Array, ""]  # Damping coefficient (usually 0.0 to 1.0)
+    alpha: Float[Array, ""] 
 
 class Damping(Force):
     """
     Cundall (Local) Damping logic.
     F_damp = -alpha * |F_total| * sign(v)
     
-    This damping is specifically useful for quasi-static simulations (e.g., soil settling).
+    Damping is specifically useful for quasi-static simulations (e.g., soil settling).
     """
 
 
