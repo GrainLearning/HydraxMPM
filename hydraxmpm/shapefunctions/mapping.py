@@ -130,37 +130,6 @@ class ShapeFunctionMapping(eqx.Module):
         self._stencil_offsets = jnp.stack(mesh, axis=-1).reshape(-1, dim)
 
 
-    # def create_cache(
-    #     self,
-    #     num_points: int,
-    #     dim: int,
-    # ):
-    #     """
-    #     Creates an empty InteractionCache for given number of points and dimension. Used within MPM solver.Re
-    #     """
-
-
-    #     window_size = _stencil_offsets.shape[0]
-
-    #     # pre-compute indices
-    #     num_interactions = num_points * window_size
-    #     flat_indices = jnp.arange(num_interactions)
-
-    #     # set data fields for point and stencil ids
-    #     point_ids = (flat_indices // window_size).astype(jnp.uint32)
-    #     stencil_ids = (flat_indices % window_size).astype(jnp.uint32)
-
-    #     return InteractionCache(
-    #         node_hashes=jnp.zeros((num_interactions,), dtype=jnp.uint32),
-    #         shape_vals=jnp.zeros((num_interactions,)),
-    #         shape_grads=jnp.zeros((num_interactions, 3)),
-    #         rel_dist=jnp.zeros((num_interactions, 3)),
-    #         cpic_mask=jnp.ones((num_interactions,)),
-    #         point_ids=point_ids,
-    #         stencil_ids=stencil_ids,
-    #         _stencil_offsets=_stencil_offsets,
-    #     )
-
     def compute(
         self,
         position_stack: Array,

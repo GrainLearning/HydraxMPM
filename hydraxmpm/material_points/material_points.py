@@ -147,6 +147,8 @@ class MaterialPointState(BaseMaterialPointState):
     L_stack: Float[Array, "num_points 3 3"]
     stress_stack: Float[Array, "num_points 3 3"]
     F_stack: Float[Array, "num_points 3 3"]
+    
+    F_store_stack: Optional[Float[Array, "num_points 3 3"]] = None
 
     @classmethod
     def create(
@@ -161,6 +163,7 @@ class MaterialPointState(BaseMaterialPointState):
         L_stack: Optional[Float[Array, "num_points 3 3"]] = None,
         stress_stack: Optional[Float[Array, "num_points 3 3"]] = None,
         F_stack: Optional[Float[Array, "num_points 3 3"]] = None,
+        store_F: bool = False,
         **kwargs,
     ) -> Self:
         """Helper function to create MaterialPointState with default values."""
@@ -208,6 +211,11 @@ class MaterialPointState(BaseMaterialPointState):
             density_stack = kwargs.get("density_stack", jnp.full((num_points,), 1000.0))
             mass_stack = volume_stack * density_stack
 
+        if store_F:
+            F_store_stack = F_stack
+        else:
+            F_store_stack = None
+
         return cls(
             position_stack=position_stack,
             velocity_stack=velocity_stack,
@@ -218,6 +226,7 @@ class MaterialPointState(BaseMaterialPointState):
             L_stack=L_stack,
             stress_stack=stress_stack,
             F_stack=F_stack,
+            F_store_stack = F_store_stack
         )
 
     @property
@@ -271,6 +280,13 @@ class MaterialPointState(BaseMaterialPointState):
         # NotImplementedError("eps_stack property not implemented yet.")
         return get_hencky_strain_stack(self.F_stack)
 
+
+    @property
+    def stored_eps_stack(self):
+        """Stored Hencky strain tensor of material points."""
+        # NotImplementedError("stored_eps_stack property not implemented yet.")
+        return get_hencky_strain_stack(self.F_store_stack)
+    
     @property
     def eps_v_stack(self):
         """Volumetric strain of material points."""
@@ -288,20 +304,7 @@ class MaterialPointState(BaseMaterialPointState):
     @property
     def shear_strain_stack(self):
         return get_shear_strain_vm_stack(self.eps_stack)
-    # @property
-    # def gamma_stack(self):
-    #     NotImplementedError("gamma_stack property not implemented yet.")
-    #     pass
-    #     # return get_scalar_shear_strain_stack(self.eps_stack)
 
-    # @property
-    # def dgamma_dt_stack(self):
-    #     NotImplementedError("dgamma_dt_stack property not implemented yet.")
-    #     pass
-    #     # return get_scalar_shear_strain_stack(self.deps_dt_stack)
-
-    # @property
-    # def viscosity_stack(self):
-    #     NotImplementedError("viscosity_stack property not implemented yet.")
-    #     pass
-    #     # return (jnp.sqrt(3) * self.q_stack) / self.dgamma_dt_stack
+    @property
+    def stored_shear_strain_stack(self):
+        return get_shear_strain_vm_stack(self.stored_eps_stack)

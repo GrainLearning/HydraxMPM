@@ -20,6 +20,44 @@ from ..sdf.sdfobject import SDFObjectBase, SDFObjectState
 from .force import Force
 
 
+import jax
+import jax.numpy as jnp
+
+def apply_frictional_contact(
+    v_in, dist, normal, v_wall, friction_coeff, dt, gap, bias_factor=0.0
+):
+    """
+    Standard MPM Frictional Contact Logic.
+    Works for both Grid Nodes and Particle Ghost Velocities.
+    """
+    v_rel = v_in - v_wall
+    v_n_mag = jnp.dot(v_rel, normal)
+
+    # 1. Normal Impulse (Kinematic)
+    # The velocity needed to reach the 'gap' distance in one timestep
+    v_bias = jnp.maximum(0.0, (gap - dist) / dt * bias_factor)
+    delta_v_kinematic = jnp.maximum(0.0, v_bias - v_n_mag)
+
+
+    # 3. Resolve Normal Velocity (Non-penetration)
+    v_corrected_n = v_in + delta_v_kinematic * normal
+
+    # 4. Resolve Tangential Velocity (Friction)
+    v_rel_corrected = v_corrected_n - v_wall
+    v_n_vec = jnp.dot(v_rel_corrected, normal) * normal
+    v_t_vec = v_rel_corrected - v_n_vec
+    vt_mag = jnp.linalg.norm(v_t_vec)
+
+    # Coulomb Law: Friction Limit
+    friction_limit = friction_coeff * delta_v_kinematic
+    reduction = jnp.where(vt_mag > 1e-12, jnp.minimum(vt_mag, friction_limit), 0.0)
+    
+    # Apply reduction safely
+    v_t_frictional = v_t_vec * (1.0 - reduction / (vt_mag + 1e-12))
+
+    # Final Velocity = Wall + Normal Component + Frictional Tangent
+    return v_wall + v_n_vec + v_t_frictional
+
 class SDFCollider(Force):
     """
     SDF Collider Force for MPM Simulations.
@@ -49,6 +87,7 @@ class SDFCollider(Force):
         gap: float = 1e-4,
         friction: float = 1.0,
 
+
     ):
         """Initialize the SDFCollider with the given parameters."""
         if g_idx_list is None:
@@ -58,6 +97,8 @@ class SDFCollider(Force):
         self.sdf_idx = sdf_idx
         self.gap = gap
         self.base_friction = friction
+
+     
 
 
     def create_state(
@@ -96,8 +137,8 @@ class SDFCollider(Force):
         Projects grid momentum to satisfy the boundary condition.
         """
         # return world, mechanics
-
-    
+        if self.sdf_idx == -1:
+            return world, mechanics, sim_cache
 
         grid_caches = list(sim_cache.grids)
     
@@ -143,7 +184,7 @@ class SDFCollider(Force):
             # local_friction_stack = sdf_logic.get_surface_friction_stack(sdf_state, flat_coords)
             local_friction_stack = node_geom.friction
             friction_stack = self.base_friction * local_friction_stack
-
+            
             # Apply contact via vmap over all points to cover while domain
             new_vel = jax.vmap(self._collide_node, in_axes=(0, 0, 0, 0, 0, None))(
                 dis_stack, vel, normals_stack, v_object_stack, friction_stack, dt
@@ -184,52 +225,9 @@ class SDFCollider(Force):
         should_collide = is_inside | is_approaching
 
         def handle_collision(v_in):
-            
-            # Check if we  are  inside the gap
-            # add velocity bias to push us out
-            # by next timestep
-            # bias = (overlap)/dt * stiffness
-            # ensure we dont apply negative bias (suction)
-            bias_factor = 0.0  # good values (0.1 - 0.5)
-            overlap = self.gap - dist
-            v_bias = (overlap / dt) * bias_factor
-            v_bias = jnp.maximum(0.0, v_bias)
-
-            # # Solve normal velocity
-            # # Get velocity direction relative Velocity to object
-
-            delta_v_stop = jnp.maximum(0.0, -v_n_mag)
-
-            # # calculate the impulse to reach v_bias
-            # # if current velocity is already > v_bias,
-            # # we are moving fast enough
-            delta_v_n = v_bias - v_n_mag
-            delta_v_n = jnp.maximum(0.0, delta_v_n)
-
-            # apply impuse to velocity
-            v_corrected = v_in + delta_v_n * normal
-
-            # Friction
-            # Decompose normal and tangential velocity
-            v_rel_corrected = v_corrected - v_object
-            v_n_new = jnp.dot(v_rel_corrected, normal)
-            v_t_vec = v_rel_corrected - v_n_new * normal
-
-            vt_mag = jnp.linalg.norm(v_t_vec)
-
-            # Friction limits based on the Normal Impulse we just applied
-            # The "Normal Force" is proportional to delta_v_n / dt
-            friction_impulse_max = friction * delta_v_stop
-
-            # Calculate how much we can reduce tangential velocity
-            reduction = jnp.minimum(vt_mag, friction_impulse_max)
-
-            # Apply reduction
-            v_t_new = v_t_vec * (1.0 - reduction / (vt_mag + 1e-12))
-
-            # Reassemble
-            return v_object + v_n_new * normal + v_t_new
-
+            return apply_frictional_contact(
+            v_in, dist, normal, v_object, friction, dt, self.gap, bias_factor=0.0
+            )
 
         return jax.lax.cond(
             should_collide,
@@ -237,3 +235,4 @@ class SDFCollider(Force):
             lambda v: v,  # No collision, return original velocity
             v_node,
         )
+
