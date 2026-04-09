@@ -27,6 +27,9 @@ from ..utils.math_helpers import (
     safe_inv_scalar_clamped,
     inv_2x2_robust,
     reconstruct_stress_from_triaxial,
+    get_spin_tensor,
+    get_sym_tensor,
+    get_jaumann_increment
 )
 from ..material_points.material_points import MaterialPointState
 
@@ -39,25 +42,6 @@ from jaxtyping import Float, Array
 
 
 
-
-############ Move this to later
-
-def get_spin_tensor(L):
-    """Computes the Spin Tensor W (Skew-symmetric part of L)."""
-    return 0.5 * (L - L.T)
-
-def get_sym_tensor(L):
-    """Computes the Rate of Deformation D (Symmetric part of L)."""
-    return 0.5 * (L + L.T)
-
-def apply_jaumann_increment(tensor, W, dt):
-    """
-    Rotates a tensor by the spin W over timestep dt.
-    Increment = (W * A - A * W) * dt
-    """
-    # Note: A @ W.T is equivalent to - (A @ W) for skew-symmetric W
-    # Using commutator brackets [W, A] = WA - AW
-    return tensor + (W @ tensor - tensor @ W) * dt
 
 ####################
 
@@ -226,25 +210,6 @@ class ModifiedCamClay(ConstitutiveLaw):
         If q_stack is not provided we assume isotropic (q=)
         otherwise, we check if its within the yield surface.
         If outside, we project it back to the yield surface.
-
-        Triaxial initiation
-
-        We assume the relationship:
-        ρ = ρₚ / v
-        
-        Where:
-        v  = Specific Volume (1 + void_ratio)
-        ρ  = Bulk Density (kg/m³)
-        ρₚ = Particle Density (self.rho_p)
-    
-        
-        Args:
-            p_stack: Current hydrostatic pressure.
-            ocr_stack: Over-Consolidation Ratio (p_c / p).
-            q_stack: (Optional) Current shear stress.
-
-        Returns:
-            (LawState, specific_volume_stack)
         """
 
 
@@ -329,7 +294,7 @@ class ModifiedCamClay(ConstitutiveLaw):
                 density_stack: Float[Array, "num_points"]
         ) -> Tuple[ModifiedCamClayState, Float[Array, "num_points"]]:
             """
-            Case 3: Lab Data Initialization.
+
             We know pressure and density (v). We derive the internal hardening state (p_s).
             
             WARNING: This can result in 'Impossible' states if (p, v) is outside the NCL.
@@ -418,28 +383,22 @@ class ModifiedCamClay(ConstitutiveLaw):
         dt
     ):
 
-        # Decompose L into D (Strain Rate) and W (Spin)
+    
         D = get_sym_tensor(L) # symmetric part
         W = get_spin_tensor(L) # skew-symmetric part
 
-        # Strain increment (Pure deformation)
+
         deps_next = D * dt
 
-        ### OBJECTIVE STRESS UPDATE (JAUMANN) ###
-        # We rotate the *previous* tensors to align with the current 
-        # configuration before adding the new strain increment.
-        # This prevents rigid rotation from generating false stress.
+        ### Apply objective stress rate (Jaumann) ###
         
-        stress_prev_rot = apply_jaumann_increment(stress_prev, W, dt)
-        eps_e_prev_rot  = apply_jaumann_increment(eps_e_prev, W, dt)
+        stress_prev_rot = get_jaumann_increment(stress_prev, W, dt)
+        eps_e_prev_rot  = get_jaumann_increment(eps_e_prev, W, dt)
         
         # Use these rotated values for the rest of the calculation
         stress_prev = stress_prev_rot
         eps_e_prev = eps_e_prev_rot 
 
-
-        # strain increment via symmetric part of velocity gradient L
-        # deps_next = 0.5 * (L + L.T)*dt
 
         # reference stresses
         p_0 = get_pressure(stress_ref)
@@ -473,7 +432,7 @@ class ModifiedCamClay(ConstitutiveLaw):
 
 
         def elastic_update():
-            stress_next = s_tr - p_tr * jnp.eye(3)
+            stress_next = s_tr + p_tr * jnp.eye(3)
             eps_e_tr = eps_e_prev + deps_next
 
             return stress_next, eps_e_tr, p_c_prev
@@ -581,20 +540,20 @@ class ModifiedCamClay(ConstitutiveLaw):
             p_c_next = jnp.where(p_c_next, p_c_next, p_c_prev_safe)
 
 
-            stress_next = s_next - (p_next) * jnp.eye(3)
+            stress_next = s_next + (p_next) * jnp.eye(3)
 
             eps_e_v_next = (p_next - p_0) / K_next
 
             eps_e_d_next = (s_next - s_0) / (2.0 * G_next)
 
-            eps_e_next = eps_e_d_next - (1.0 / 3) * eps_e_v_next * jnp.eye(3)
+            eps_e_next = eps_e_d_next + (1.0 / 3) * eps_e_v_next * jnp.eye(3)
 
             return stress_next, eps_e_next, p_c_next
 
 
         # We treat it as disconnected at low pressures
         stress_next, eps_e_next, p_c_next = jax.lax.cond(
-            specific_volume <= self.N*0.999,
+            specific_volume <= self.N*0.999999,
             lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
             lambda: (0.0 * jnp.eye(3), eps_e_prev, p_c_prev),
         )
@@ -621,391 +580,3 @@ for _name in _helpers:
     _fn = globals().get(_name)
     if _fn is not None:
         setattr(ModifiedCamClay, _name, staticmethod(_fn))
-
-#     def precondition(
-#             self,
-#             *,
-#             p_stack: Float[Array, "num_points 1"] = None,
-#             specific_volume_stack: Float[Array, "num_points 1"]=None,
-#             p_s_stack: Float[Array, "num_points 1"] =None,
-#             q_stack: Float[Array, "num_points 1"] =None,
-#     ):
-#         """
-
-#         tries to do too much...
-
-#         Initialize the constitutive state based on partial inputs.
-
-#         Assumptions:
-
-#         - If q is not provided, we assume the soil is Normally Consolidated (on the Yield Surface).
-
-
-#         Here we use 2 knowns and 2 unknowns to solve
-
-#         given the volume state eqaution (swelling line)
-
-#         stress ratio (yield surface)
-
-#         currently only supports normally consolidated case
-
-
-#         """
-
-#         if p_s_stack is not None:
-#             p_stack = p_stack.squeeze()
-
-
-#         if specific_volume_stack is not None:
-#             specific_volume_stack = specific_volume_stack.squeeze()
-
-#         if p_s_stack is not None:
-#             p_s_stack = p_s_stack.squeeze()
-
-#         if q_stack is not None:
-#             q_stack = q_stack.squeeze()
-
-
-#         # >>> Case 1 <<<
-#         # input p (pressure), p_s (critical state pressure);
-#         # output v (specific volume), q (shear stress);
-#         if (p_stack is not None) & (p_s_stack is not None):
-#             # specific volume from swelling line
-#             specific_volume_stack = get_v_sl(
-#                 p_s_stack,
-#                 p_stack,
-#                 self.p_ref,
-#                 self.gamma,
-#                 self.lam,
-#                 self.kap
-#             )
-
-#             q_p_stack = get_qp_ys(
-#                 p_s_stack,
-#                 p_stack,
-#                 self.M
-#             )
-
-#             q_yield_stack = q_p_stack*p_stack
-
-
-#         # >>> Case 2 <<<
-#         # input p (pressure), q (shear stress);
-#         # output p_s (critical state pressure), v (specific volume)
-#         elif (p_stack is not None) & (q_stack is not None):
-#             # includes critical state case when q=Mp
-
-#             q_p_stack = q_stack/p_stack
-
-#             # analytical inversion for p_s, from yield surface for MCC
-#             p_s_stack = (0.5*(q_p_stack / self.M)**2 + 0.5)*p_stack
-
-#             specific_volume_stack = get_v_sl(
-#                 p_s_stack,
-#                 p_stack,
-#                 self.p_ref,
-#                 self.gamma,
-#                 self.lam,
-#                 self.kap
-#             )
-
-#             q_yield_stack = q_p_stack*p_stack
-
-
-#         # >>> Case 3 <<<
-#         # input p (pressure), v (specific volume)
-#         # output p_s (critical state pressure), q (shear stress)
-#         elif (p_stack is not None) & (specific_volume_stack is not None):
-#             # analytical inversion for p_s, from swelling line for MCC
-#             # p_s = [ (Γ * p_ref^λ) / (v_sl * p^κ) ] ^ (1 / (λ - κ))
-#             p_s_stack =((self.gamma*self.p_ref**self.lam)/(specific_volume_stack*p_stack**self.kap))**(1/(self.lam - self.kap))
-
-#             q_p_stack = get_qp_ys(
-#                 p_s_stack,
-#                 p_stack,
-#                 self.M
-#             )
-
-#             q_yield_stack = q_p_stack*p_stack
-
-
-#         # if q is provided, check if on yield surface
-#         # if above yield surface, project back
-#         # if below, keep as is
-#         if q_stack is not None:
-#             q_p_inp_stack = q_stack/p_stack
-#             yf_check = jnp.abs(q_p_inp_stack - q_p_stack)
-#             q_stack = jnp.where(yf_check>0,q_yield_stack,q_stack)
-#         else:
-#             q_stack = q_yield_stack
-
-#         return p_s_stack.reshape(-1,1), specific_volume_stack.reshape(-1,1), q_stack.reshape(-1,1)
-
-
-# #     @property
-# #     def GAMMA(self):
-# #         """Reference (natural) logarithmic specific volume of critical state line (CSL) at 1kPa
-
-# #         #     Returns ln_GAMMA
-# #         #"""
-
-# #         return self.ln_N - (self.lam - self.kap) * jnp.log(2)
-
-# #     @property
-# #     def _cp(self):
-# #         return self.lam - self.kap
-
-# #     def CSL(self, p):
-# #         """Equation for critical state line (CSL) in double log specific volume/pressure space (ln v - ln p) space.
-
-# #         Returns specific volume (not logaritm)
-# #         """
-# #         return jnp.exp(self.GAMMA - self.lam * jnp.log(p))
-
-# #     def CSL_q_p(self, p):
-# #         """Equation for critical state line (CSL) in scalar shear stress- pressure (q - p) space.
-
-# #         Returns specific volume (not logaritm)
-# #         """
-# #         return p * self.M
-
-# #     def ICL(self, p):
-# #         """Equation for isotropic compression line (ICL) in double log specific volume/pressure space (ln v - ln p) space.
-
-# #         Returns specific volume (not logaritm)
-# #         """
-# #         return jnp.exp(self.ln_N - self.lam * jnp.log(p))
-
-# #     # def SL(p):
-
-# #     def get_p_0(self, ln_v0):
-# #         return self.px_hat_stack * jnp.exp(
-# #             (ln_v0, self.ln_N + self.lam * self.px_hat_stack) / self.kap
-# #         ) ** (-1)
-
-# #     def get_ln_v0(self, stress, ln_N=None):
-# #         p = get_pressure(stress)
-
-# #         q = get_q_vm(stress)
-
-# #         if ln_N is None:
-# #             ln_N = self.ln_N
-
-# #         xi = (self.lam - self.kap) * jnp.log(self.R)
-
-# #         ln_v = ln_N - self.lam * jnp.log(p) - (self.lam - self.kap) * jnp.log(self.R)
-# #         # ln_v_eta = (
-# #         #     ln_N
-# #         #     - self.lam * jnp.log(p)
-# #         #     - (self.lam - self.kap) * jnp.log(1 + q**2 / self.M**2)
-# #         # )
-# #         # ln_v = ln_v_eta - xi
-
-# #         return ln_v
-
-# #         # return ln_N - self.lam * jnp.log(pc0) + self.kap * jnp.log(self.R)
-
-
-#         # stress_0_stack = material_points.stress_stack
-#         # p_0_stack = material_points.p_stack
-
-#         # # pressure needs to be at least 1 Pa
-#         # # avoid numerical issues with log(0)
-#         # p_0_stack = jnp.clip(p_0_stack, 1.0, None)
-
-#         # if self.N is None:
-#         #     # if reference specific volume on bilogarithmic ln v - ln p space at 1kPa is not given
-#         #     # we treat the the initial density at as this point
-#         #     # Not recommended for real simulations
-
-#         #     density_initial_stack = material_points.density0_stack
-
-#         #     N = self.rho_p / density_initial_stack
-#         #     warnings.warn("Reference specific volume N not given. Computing from initial density. This is not recommended for real simulations.", UserWarning)
-#         # else:
-
-
-# # class ModifiedCamClay(ConstitutiveLaw):
-# #     nu: TypeFloat
-# #     M: TypeFloat
-# #     R: TypeFloat
-# #     lam: TypeFloat
-# #     kap: TypeFloat
-# #     p_t: TypeFloat = 0.0
-# #     ln_N: Optional[TypeFloat] = None
-
-# #     K_min: Optional[TypeFloat] = None
-# #     K_max: Optional[TypeFloat] = None
-
-# #     px_hat_stack: Optional[TypeFloatScalarPStack] = None
-# #     stress_0_stack: Optional[TypeFloatMatrixPStack] = None
-
-# #     settings: ConvergenceControlConfig
-
-# #     def __init__(
-# #         self: Self,
-# #         nu: TypeFloat,
-# #         M: TypeFloat,
-# #         R: TypeFloat,
-# #         lam: TypeFloat,
-# #         kap: TypeFloat,
-# #         K_min: TypeFloat = None,
-# #         K_max: TypeFloat = None,
-# #         ln_N: Optional[TypeFloat] = None,
-# #         p_t: Optional[TypeFloat] = 0.0,
-# #         settings: Optional[dict | ConvergenceControlConfig] = None,
-# #         **kwargs,
-# #     ) -> Self:
-# #         self.nu = nu
-
-# #         self.M = M
-
-# #         self.R = R
-
-# #         self.lam = lam
-
-# #         self.kap = kap
-
-# #         self.p_t = p_t
-
-# #         self.ln_N = ln_N
-
-# #         self.K_min = K_min
-
-# #         self.K_max = K_max
-
-# #         self.eps_e_stack = kwargs.get("eps_e_stack")
-
-# #         self.px_hat_stack = kwargs.get("px_hat_stack")
-
-# #         self.stress_0_stack = kwargs.get("stress_0_stack")
-
-# #         # settings used for convergence control
-# #         if settings is None:
-# #             settings = dict()
-# #         if isinstance(settings, dict):
-# #             self.settings = ConvergenceControlConfig(
-# #                 rtol=settings.get("rtol", 1e-3),
-# #                 atol=settings.get("atol", 1e3),
-# #                 max_iter=settings.get("max_iter", 1000),
-# #                 throw=settings.get("throw", True),
-# #                 # plastic multiplier and volumetric strain, respectively
-# #                 lower_bound=settings.get("lower_bound", (0, -1.0)),
-# #                 upper_bound=settings.get("upper_bound", (1000.0, 1.0)),
-# #             )
-# #         else:
-# #             self.settings = settings
-# #         del settings
-
-# #         super().__init__(**kwargs)
-
-# #     def init_state(self: Self, material_points: MaterialPoints):
-# #         # tension cuttoff
-# #         # at p_0=px = 1 Pa
-# #         # then ln_N = ln_sl
-# #         # i.e., normall consolidation line and swelling line both are zero
-
-# #         # pressure has to be at least 1 Pa
-# #         def clip_(p):
-# #             return jnp.clip(p, 1.0, None)
-
-# #         stress_0_stack = material_points.stress_stack
-# #         p_0_stack = material_points.p_stack
-
-# #         ln_N = self.ln_N
-
-# #         rho_0 = self.rho_0
-# #         if self.ln_N is None:
-# #             phi_N = self.rho_0 / self.rho_p
-# #             N = 1.0 / phi_N
-# #             ln_N = jnp.log(N)
-# #         else:
-# #             N = jnp.exp(self.ln_N)
-# #             phi_N = 1.0 / N
-# #             rho_0 = self.rho_p * phi_N
-
-# #         ln_v0 = jax.vmap(self.get_ln_v0, in_axes=(0, None))(stress_0_stack, ln_N)
-
-# #         rho = self.rho_p / jnp.exp(ln_v0)
-
-# #         px_hat_stack = p_0_stack * self.R
-
-# #         eps_e_stack = jnp.zeros((material_points.num_points, 3, 3))
-# #         return self.post_init_state(
-# #             material_points,
-# #             rho_0=rho_0,
-# #             rho=rho,
-# #             ln_N=ln_N,
-# #             stress_0_stack=stress_0_stack,
-# #             px_hat_stack=px_hat_stack,
-# #             eps_e_stack=eps_e_stack,
-# #         )
-
-# #     def update(
-# #         self: Self,
-# #         material_points: MaterialPoints,
-# #         dt: TypeFloat,
-# #         dim: Optional[TypeInt] = 3,
-# #     ) -> Tuple[MaterialPoints, Self]:
-# #         """Update the material state and particle stresses for MPM solver."""
-
-# #         deps_dt_stack = material_points.deps_dt_stack
-
-# #         new_stress_stack, new_eps_e_stack, new_px_hat_stack = self.vmap_update_ip(
-# #             deps_dt_stack * dt,
-# #             self.eps_e_stack,
-# #             material_points.stress_stack,
-# #             self.px_hat_stack,
-# #             self.stress_0_stack,
-# #             material_points.rho_stack,
-# #         )
-# #         new_self = eqx.tree_at(
-# #             lambda state: (state.eps_e_stack, state.px_hat_stack),
-# #             self,
-# #             (new_eps_e_stack, new_px_hat_stack),
-# #         )
-
-# #         new_material_points = eqx.tree_at(
-# #             lambda state: (state.stress_stack),
-# #             material_points,
-# #             (new_stress_stack),
-# #         )
-
-# #         # new_self = new_self.post_update(new_stress_stack, deps_dt_stack, dt)
-# #         return new_material_points, new_self
-
-# #     # def ln_Vk(self, ln_v, p_0):
-# #     #     """Reference (natural) logarithmic specific volume of swelling line (SL) at 1kPa
-# #     #     (input current specific volume/ pressure)
-# #     #     Returns ln_GAMMA
-# #     #     """
-# #     # return ln_v + self.kap * jnp.log(p_0 / self.R)
-
-# #     def SL(self, p, ln_v0, p_0, return_ln=False):
-# #         ln_v_sl = ln_v0 + self.kap * jnp.log(p_0)
-# #         ln_v = ln_v_sl - self.kap * jnp.log(p)
-
-# #         if return_ln:
-# #             return ln_v
-# #         else:
-# #             return jnp.exp(ln_v)
-
-# #     def get_dt_crit(self, material_points, cell_size, dt_alpha=0.5):
-# #         """Get critical timestep of material poiints for stability."""
-
-# #         def vmap_dt_crit(p, rho, vel):
-# #             K = get_K(self.kap, p, self.K_min, self.K_max)
-# #             G = get_G(self.nu, K)
-
-# #             cdil = jnp.sqrt((K + (4 / 3) * G) / rho)
-
-# #             c = jnp.abs(vel) + cdil * jnp.ones_like(vel)
-# #             return c
-
-# #         c_stack = jax.vmap(vmap_dt_crit)(
-# #             material_points.p_stack,
-# #             material_points.rho_stack,
-# #             material_points.velocity_stack,
-# #         )
-# #         return (dt_alpha * cell_size) / jnp.max(c_stack)
-

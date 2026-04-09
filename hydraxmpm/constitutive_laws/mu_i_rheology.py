@@ -43,31 +43,31 @@ class MuI_LC(ConstitutiveLaw):
     """
 
     # Material Constants
-    mu_s: float  # Static friction coefficient
-    mu_d: float  # Dynamic friction coefficient
-    I_0: float   # Inertial number constant
-    K: float     # Bulk Modulus
-    rho_p: float # Particle grain density
-    d_p: float   # Mean particle diameter
+    mu_s: float | Float[Array, ""]  # Static friction coefficient
+    mu_d: float | Float[Array, ""]  # Dynamic friction coefficient
+    I_0: float | Float[Array, ""]   # Inertial number constant
+    K: float | Float[Array, ""]     # Bulk Modulus
+    rho_p: float | Float[Array, ""] # Particle grain density
+    d_p: float | Float[Array, ""]   # Mean particle diameter
 
     # Regularization parameters
-    alpha: float 
-    alpha_sq: float
+    alpha: float | Float[Array, ""] 
+    alpha_sq: float | Float[Array, ""]
 
     # Stability parameters
-    p_min_calc: float = 10.0
+    p_min_calc: float | Float[Array, ""] = 0.0
 
     def __init__(
         self,
         *,
-        mu_s: float,
-        mu_d: float,
-        I_0: float,
-        d_p: float,
-        K: float = 1.0e6,
-        rho_p: float = 2650.0,
-        alpha: float = 1e-4,
-        p_min_calc: float = 10.0,
+        mu_s: float | Float[Array, ""],
+        mu_d: float | Float[Array, ""],
+        I_0: float | Float[Array, ""],
+        d_p: float | Float[Array, ""],
+        K: float | Float[Array, ""] = 1.0e6,
+        rho_p: float | Float[Array, ""] = 2650.0,
+        alpha: float | Float[Array, ""] = 1e-6,
+        p_min_calc: float | Float[Array, ""] = 0.0,
         requires_F_reset: bool = True,
     ):
         """
@@ -91,6 +91,7 @@ class MuI_LC(ConstitutiveLaw):
         self.K = K
         self.rho_p = rho_p
         
+     
         self.alpha = alpha
         self.alpha_sq = alpha * alpha
         
@@ -111,7 +112,10 @@ class MuI_LC(ConstitutiveLaw):
         
         # Invert linear EOS: rho_ref = rho / (p/K + 1)
         density_ref_stack = density_stack / ((pressure_stack / self.K) + 1.0)
-        
+        jax.debug.print("Initial density range: [{min:.2f}, {max:.2f}]",
+            min=jnp.min(density_ref_stack),
+            max=jnp.max(density_ref_stack)
+        )
         return MuIState(density_ref_stack=density_ref_stack)
 
     def create_state(
@@ -121,7 +125,7 @@ class MuI_LC(ConstitutiveLaw):
         """Creates state using initial material point configuration."""
         
         density_initial_stack = material_points.mass_stack / material_points.volume0_stack
-        
+
         return self.create_state_from_density(
             density_stack=density_initial_stack,
             pressure_stack=material_points.pressure_stack
@@ -136,79 +140,51 @@ class MuI_LC(ConstitutiveLaw):
         dt
     ) -> Float[Array, "3 3"]:
         """Calculates the Cauchy stress for a single particle."""
+
+        deps_dt = 0.5 * (L + L.T) 
+
         
-        # 1. Strain Rate & Shear Rate
-        # ---------------------------
-        # D = 0.5 * (L + L.T)
-        deps_dt = 0.5 * (L + L.T) * dt # Strain increment
-        
-        # Volumetric and Deviatoric Strain Increment
+
         deps_v = jnp.trace(deps_dt)
         deps_dev = deps_dt - (deps_v / 3.0) * jnp.eye(3)
         
-        # Scalar shear strain increment (gamma_dot * dt)
-        # Definition: dgamma = sqrt(2 * e_dev : e_dev)
-        dgamma = jnp.sqrt(2.0 * jnp.sum(deps_dev * deps_dev))
 
-        # 2. Pressure (Equation of State)
-        # -------------------------------
+        dot_gamma = jnp.sqrt(2.0 * jnp.sum(deps_dev * deps_dev))
+
+
         current_density = mass / volume
         rho_ratio = current_density / density_ref
         
-        # Linear EOS: p = K * (rho/rho_0 - 1)
+        # Linear EOS
         p = self.K * (rho_ratio - 1.0)
-        
-        # Connectivity Check (Tension Cutoff)
-        # If density is too low (expanded) or shear is essentially zero, treat as disconnected
-        is_connected = (rho_ratio > 1.0) # & (dgamma > 1e-22)
+
+        is_connected = (rho_ratio > 1.0) 
         
         def connected_update():
-            # Apply pressure floor for stability in I calculation
+
             p_safe = jnp.maximum(p, self.p_min_calc)
-            
-            # 3. Viscoplasticity
-            # ------------------
-            # Calculate Inertial Number components
-            # I = d_p * gamma_dot / sqrt(p / rho_p)
-            
-            # Note: We calculate 'eta' such that stress_dev = eta * deps_dev
-            # This 'eta' is effectively (2 * viscosity_eff)
-            
-            # Term 1: Static Yielding (Regularized)
-            # eta_s = (mu_s * p) / gamma_dot (regularized)
-            eta_s = (self.mu_s * p_safe) / jnp.sqrt(dgamma**2 + self.alpha_sq)
-            
-            # Term 2: Dynamic Friction
-            # delta_mu = mu_d - mu_s
-            # eta_d comes from: mu(I) = mu_s + delta_mu / (1 + I_0/I)
+
+            eta_s = (self.mu_s * p_safe) / jnp.sqrt(dot_gamma**2 + self.alpha**2)
+
             delta_mu = self.mu_d - self.mu_s
             
-            # Xi represents the pressure confinement term
-            xi = self.I_0 * jnp.sqrt(p_safe / self.rho_p)
+            #  pressure confinement term
+            pconf = self.I_0 * jnp.sqrt(p_safe / self.rho_p)
             
-            # d_p * dgamma is the numerator of I (without the time scaling of dt, careful here)
-            # Since dgamma is strain increment, we treat dgamma/dt as rate.
-            # However, the formulation in the old code seemed to scale stress directly by strain increment.
-            # Replicating old logic:
-            eta_d = (self.d_p * p_safe * delta_mu) / (xi + self.d_p * dgamma)
+
+            eta_d = (self.d_p * p_safe * delta_mu) / (pconf + self.d_p * dot_gamma)
 
             eta_total = eta_s + eta_d
             
-            # 4. Final Stress
-            # ---------------
-            # sigma = -pI + eta * deps_dev
-            # Note: mathematically this looks like Sigma = -pI + Visc * Strain_Inc
-            # This implies 'eta' implies stiffness, or the code relies on implicit dt scaling.
-            # Assuming consistency with previous implementation:
-            stress = -p_safe * jnp.eye(3) + eta_total * deps_dev
+
+            stress = p_safe * jnp.eye(3) + eta_total * deps_dev
             return stress
 
-        # 5. Branching
-        # ------------
+
         stress_next = jax.lax.cond(
             is_connected,
             connected_update,
-            lambda: jnp.zeros((3, 3)) # Disconnected / Vacuum state
+            lambda: jnp.zeros((3, 3)) 
         )
         
         return stress_next

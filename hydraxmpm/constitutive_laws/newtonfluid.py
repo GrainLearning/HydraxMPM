@@ -26,9 +26,6 @@ class NewtonFluidState(ConstitutiveLawState):
 
 class NewtonFluid(ConstitutiveLaw):
     """Nearly incompressible Newtonian fluid.
-
-    - Tait-Murnaghan power law to link density to pressure
-    - Shear History Suppression option to reset shear deformation (Default)
     Attributes:
         K: Bulk modulus.
         viscosity: Viscosity.
@@ -92,7 +89,7 @@ class NewtonFluid(ConstitutiveLaw):
     
     def _update_stress(
         self,
-        L,      # Velocity Gradient
+        L, 
         mass,
         volume,
         density_ref,
@@ -109,12 +106,11 @@ class NewtonFluid(ConstitutiveLaw):
         # Equation of State (EOS, Pressure)
         density = mass / volume
 
-        # Tait-Murnaghan EOS
+        # EOS
         # p = K * ((rho/rho_0)^beta - 1)
         ratio = density / density_ref
 
-        # Numerical safeguard: prevent NaN if volume explodes (ratio < 0)
-        # and prevent extreme negative pressures (cavitation limit optional)
+        # Prevent extreme negative pressures 
         ratio = jnp.maximum(ratio, 1e-6) 
 
         p = self.K * (ratio**self.beta - 1.0)
@@ -159,9 +155,6 @@ class NewtonFluid(ConstitutiveLaw):
         """Calculates CFL limit based on sound speed."""
         
         def particle_c(rho):
-            # c = sqrt(dp/drho) ~ sqrt(K/rho) (simplified)
-            # Actual: c = sqrt( beta * K / rho_0 * (rho/rho_0)^(beta-1) )
-            # Conservative Estimate: c = sqrt(K/rho) * safety
             return jnp.sqrt(self.K * self.beta / rho)
 
         rho = mp_state.mass_stack / mp_state.volume_stack

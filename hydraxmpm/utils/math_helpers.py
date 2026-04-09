@@ -11,6 +11,46 @@ import jax.numpy as jnp
 from jaxtyping import Float, Array
 from typing import Any, Tuple
 
+def get_spin_tensor(L):
+    """Get the Spin Tensor W"""
+    return 0.5 * (L - L.T)
+
+
+def get_sym_tensor(L):
+    """Get the Rate of Deformation D"""
+    return 0.5 * (L + L.T)
+
+
+def get_jaumann_increment(tensor, W, dt):
+    """
+    Rotates a tensor by the spin W over timestep dt.
+    """
+    return tensor + (W @ tensor - tensor @ W) * dt
+
+
+def inv_3x3_robust(m, gradient_clip_val=1e6):
+    """Inverts a 3x3 matrix using universal robust scalar inverse."""
+    a, b, c = m[0, 0], m[0, 1], m[0, 2]
+    d, e, f = m[1, 0], m[1, 1], m[1, 2]
+    g, h, i = m[2, 0], m[2, 1], m[2, 2]
+
+    A = e * i - f * h
+    B = -(d * i - f * g)
+    C = d * h - e * g
+    D = -(b * i - c * h)
+    E = a * i - c * g
+    F = -(a * h - b * g)
+    G = b * f - c * e
+    H = -(a * f - c * d)
+    I_ = a * e - b * d
+
+    det = a * A + b * B + c * C
+    inv_det = safe_inv_scalar_clamped(det, gradient_clip_val)
+
+    inv = jnp.array([[A, D, G], [B, E, H], [C, F, I_]]) * inv_det
+    return inv
+
+
 def get_double_contraction(A, B):
     """"
     Computes tensor double contraction A:B = trace(A@ B.T)
@@ -27,12 +67,12 @@ def get_pressure(stress):
 
 
     $$
-    p = -\\mathrm{trace} ( \\boldsymbol \\sigma ) / \\mathrm{dim}
+    p = \\mathrm{trace} ( \\boldsymbol \\sigma ) / \\mathrm{dim}
     $$
 
     """
     # axis1=-2, axis2=-1 takes last two dimensions as stress tensor 3x3
-    return -(1 / 3) * jnp.trace(stress, axis1=-2, axis2=-1)
+    return (1 / 3) * jnp.trace(stress, axis1=-2, axis2=-1)
 
 
 def get_dev_stress(stress, pressure=None):
@@ -59,7 +99,7 @@ def get_dev_stress(stress, pressure=None):
     # to match (...,3,3)
     p_expanded = pressure[..., None, None]
 
-    return stress + jnp.eye(3) * p_expanded
+    return stress - jnp.eye(3) * p_expanded
 
 
 def get_J2(stress=None, dev_stress=None, pressure=None):
@@ -108,7 +148,7 @@ def get_scalar_shear_stress(stress, dev_stress, pressure):
 
 def get_volumetric_strain(strain):
     "Get compressive positive volumetric strain."
-    return -jnp.trace(strain, axis1=-2, axis2=-1)
+    return jnp.trace(strain, axis1=-2, axis2=-1)
 
 
 
@@ -131,13 +171,14 @@ def get_hencky_strain(F):
     """
     u, s, vh = jnp.linalg.svd(F, full_matrices=False)
 
-    # Avoid log(0) numerical issues
+    # avoid log(0) numerical issues
     s = jnp.clip(s, 1e-12, None)
 
-    # 1. Principal Strains
-    log_s = jnp.log(s)
+    # principal Strains
+    # note, here we have compression positive!
+    log_s = -jnp.log(s)
 
-    # 2. Rotate back to global frame
+    # rotate back to global frame
     # Spatial Hencky Strain: eps = U @ diag(ln(s)) @ U.T
     # rank agnostic  jnp.diag(log_s), then u @ eps_principal @ u.T
     eps_spatial = jnp.einsum('...ik,...k,...jk->...ij', u, log_s, u)
@@ -191,7 +232,9 @@ def get_dev_strain(strain, vol_strain=None):
     if vol_strain is None:
         vol_strain = get_volumetric_strain(strain)
         
-    return strain + (vol_strain[..., None, None] / 3.0) *jnp.eye(3)
+    return strain - (vol_strain[..., None, None] / 3.0) *jnp.eye(3)
+
+
 # --------------------------------------------------------------
 # Stack Aliases (Backward Compatibility)
 # --------------------------------------------------------------
@@ -252,6 +295,8 @@ def get_strain_rate_tensor_stack(L_stack):
 
 def get_shear_strain_vm_stack(strain_stack, dev_strain_stack=None):
     return get_shear_strain_vm(strain_stack,dev_strain_stack)
+
+
 
 # --------------------------------------------------------------
 # TODO
@@ -496,20 +541,23 @@ def get_phi_from_bulk_density_stack(absolute_density_stack, bulk_density_stack):
 
 
 def precondition_from_lithostatic(
-    density_stack: Float[Array, "num_points 1"],
-    depth_stack: Float[Array, "num_points 1"],
+    density_stack: Float[Array, "num_points"],
+    depth_stack: Float[Array, "num_points"],
     gravity,
+    slope_angle_deg: float = 0.0,
     k0=0.5,
 ):
     """
     Initializes the state of the model based on lithostatic lithostatic gravity loading and input density.
     """
-    density_stack = density_stack
-    depth_stack = depth_stack
+
+    theta = jnp.radians(slope_angle_deg)
 
     # calculate vertical stress (lithostatic)
     # sigma_v = rho * g * z
-    sigma_v_stack = density_stack * gravity * depth_stack
+    sigma_v_stack = density_stack * gravity * depth_stack*jnp.cos(theta)
+
+    tau_stack = density_stack * gravity * depth_stack * jnp.sin(theta)
 
     # calculate horizontal stress (K0 assumption)
     sigma_h_stack = k0 * sigma_v_stack
@@ -517,9 +565,10 @@ def precondition_from_lithostatic(
     # convert to invariants (p, q)
     # assuming triaxial symmetry (sigma_x = sigma_y = sigma_h)
     p_stack = (sigma_v_stack + 2.0 * sigma_h_stack) / 3.0
-    q_stack = jnp.abs(sigma_v_stack - sigma_h_stack)
 
-    return p_stack.reshape(-1, 1), q_stack.reshape(-1, 1)
+    q_stack = jnp.sqrt((sigma_v_stack - sigma_h_stack)**2 + 3.0 * tau_stack**2)
+
+    return p_stack, q_stack
 
 
 def reconstruct_stress_from_triaxial(
@@ -536,7 +585,7 @@ def reconstruct_stress_from_triaxial(
     sig_h = p_stack - (1.0 / 3.0) * q_stack
 
     def make_tensor(sv, sh):
-        return jnp.diag(jnp.array([-sh, -sh, -sv]))  # Assuming Z is vertical
+        return jnp.diag(jnp.array([sh, sh, sv]))  # Assuming Z is vertical
 
     stress0_stack = jax.vmap(make_tensor)(sig_v, sig_h)
 
