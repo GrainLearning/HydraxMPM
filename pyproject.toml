@@ -13,9 +13,6 @@ dependencies = [
     "vtk>=9.5.2",
     "rerun-sdk>=0.28.1",
     "optax>=0.2.6",
-    "trimesh>=4.11.0",
-    "mesh-to-sdf>=0.0.15",
-    "mujoco-mjx>=3.4.0",
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},
@@ -46,9 +43,8 @@ plot = [
     "matplotlib>=3.10.8",
     "pyvista[all]>=0.44.2",
     "vtk>=9.5.2",
+    "seaborn>=0.13.2",
 ]
-
-
 
 [build-system]
 requires = ["hatchling"]
@@ -62,9 +58,6 @@ include = ["hydraxmpm/*"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["hydraxmpm"]
-
-
-
 
 [tool.ruff.lint]
 select = [
