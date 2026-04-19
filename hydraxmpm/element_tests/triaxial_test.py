@@ -11,7 +11,8 @@ class TriaxialTest(eqx.Module):
     confine: float | Float[Array, ""]
     axial_rate: float | Float[Array, "..."]
     dt: float | Float[Array, "..."]
-    is_undrained: bool = (False,)
+    is_undrained: bool = False
+    is_p_constant: bool = False
     num_steps: Optional[int] = 2000
     num_newton_iters: int = 20
     stride: int = 1
@@ -57,19 +58,21 @@ class TriaxialTest(eqx.Module):
 
             def get_L_drained():
                 def residual(lateral_rate):
-                    
                     L = jnp.zeros((1, 3, 3))
                     L = L.at[0, 0, 0].set(lateral_rate)  # L_11
                     L = L.at[0, 1, 1].set(lateral_rate)  # L_22
                     L = L.at[0, 2, 2].set(curr_rate)  # L_33
 
-       
                     mp_out, _ = self.solver.step(mp, law, L, curr_dt)
-   
- 
                     sigma_xx = mp_out.stress_stack[0, 0, 0]
+                    mean_pressure = jnp.trace(mp_out.stress_stack[0]) / 3.0
 
-                    return sigma_xx - self.confine
+                    return jax.lax.cond(
+                        self.is_p_constant,
+                        lambda _: mean_pressure - self.confine,
+                        lambda _: sigma_xx - self.confine,
+                        operand=None,
+                    )
 
                 def step_fn(carry, _):
                     x = carry
