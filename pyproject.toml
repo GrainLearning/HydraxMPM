@@ -6,13 +6,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "equinox>=0.13.2",
-    "jax[cuda]>=0.8.2",
     "jaxtyping>=0.3.5",
+    "scipy>=1.14.1",
     "scikit-image>=0.26.0",
     "typeguard==2.13.3",
     "vtk>=9.5.2",
     "rerun-sdk>=0.28.1",
     "optax>=0.2.6",
+    "readme-md>=2018.11.23",
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},
@@ -32,9 +33,25 @@ classifiers = [
 urls = {repository = "https://github.com/GrainLearning/HydraxMPM" }
 
 [project.optional-dependencies]
+
 storage = [
     "numcodecs>=0.16.5",
     "zarr>=3.1.6",
+    "h5py>=3.14.0",
+]
+
+cuda = [
+    "jax[cuda12]>=0.4.30", 
+]
+cpu = [
+    "jax[cpu]>=0.4.30"
+]
+
+plot = [
+    "matplotlib>=3.10.8",
+    "pyvista[all]>=0.44.2",
+    "vtk>=9.5.2",
+    "seaborn>=0.13.2",
 ]
 
 [dependency-groups]
@@ -45,12 +62,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "zensical>=0.0.15",
 ]
-plot = [
-    "matplotlib>=3.10.8",
-    "pyvista[all]>=0.44.2",
-    "vtk>=9.5.2",
-    "seaborn>=0.13.2",
-]
+
 
 [build-system]
 requires = ["hatchling"]
