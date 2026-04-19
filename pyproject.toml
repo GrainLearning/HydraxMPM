@@ -31,6 +31,12 @@ classifiers = [
 ]
 urls = {repository = "https://github.com/GrainLearning/HydraxMPM" }
 
+[project.optional-dependencies]
+storage = [
+    "numcodecs>=0.16.5",
+    "zarr>=3.1.6",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",

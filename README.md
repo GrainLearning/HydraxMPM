@@ -28,7 +28,7 @@ The software is built on the JAX-ecosystem. It leverages automatic differentiati
     ```
 3.  **Run Example:**
     ```bash
-    uv run ./examples/collapse/collapse.py
+    uv run ./projects/collapse/collapse.py
     ```
 
 
