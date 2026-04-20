@@ -110,8 +110,11 @@ from .utils.math_helpers import (
     get_dev_strain,
     get_volumetric_strain,
     get_q_vm,
-    inv_2x2_robust
+    inv_2x2_robust,
+    rotation_2d
 )
+
+from jaxtyping import Array, Float
 
 
 hook.uninstall()

@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "equinox>=0.13.2",
-    "h5py>=3.14.0",
     "jaxtyping>=0.3.5",
     "scipy>=1.14.1",
     "scikit-image>=0.26.0",
@@ -34,11 +33,29 @@ classifiers = [
 urls = {repository = "https://github.com/GrainLearning/HydraxMPM" }
 
 [project.optional-dependencies]
+
 cuda = [
     "jax[cuda12]>=0.4.30", 
 ]
 cpu = [
-    "jax[cpu]>=0.4.30",
+    "jax[cpu]>=0.4.30"
+]
+storage = [
+    "numcodecs>=0.16.5",
+    "zarr>=3.1.6",
+    "h5py>=3.14.0",
+]
+plot = [
+    "matplotlib>=3.10.8",
+    "pyvista[all]>=0.44.2",
+    "vtk>=9.5.2",
+    "seaborn>=0.13.2",
+]
+full-cuda = [
+    "hydraxmpm[cuda,storage,plot]"
+]
+full-cpu = [
+    "hydraxmpm[cpu,storage,plot]"
 ]
 
 [dependency-groups]
@@ -49,20 +66,13 @@ dev = [
     "pytest-cov>=6.0.0",
     "zensical>=0.0.15",
 ]
-plot = [
-    "matplotlib>=3.10.8",
-    "pyvista[all]>=0.44.2",
-    "vtk>=9.5.2",
-    "seaborn>=0.13.2",
-]
-
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-default-groups = ["plot","dev"]
+default-groups = ["dev"]
 
 [tool.hatch.build]
 include = ["hydraxmpm/*"]

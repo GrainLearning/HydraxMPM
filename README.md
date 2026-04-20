@@ -17,7 +17,16 @@ The software is built on the JAX-ecosystem. It leverages automatic differentiati
 
 ## Installation
 
-1. **Install uv:** Follow instructions [here](https://docs.astral.sh/uv/getting-started/installation/).
+1.  **Install uv:** Follow instructions [here](https://docs.astral.sh/uv/getting-started/installation/).
+2.  **Clone & Install Dependencies:**
+    ```bash
+    git clone https://github.com/GrainLearning/HydraxMPM.git && cd HydraxMPM
+    uv sync
+    ```
+3.  **Run Example:**
+    ```bash
+    uv run ./projects/collapse/collapse.py
+    ```
 
 2. **Clone & Install Dependencies:**
    
@@ -27,8 +36,15 @@ The software is built on the JAX-ecosystem. It leverages automatic differentiati
    # for CPU
    uv sync --extra cpu
    
-   # for GPU
-   uv sync --extra 
+   # for GPU (CUDA 12) 
+   uv sync --extra gpu
+
+   # Install for CPU + Storage capabilities + Plotting
+   uv sync --extra full-cuda
+
+   # Install for GPU (CUDA 12) + Storage capabilities + Plotting
+   uv sync --extra full-cpu
+
    ```
 
 3. **Run Example:**

@@ -156,6 +156,7 @@ class SimBuilder:
         angular_velocity=None,
         rotation=None,
         sdf_state=None,
+        return_state=False
     ):
         
         if sdf_state is None:
@@ -177,6 +178,9 @@ class SimBuilder:
 
         #  these two must be in sync
         assert sdf_state_idx == sdf_idx, "SDF Logic and State indices out of sync!"
+        
+        if return_state:
+            return sdf_idx, sdf_state
         return sdf_idx
 
     def couple(
@@ -441,3 +445,45 @@ class SimBuilder:
         f_idx = self.force_logics.add(sdf_collider)
 
         return f_idx
+
+    def summary(self, dt: float = None):
+        """Prints an overview of the simulation."""
+        print(f"\n{' Simulation Configuration ':=^50}")
+        
+        # Temporal Information
+        if dt is not None:
+            print(f"dt = {dt:.2e} s")
+
+        # Grid / Domain Information
+        for i, gd in enumerate(self.grid_domains):
+            dim = gd.dim
+            res = " × ".join(map(str, gd.grid_size))
+            bounds = " to ".join([str(gd.origin), str(gd.end)])
+            print(f"Grid [{i}]:    {res} nodes | cell size: {gd.cell_size:.4f} | {dim}D Domain")
+            print(f"            bounds: {bounds}")
+
+        # Material Points
+        total_p = 0
+        for i, mp in enumerate(self.particle_states):
+            n_p = mp.num_points
+            total_p += n_p
+            p_type = "Rigid" if isinstance(mp, RigidMaterialPointState) else "Deformable"
+            print(f"Body [{i}]:    {n_p} particles ({p_type})")
+        print(f"Total |P|:  {total_p}")
+
+        # Physics / Mechanics
+        print(f"{' Physics Logics ':-^50}")
+        for i, law in enumerate(self.law_logics):
+            name = law.__class__.__name__
+            print(f"Law [{i}]:     {name}")
+            
+        for i, force in enumerate(self.force_logics):
+            name = force.__class__.__name__
+            print(f"Force [{i}]:   {name}")
+
+        # Solvers
+        for i, solver in enumerate(self.solver_logics):
+            name = solver.__class__.__name__
+            print(f"Solver [{i}]:  {name}")
+            
+        print(f"{'':=^50}\n")
