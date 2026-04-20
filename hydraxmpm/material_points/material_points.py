@@ -272,8 +272,6 @@ class MaterialPointState(BaseMaterialPointState):
         NotImplementedError("q_p_stack property not implemented yet.")
         pass
 
-        # return self.q_stack / self.p_stack
-
     @property
     def eps_stack(self):
         """Hencky strain tensor of material points."""

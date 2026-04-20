@@ -400,4 +400,3 @@ class RerunVisualizer:
             except (RuntimeError, ValueError):
                 # Happens if object is fully outside or fully inside (no surface found)
                 pass
-

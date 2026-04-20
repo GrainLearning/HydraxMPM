@@ -497,6 +497,11 @@ class USLAFLIP(USLSolver):
             F_inc = I - p_L_next * dt
             p_F_next = jnp.einsum("ijk,ikl->ijl", F_inc, mp_state.F_stack)
 
+            if mp_state.F_store_stack is not None:
+                p_F_store_next = jnp.einsum("ijk,ikl->ijl", F_inc, mp_state.F_store_stack)
+            else:
+                p_F_store_next = None
+
             if grid_cache.dim == 2:
                 p_F_next = p_F_next.at[:, 2, 2].set(1.0)
 
@@ -531,9 +536,10 @@ class USLAFLIP(USLSolver):
                     s.volume_stack,
                     s.F_stack,
                     s.L_stack,
+                    s.F_store_stack,
                 ),
                 mp_state,
-                (p_velocity_next, p_position_next, p_volume_next, p_F_next, p_L_next),
+                (p_velocity_next, p_position_next, p_volume_next, p_F_next, p_L_next, p_F_store_next),
             )
 
             solver_states[c.p_idx] = eqx.tree_at(

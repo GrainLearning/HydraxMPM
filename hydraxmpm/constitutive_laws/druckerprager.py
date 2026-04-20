@@ -62,7 +62,7 @@ class DruckerPrager(ConstitutiveLaw):
         requires_F_reset: bool = False,
     ):
         self.K = K
-        E = 3 * K * (1 - 2 * nu)
+        E = 3.0 * K * (1.0 - 2.0 * nu)
         self.G = E / (2.0 * (1.0 + nu))
         self.mu_1 = mu_1
         self.mu_2 = mu_2
