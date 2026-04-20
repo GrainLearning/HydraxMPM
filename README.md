@@ -39,8 +39,11 @@ The software is built on the JAX-ecosystem. It leverages automatic differentiati
    # for GPU (CUDA 12) 
    uv sync --extra gpu
 
+   # Install for CPU + Storage capabilities + Plotting
+   uv sync --extra full-cuda
+
    # Install for GPU (CUDA 12) + Storage capabilities + Plotting
-   uv sync --extra cuda storage plot
+   uv sync --extra full-cpu
 
    ```
 
