@@ -17,8 +17,7 @@ __pycache__/
 old/
 projects/unified_elasto_plastic_inertial_mcc/data/
 projects/mcc_trx_inverse/data/
-projects/robot_example
-projects/lorentz_collapse
+projects/robot_example/
 core.*
 uv.lock
 imgui.ini
