@@ -23,7 +23,7 @@ import hydraxmpm as hdx
 class ChuteParameters:
     # Slim computational box while keeping a small margin around periodic cell.
     origin = (-0.03, 0.0)
-    end = (0.13, 0.16)
+    end = (0.07, 0.08)
     cell_size = 0.02
     ppc = 2
     dt = 1.0e-4
@@ -31,10 +31,10 @@ class ChuteParameters:
     output_time = 0.01
     rho_0 = 2650.0
     K = 7.0e8
-    friction_angle = 19.8
-    chute_angle_deg = 35.0
+    friction_angle = 20.0
+    chute_angle_deg = 30.0
     periodic_x_min = 0.0
-    periodic_x_max = 0.05
+    periodic_x_max = 0.04
     fill_depth = 0.1
     constitutive_model = "mu_i"  # or "mu_i"
 
@@ -80,8 +80,8 @@ class ChuteProcedure:
         model_name = self.params.constitutive_model.lower()
         if model_name == "mu_i":
             law = hdx.MuI_LC(
-                mu_s=0.42,
-                mu_d=0.28,
+                mu_s=self.params.compute_mu(),
+                mu_d=self.params.compute_mu() * 1.5,
                 I_0=0.35,
                 d_p=0.002,
                 K=self.params.K,
@@ -136,7 +136,7 @@ class ChuteProcedure:
         domain_sdf = hdx.DomainSDF(
             origin=self.origin,
             end=self.end,
-            frictions=[0.0, 1.0, 0.0, 0.0],
+            frictions=[0.0, 0.7, 0.0, 0.0],
             wall_offset=0.75 * self.cell_size,
         )
         sim_builder.add_sdf_object(sdf_logic=domain_sdf)
@@ -175,6 +175,31 @@ class ChuteProcedure:
         world = eqx.tree_at(lambda w: w.material_points, world, tuple(mp_states))
         return eqx.tree_at(lambda s: s.world, sim_state, world)
 
+    def compute_velocity_profile(self, sim_state):
+        mp_state = sim_state.world.material_points[0]
+        pos = np.asarray(mp_state.position_stack)
+        vel = np.asarray(mp_state.velocity_stack)
+
+        y = pos[:, 1]
+        vx = vel[:, 0]
+        y_min = self.origin[1]
+        y_max = self.end[1]
+        bins = 20
+        edges = np.linspace(y_min, y_max, bins + 1)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        counts, _ = np.histogram(y, bins=edges)
+        weighted, _ = np.histogram(y, bins=edges, weights=vx)
+        avg_vx = np.divide(weighted, counts, out=np.zeros_like(weighted, dtype=float), where=counts > 0)
+        return centers, avg_vx
+
+    def compute_time_averaged_profile(self, profiles):
+        if not profiles:
+            return np.array([]), np.array([])
+        y = np.asarray(profiles[0][:, 0], dtype=float)
+        stacked_vx = np.stack([np.asarray(p[:, 1], dtype=float) for p in profiles], axis=0)
+        avg_vx = np.mean(stacked_vx, axis=0)
+        return y, avg_vx
+
 
 def run_sim():
     procedure = ChuteProcedure()
@@ -185,7 +210,8 @@ def run_sim():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     vis = hdx.VTKVisualizer(output_dir=str(output_dir))
-    history = {"time": [], "mean_speed": []}
+    history = {"time": [], "mean_speed": [], "profile_y": [], "profile_vx": []}
+    profile_history = []
 
     print("Starting granular chute flow benchmark")
     print(f"Domain: {procedure.origin} -> {procedure.end}, dt={procedure.dt}, steps={procedure.total_steps}")
@@ -208,12 +234,11 @@ def run_sim():
             )
 
             pos = np.asarray(mp_state.position_stack)
-            local = pos
             vel_local = np.asarray(mp_state.velocity_stack)
 
             plt.figure(figsize=(7, 3.5))
             plt.quiver(
-                local[:, 0], local[:, 1],
+                pos[:, 0], pos[:, 1],
                 vel_local[:, 0], vel_local[:, 1],
                 np.linalg.norm(vel_local, axis=1),
                 cmap="viridis",
@@ -228,6 +253,19 @@ def run_sim():
             plt.tight_layout()
             plt.savefig(output_dir / f"snapshot_{step:05d}.png", dpi=180)
             plt.close()
+
+            profile_y, profile_vx = procedure.compute_velocity_profile(sim_state)
+            history["profile_y"].append(profile_y)
+            history["profile_vx"].append(profile_vx)
+            profile_history.append(np.column_stack([profile_y, profile_vx]))
+
+            np.savetxt(
+                output_dir / f"velocity_profile_{step:05d}.csv",
+                np.column_stack([profile_y, profile_vx]),
+                delimiter=",",
+                header="y,mean_vx",
+                comments="",
+            )
 
             print(f"step={step:04d}, mean_speed={float(mean_vel):.4e}")
 
@@ -252,12 +290,11 @@ def run_sim():
             f.write(f"{t},{v}\n")
 
     final_pos = np.asarray(final_mp.position_stack)
-    local = final_pos
     vel_local = np.asarray(final_mp.velocity_stack)
 
     plt.figure(figsize=(7, 3.5))
     plt.quiver(
-        local[:, 0], local[:, 1],
+        final_pos[:, 0], final_pos[:, 1],
         vel_local[:, 0], vel_local[:, 1],
         np.linalg.norm(vel_local, axis=1),
         cmap="viridis",
@@ -271,6 +308,44 @@ def run_sim():
     plt.colorbar(label="speed")
     plt.tight_layout()
     plt.savefig(output_dir / "final_snapshot.png", dpi=180)
+    plt.close()
+
+    final_profile_y, final_profile_vx = procedure.compute_velocity_profile(sim_state)
+    np.savetxt(
+        output_dir / "final_velocity_profile.csv",
+        np.column_stack([final_profile_y, final_profile_vx]),
+        delimiter=",",
+        header="y,mean_vx",
+        comments="",
+    )
+
+    steady_window = max(1, min(20, len(profile_history)))
+    steady_profiles = profile_history[-steady_window:]
+    avg_y, avg_vx = procedure.compute_time_averaged_profile(steady_profiles)
+    if avg_y.size > 0:
+        np.savetxt(
+            output_dir / "steady_velocity_profile.csv",
+            np.column_stack([avg_y, avg_vx]),
+            delimiter=",",
+            header="y,mean_vx",
+            comments="",
+        )
+        plt.figure(figsize=(6, 4))
+        plt.plot(avg_vx, avg_y, linewidth=2)
+        plt.gca().invert_yaxis()
+        plt.xlabel("mean streamwise velocity $v_x$")
+        plt.ylabel("depth y")
+        plt.tight_layout()
+        plt.savefig(output_dir / "steady_velocity_profile.png", dpi=180)
+        plt.close()
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(final_profile_vx, final_profile_y, linewidth=2)
+    plt.gca().invert_yaxis()
+    plt.xlabel("mean streamwise velocity $v_x$")
+    plt.ylabel("depth y")
+    plt.tight_layout()
+    plt.savefig(output_dir / "final_velocity_profile.png", dpi=180)
     plt.close()
 
     print(f"Saved visualization outputs to {output_dir}")
