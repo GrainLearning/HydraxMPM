@@ -23,20 +23,20 @@ import hydraxmpm as hdx
 class ChuteParameters:
     # Slim computational box while keeping a small margin around periodic cell.
     origin = (-0.03, 0.0)
-    end = (0.07, 0.08)
+    end = (0.07, 0.2)
     cell_size = 0.02
-    ppc = 2
-    dt = 1.0e-4
+    ppc = 4
+    dt = 2.0e-4
     total_time = 1.0
     output_time = 0.01
     rho_0 = 2650.0
-    K = 7.0e8
+    K = 1.0e8
     friction_angle = 20.0
-    chute_angle_deg = 30.0
+    chute_angle_deg = 24.0
     periodic_x_min = 0.0
-    periodic_x_max = 0.04
-    fill_depth = 0.1
-    constitutive_model = "mu_i"  # or "mu_i"
+    periodic_x_max = 0.02
+    fill_depth = 0.2
+    constitutive_model = "drucker_prager"  # or "mu_i"
 
     @staticmethod
     def compute_mu():
@@ -74,8 +74,44 @@ class ChuteProcedure:
         density = jnp.full(pos.shape[0], self.params.rho_0)
         return pos, vel, density
 
+    def initialize_lithostatic_stress(self, pos, density):
+        """Initialize a realistic confining stress field for a tilted chute.
+
+        The soil is initially at rest in a gravity field that is tilted by the chute
+        angle. We compute the vertical stress using the depth measured normal to the
+        chute base and rotate the principal stress tensor into the global frame.
+        """
+        gravity_mag = jnp.linalg.norm(
+            jnp.array([
+                9.81 * jnp.sin(jnp.deg2rad(self.params.chute_angle_deg)),
+                -9.81 * jnp.cos(jnp.deg2rad(self.params.chute_angle_deg)),
+            ], dtype=jnp.float32)
+        )
+        y_depth = pos[:, 1] - self.origin[1]
+        p_stack, q_stack = hdx.precondition_from_lithostatic(
+            density_stack=density,
+            depth_stack=y_depth,
+            gravity=gravity_mag,
+            slope_angle_deg=self.params.chute_angle_deg,
+            k0=0.5,
+        )
+        stress_local = hdx.reconstruct_stress_from_triaxial(p_stack, q_stack)
+
+        theta = jnp.deg2rad(self.params.chute_angle_deg)
+        rot = jnp.array(
+            [
+                [jnp.cos(theta), -jnp.sin(theta), 0.0],
+                [jnp.sin(theta),  jnp.cos(theta), 0.0],
+                [0.0,            0.0,            1.0],
+            ],
+            dtype=jnp.float32,
+        )
+        stress_world = jax.vmap(lambda s: rot @ s @ rot.T)(stress_local)
+        return stress_world
+
     def build_template(self):
         pos, vel, density = self.generate_particles()
+        stress_stack = self.initialize_lithostatic_stress(pos, density)
 
         model_name = self.params.constitutive_model.lower()
         if model_name == "mu_i":
@@ -109,6 +145,7 @@ class ChuteProcedure:
             position_stack=pos,
             velocity_stack=vel,
             density_stack=density,
+            stress_stack=stress_stack,
             cell_size=self.cell_size,
             ppc=self.ppc,
         )
