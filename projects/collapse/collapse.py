@@ -1,33 +1,63 @@
-import os
+"""Forward collapse benchmark used by the AD inverse example.
+
+This module provides:
+1) A forward solver entrypoint: ``simulate_collapse``.
+2) Post-processing utilities for global/local measures.
+3) Optional Rerun visualization for interactive runs.
+4) Optional saving of a reference bundle for inverse analysis.
+"""
+
 import json
+import multiprocessing
+import os
 from pathlib import Path
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 
-
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
+# Benchmark geometry / discretization defaults.
+ORIGIN = (0.0, 0.0)
+END = (0.2, 0.04)
+CELL_SIZE = 0.005
+COLUMN_WIDTH = 0.05
+COLUMN_HEIGHT = 0.025
+PPC = 2
+DT = 5e-5
+TOTAL_TIME = 0.5
+OUTPUT_TIME = 0.05
 
-def compute_global_measures(sim_state):
-    """Collect the final global collapse metrics from the material points."""
+
+def compute_dp_mu(fric_angle_deg: float | jnp.ndarray) -> jnp.ndarray:
+    """Compute Drucker–Prager friction coefficient from friction angle (deg)."""
+    fric_angle_rad = jnp.deg2rad(fric_angle_deg)
+    return 6.0 * jnp.sin(fric_angle_rad) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(fric_angle_rad)))
+
+
+def compute_global_measures(sim_state: Any) -> dict[str, jnp.ndarray]:
+    """Compute global collapse measures from the final material-point state."""
     mp_state = sim_state.world.material_points[0]
     pos = mp_state.position_stack
     x = pos[:, 0]
     y = pos[:, 1]
 
-    height = jnp.max(y) - jnp.min(y)
-    center_of_mass = jnp.asarray([jnp.mean(x), jnp.mean(y)], dtype=jnp.float32)
-    runout = jnp.max(x) - jnp.min(x)
     return {
-        "final_height": height,
-        "final_center_of_mass": center_of_mass,
-        "final_runout_distance": runout,
+        "final_height": jnp.max(y) - jnp.min(y),
+        "final_center_of_mass": jnp.asarray([jnp.mean(x), jnp.mean(y)], dtype=jnp.float32),
+        "final_runout_distance": jnp.max(x) - jnp.min(x),
     }
 
 
-def project_volume_fraction_field(sim_state, *, origin=(0.0, 0.0), end=(0.2, 0.04), cell_size=0.005):
-    """Project the final solid volume fraction onto the background grid."""
+def project_volume_fraction_field(
+    sim_state: Any,
+    *,
+    origin: tuple[float, float] = ORIGIN,
+    end: tuple[float, float] = END,
+    cell_size: float = CELL_SIZE,
+) -> jnp.ndarray:
+    """Project final solid volume fraction onto the background grid."""
     mp_state = sim_state.world.material_points[0]
     pos = mp_state.position_stack[:, :2]
     volume_stack = mp_state.volume_stack
@@ -40,15 +70,21 @@ def project_volume_fraction_field(sim_state, *, origin=(0.0, 0.0), end=(0.2, 0.0
     cell_x = jnp.clip(jnp.floor((pos[:, 0] - x0) / cell_size).astype(jnp.int32), 0, nx - 1)
     cell_y = jnp.clip(jnp.floor((pos[:, 1] - y0) / cell_size).astype(jnp.int32), 0, ny - 1)
     flat_idx = cell_x + nx * cell_y
-    weights = volume_stack / (cell_size ** 2)
+    weights = volume_stack / (cell_size**2)
 
     field = jnp.bincount(flat_idx, weights=weights, length=nx * ny).reshape(nx, ny)
-    field = field / jnp.maximum(jnp.max(field), 1e-12)
-    return field
+    return field / jnp.maximum(jnp.max(field), 1e-12)
 
 
-def save_measure_bundle(global_measures, local_field, *, prefix="collapse_ref"):
+def save_measure_bundle(
+    global_measures: dict[str, jnp.ndarray],
+    local_field: jnp.ndarray,
+    *,
+    prefix: str = "collapse_ref",
+) -> tuple[Path, Path]:
+    """Save global and local measures as NPZ + JSON under ``projects/collapse/output``."""
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+
     npz_path = OUTPUT_DIR / f"{prefix}_measures.npz"
     global_arrays = {name: jnp.asarray(value) for name, value in global_measures.items()}
     jnp.savez(npz_path, **global_arrays, local_field=jnp.asarray(local_field))
@@ -62,143 +98,85 @@ def save_measure_bundle(global_measures, local_field, *, prefix="collapse_ref"):
 
 def simulate_collapse(
     fric_angle: float = 20.0,
-    c0: float = 10,
+    c0: float = 10.0,
     *,
     save_bundle: bool = False,
     prefix: str = "collapse_ref",
     visualize: bool = False,
-    ad_final_step_only: bool = False,
-    ad_window_steps: int | None = None,
-):
-    """Run one collapse forward solve with optional Rerun visualization."""
+    num_steps: int | None = None,
+) -> dict[str, Any]:
+    """Run one forward collapse simulation.
+
+    Parameters
+    ----------
+    fric_angle:
+        Friction angle (deg) used to compute DP ``mu_1`` and ``mu_2``.
+    c0:
+        Mohr–Coulomb cohesion mapped into the DP law.
+    save_bundle:
+        If True, save global/local outputs under [output/](/home/hcheng/GrainLearning/HydraxMPM/projects/collapse/output).
+    prefix:
+        Prefix for saved files.
+    visualize:
+        If True, stream simulation data to Rerun.
+    num_steps:
+        Optional override for number of explicit solver steps. If None, uses
+        ``int(TOTAL_TIME / DT)``.
+    """
     import hydraxmpm as hdx
-    import jax.numpy as jnp
 
-    class ColumnParameters:
-        def __init__(self, fric_angle, c0):
-            self.fric_angle = fric_angle
-            self.c0 = c0
-            self.rho_0 = 2650.0
-            self.rho_p = 2650.0
-            self.K = 7e5
+    sep = CELL_SIZE / PPC
+    x = jnp.arange(0.0, COLUMN_WIDTH, sep) + 2.0 * sep
+    y = jnp.arange(0.0, COLUMN_HEIGHT, sep) + 2.0 * sep
+    xv, yv = jnp.meshgrid(x, y)
+    position_stack = jnp.column_stack((xv.ravel(), yv.ravel()))
+    num_particles = position_stack.shape[0]
 
-        def compute_mu(self):
-            fric_angle_rad = jnp.deg2rad(self.fric_angle)
-            mu = (
-                6
-                * jnp.sin(fric_angle_rad)
-                / (jnp.sqrt(3) * (3 + jnp.sin(jnp.deg2rad(self.fric_angle))))
-            )
-            return mu
+    density_stack = jnp.full((num_particles,), 2650.0)
+    mu = compute_dp_mu(fric_angle)
+    law = hdx.DruckerPrager(
+        nu=0.3,
+        K=7e5,
+        mu_1=mu,
+        mu_2=mu,
+        c0=c0,
+        rho_0=2650.0,
+    )
+    law_state = law.create_state(stress_stack=jnp.zeros((num_particles, 3, 3)))
 
-    class CollapseProcedure:
-        origin: tuple[float, float] = (0.0, 0.0)
-        end: tuple[float, float] = (0.2, 0.04)
-        cell_size: float = 0.005
-        column_width: float = 0.05
-        column_height: float = 0.025
-        ppc: int = 2
-        dt: float = 5e-5
-        total_time: float = 0.5
-        output_time: float = 0.05
-        gap = 0.0025
-
-        def build_template(self):
-            default_params = ColumnParameters(fric_angle, c0)
-            sep = self.cell_size / self.ppc
-            x = jnp.arange(0, self.column_width, sep) + 2 * sep
-            y = jnp.arange(0, self.column_height, sep) + 2 * sep
-            xv, yv = jnp.meshgrid(x, y)
-
-            position_stack = jnp.array(list(zip(xv.flatten(), yv.flatten())))
-            num_particles = len(position_stack)
-            density_stack = jnp.ones(num_particles) * default_params.rho_0
-
-            law = hdx.DruckerPrager(
-                nu=0.3,
-                K=default_params.K,
-                mu_1=default_params.compute_mu(),
-                mu_2=default_params.compute_mu(),
-                c0=default_params.c0,
-                rho_0=default_params.rho_0,
-            )
-            law_state = law.create_state(stress_stack=jnp.zeros((num_particles, 3, 3)))
-
-            sim_builder = hdx.SimBuilder()
-            sim_builder.add_material_points(
-                position_stack=position_stack,
-                density_stack=density_stack,
-                cell_size=self.cell_size,
-                ppc=self.ppc,
-            )
-            sim_builder.add_grid(
-                origin=self.origin,
-                end=self.end,
-                cell_size=self.cell_size,
-            )
-            sim_builder.add_constitutive_law(law=law, law_state=law_state)
-            sim_builder.couple(shapefunction="quadratic")
-            sim_builder.add_gravity(gravity=jnp.array([0.0, -9.81]), is_apply_on_grid=True)
-
-            domain_sdf = hdx.DomainSDF(
-                origin=self.origin,
-                end=self.end,
-                frictions=[0.0, 0.9, 0.0, 0.0],
-                wall_offset=0.75 * self.cell_size,
-            )
-            sim_builder.add_sdf_object(sdf_logic=domain_sdf)
-            sim_builder.add_sdf_collider(gap=sep)
-            sim_builder.set_solver(scheme="usl_aflip", alpha=0.90)
-            mpm_solver, sim_state = sim_builder.build(dt=self.dt)
-            return mpm_solver, sim_state
-
-        def run(self, solver, state, call_back=None, ad_final_step_only=False, ad_window_steps=None):
-            steps = int(self.total_time / self.dt)
-            output_step = int(self.output_time / self.dt)
-
-            def loop_body(i, val_state):
-                next_state = solver(val_state)
-                if call_back is not None:
-                    jax.lax.cond(
-                        i % output_step == 0,
-                        lambda s: jax.debug.callback(call_back, s),
-                        lambda s: None,
-                        next_state,
-                    )
-                return next_state
-
-            if ad_window_steps is None:
-                ad_window_steps_eff = 1 if ad_final_step_only else steps
-            else:
-                ad_window_steps_eff = int(ad_window_steps)
-
-            ad_window_steps_eff = max(0, min(ad_window_steps_eff, steps))
-
-            if ad_window_steps_eff == steps:
-                return jax.lax.fori_loop(0, steps, loop_body, state)
-
-            # Truncated AD mode: stop gradients through rollout and only
-            # differentiate through the trailing ad_window_steps_eff updates.
-            warm_steps = max(steps - ad_window_steps_eff, 0)
-            warm_state = jax.lax.fori_loop(0, warm_steps, loop_body, state)
-            warm_state = jax.lax.stop_gradient(warm_state)
-            if ad_window_steps_eff == 0:
-                return warm_state
-            return jax.lax.fori_loop(warm_steps, steps, loop_body, warm_state)
-
-    collapse_procedure = CollapseProcedure()
-    mpm_solver, sim_state = collapse_procedure.build_template()
-
-    call_back = None
-    if visualize and not ad_final_step_only and ad_window_steps is None:
-        viewer = hdx.RerunVisualizer(is_3d=False)
-        viewer.log_static_domain(
-            origin=collapse_procedure.origin,
-            end=collapse_procedure.end,
-            cell_size=collapse_procedure.cell_size,
+    sim_builder = hdx.SimBuilder()
+    sim_builder.add_material_points(
+        position_stack=position_stack,
+        density_stack=density_stack,
+        cell_size=CELL_SIZE,
+        ppc=PPC,
+    )
+    sim_builder.add_grid(origin=ORIGIN, end=END, cell_size=CELL_SIZE)
+    sim_builder.add_constitutive_law(law=law, law_state=law_state)
+    sim_builder.couple(shapefunction="quadratic")
+    sim_builder.add_gravity(gravity=jnp.array([0.0, -9.81]), is_apply_on_grid=True)
+    sim_builder.add_sdf_object(
+        sdf_logic=hdx.DomainSDF(
+            origin=ORIGIN,
+            end=END,
+            frictions=[0.0, 0.9, 0.0, 0.0],
+            wall_offset=0.75 * CELL_SIZE,
         )
+    )
+    sim_builder.add_sdf_collider(gap=sep)
+    sim_builder.set_solver(scheme="usl_aflip", alpha=0.90)
 
-        def log_simulation(current_state):
+    mpm_solver, sim_state = sim_builder.build(dt=DT)
+
+    steps = int(num_steps) if num_steps is not None else int(TOTAL_TIME / DT)
+    output_step = max(1, int(OUTPUT_TIME / DT))
+    callback = None
+
+    if visualize:
+        viewer = hdx.RerunVisualizer(is_3d=False)
+        viewer.log_static_domain(origin=ORIGIN, end=END, cell_size=CELL_SIZE)
+
+        def log_simulation(current_state: Any) -> None:
             mp_state = current_state.world.material_points[0]
             viewer.log_time(
                 current_step=int(current_state.step),
@@ -206,26 +184,31 @@ def simulate_collapse(
             )
             viewer.log_material_points(
                 mp_state,
-                v_min=0,
+                v_min=0.0,
                 v_max=0.5,
                 property_name="velocity_stack",
             )
 
-        call_back = log_simulation
+        callback = log_simulation
 
-    final_state = collapse_procedure.run(
-        mpm_solver,
-        sim_state,
-        call_back,
-        ad_final_step_only=ad_final_step_only,
-        ad_window_steps=ad_window_steps,
-    )
+    def loop_body(i: int, state: Any) -> Any:
+        next_state = mpm_solver(state)
+        if callback is not None:
+            jax.lax.cond(
+                i % output_step == 0,
+                lambda s: jax.debug.callback(callback, s),
+                lambda s: None,
+                next_state,
+            )
+        return next_state
+
+    final_state = jax.lax.fori_loop(0, steps, loop_body, sim_state)
     global_measures = compute_global_measures(final_state)
     local_field = project_volume_fraction_field(
         final_state,
-        origin=collapse_procedure.origin,
-        end=collapse_procedure.end,
-        cell_size=collapse_procedure.cell_size,
+        origin=ORIGIN,
+        end=END,
+        cell_size=CELL_SIZE,
     )
 
     if save_bundle:
@@ -239,7 +222,8 @@ def simulate_collapse(
     }
 
 
-def run_sim():
+def run_sim() -> dict[str, Any]:
+    """Run the interactive forward benchmark with visualization and bundle export."""
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
     result = simulate_collapse(
         fric_angle=20.0,
@@ -252,8 +236,6 @@ def run_sim():
     print("Saved local field shape:", result["local"].shape)
     return result
 
-
-import multiprocessing
 
 if __name__ == "__main__":
     p = multiprocessing.Process(target=run_sim, args=())

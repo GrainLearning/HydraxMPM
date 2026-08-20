@@ -178,7 +178,7 @@ class ChuteProcedure:
         )
         sim_builder.add_sdf_object(sdf_logic=domain_sdf)
         sim_builder.add_sdf_collider(gap=self.cell_size / self.ppc)
-        sim_builder.set_solver(scheme="usl_aflip", alpha=0.9)
+        sim_builder.set_solver(scheme="usl_aflip", alpha=0.1)
 
         return sim_builder.build(dt=self.dt)
 

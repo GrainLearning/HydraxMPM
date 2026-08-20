@@ -18,6 +18,7 @@ from jaxtyping import Float, Array
 
 from ..sdf.sdfobject import SDFObjectBase, SDFObjectState
 from .force import Force
+from ..utils.math_helpers import safe_norm
 
 
 import jax
@@ -46,12 +47,12 @@ def apply_frictional_contact(
     v_rel_corrected = v_corrected_n - v_wall
     v_n_vec = jnp.dot(v_rel_corrected, normal) * normal
     v_t_vec = v_rel_corrected - v_n_vec
-    vt_mag = jnp.linalg.norm(v_t_vec)
+    vt_mag = safe_norm(v_t_vec, eps=1e-12)
 
     # Coulomb Law: Friction Limit
     friction_limit = friction_coeff * delta_v_kinematic
     reduction = jnp.where(vt_mag > 1e-12, jnp.minimum(vt_mag, friction_limit), 0.0)
-    
+
     # Apply reduction safely
     v_t_frictional = v_t_vec * (1.0 - reduction / (vt_mag + 1e-12))
 
@@ -98,7 +99,7 @@ class SDFCollider(Force):
         self.gap = gap
         self.base_friction = friction
 
-     
+
 
 
     def create_state(
@@ -141,9 +142,9 @@ class SDFCollider(Force):
             return world, mechanics, sim_cache
 
         grid_caches = list(sim_cache.grids)
-    
+
         sdf_logic = sdf_logics[self.sdf_idx]
-        
+
         sdf_state = list(world.sdfs)[self.sdf_idx]
 
 
@@ -162,14 +163,16 @@ class SDFCollider(Force):
             # )
             # flat_coords = coords.reshape(-1, grid_domain.dim)
 
-            # Get current  grid velocity
-            inv_mass = jnp.where(grid_cache.mass_stack > 1e-14, 1.0 / grid_cache.mass_stack, 0.0)
+            # Safe mass inversion: avoid 1/0 NaN gradient by replacing zero mass
+            # with 1.0 before dividing, then masking the result.
+            safe_mass = jnp.where(grid_cache.mass_stack > 1e-14, grid_cache.mass_stack, 1.0)
+            inv_mass = jnp.where(grid_cache.mass_stack > 1e-14, 1.0 / safe_mass, 0.0)
             vel = grid_cache.moment_nt_stack * inv_mass[:, None]
 
             # Compute quantities from SDF object
 
             # SDF check Penetration
-            # dis_stack = sdf_logic.get_signed_distance_stack(sdf_state, node_geom.coords) 
+            # dis_stack = sdf_logic.get_signed_distance_stack(sdf_state, node_geom.coords)
             dis_stack = node_geom.dists
             # Uses AD to find normal by default
             # normals_stack = sdf_logic.get_normal_stack(sdf_state, flat_coords)
@@ -184,7 +187,7 @@ class SDFCollider(Force):
             # local_friction_stack = sdf_logic.get_surface_friction_stack(sdf_state, flat_coords)
             local_friction_stack = node_geom.friction
             friction_stack = self.base_friction * local_friction_stack
-            
+
             # Apply contact via vmap over all points to cover while domain
             new_vel = jax.vmap(self._collide_node, in_axes=(0, 0, 0, 0, 0, None))(
                 dis_stack, vel, normals_stack, v_object_stack, friction_stack, dt
@@ -199,7 +202,7 @@ class SDFCollider(Force):
             # update global grid state
             grid_caches[g_idx] = new_grid
 
-    
+
         sim_cache = eqx.tree_at(
             lambda s: (s.grids,),
             sim_cache,
@@ -235,4 +238,3 @@ class SDFCollider(Force):
             lambda v: v,  # No collision, return original velocity
             v_node,
         )
-

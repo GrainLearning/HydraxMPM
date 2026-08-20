@@ -195,9 +195,9 @@ def get_strain_rate_tensor(L):
 def get_shear_strain_vm(strain=None, dev_strain=None):
     """
     Get the scalar von-Mises equivalent shear strain.
-    
+
     This is the work-conjugate variable to the von-Mises shear stress q.
-    
+
     $$
     \\varepsilon_q = \\sqrt{\\frac{2}{3} \\mathbf{e} : \\mathbf{e}}
     $$
@@ -218,20 +218,20 @@ def get_shear_strain_vm(strain=None, dev_strain=None):
     # Double contraction e:e (rank agnostic)
     # This is equivalent to sum(e_ij * e_ij)
     e_contraction = jnp.einsum('...ij,...ij->...', dev_strain, dev_strain)
-    
+
     return jnp.sqrt((2.0 / 3.0) * (e_contraction ) +1e-16)
 
 
 def get_dev_strain(strain, vol_strain=None):
     """
     Get deviatoric strain tensor (Rank Agnostic).
-    
+
     e = eps - (tr(eps)/3) * I
     """
     # Calculate trace over the last two dimensions (matrix dims)
     if vol_strain is None:
         vol_strain = get_volumetric_strain(strain)
-        
+
     return strain - (vol_strain[..., None, None] / 3.0) *jnp.eye(3)
 
 
@@ -636,12 +636,12 @@ def inv_2x2_robust(m, gradient_clip_val=1e6):
     return inv
 
 
-def safe_norm(x, eps=1e-12, axis=None):
+def safe_norm(x, eps=1e-12, axis=None, keepdims=False):
     """
     Computes euclidean norm safely for AutoDiff.
     Prevents NaN gradients when x is the zero vector.
     """
-    return jnp.sqrt(jnp.sum(x**2, axis=axis) + eps)
+    return jnp.sqrt(jnp.sum(x**2, axis=axis, keepdims=keepdims) + eps)
 
 
 def quaternion_rotate(q, v):

@@ -46,6 +46,8 @@ from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 
 from ..forces.sdf_collider import apply_frictional_contact
 
+from ..utils.math_helpers import safe_norm
+
 from ..shapefunctions.mapping import InteractionCache
 
 from ..sdf.sdfobject import SDFObjectBase
@@ -116,7 +118,7 @@ class USLAFLIP(USLSolver):
     forces: Tuple[Force, ...]
     sdf_logics: Tuple[SDFObjectBase, ...]
     grid_domains: Tuple[GridDomain, ...] = eqx.field(static=True)
-    
+
     active_p_ids: Tuple[int, ...] = eqx.field(static=True)
     active_g_ids: Tuple[int, ...] = eqx.field(static=True)
 
@@ -226,7 +228,7 @@ class USLAFLIP(USLSolver):
 
             # CPIC modification: apply cpic mask to shape vals
             effective_shape_vals = intr_cache.shape_vals * intr_cache.cpic_mask
-            
+
             # Compute weighted momentum and mass contributions
             weighted_mass_stack = effective_shape_vals * intr_masses_stack
 
@@ -251,7 +253,7 @@ class USLAFLIP(USLSolver):
                 intr_stress_stack @ intr_cache.shape_grads[..., None]
             ).squeeze(-1)
             intern_force_term_stack = intern_force_term_stack[:, : grid_cache.dim]
-            
+
             # Compression positive
             weighted_intern_force_stack = (
                 1.0 * intr_volume_stack[:, None] * intern_force_term_stack
@@ -352,7 +354,7 @@ class USLAFLIP(USLSolver):
 
             #     # Find closest
             #     closest_idx = jnp.argmin(dists_stack, axis=0, keepdims=True)
-                
+
             #     # Store min dist for ASFLIP safety
             #     min_dist_to_wall = jnp.take_along_axis(dists_stack, closest_idx, axis=0).squeeze(0)
 
@@ -366,15 +368,15 @@ class USLAFLIP(USLSolver):
             #     # jax.debug.print("p_fric_best mean: {}", p_fric_best.mean())
 
 
-                
+
             #     # v_ghost_p = jax.vmap(apply_frictional_contact, in_axes=(0, 0, 0, 0, 0, None, None, None))(
-            #     #         mp_state.velocity_stack, 
-            #     #         min_dist_to_wall, 
-            #     #         p_normal_best, 
-            #     #         p_wall_vel_best, 
+            #     #         mp_state.velocity_stack,
+            #     #         min_dist_to_wall,
+            #     #         p_normal_best,
+            #     #         p_wall_vel_best,
             #     #         p_fric_best,
-            #     #         dt, 
-            #     #         0.0, 
+            #     #         dt,
+            #     #         0.0,
             #     #         0.0
             #     #     )
 
@@ -483,7 +485,7 @@ class USLAFLIP(USLSolver):
             # --- CFL Clamping ---
             # Clamp velocity magnitude to prevent particles crossing >50% of a cell in one step
             max_speed = self.cfl_limit * grid_domain.cell_size / dt
-            speed = jnp.linalg.norm(p_velocity_next, axis=1, keepdims=True)
+            speed = safe_norm(p_velocity_next, eps=1e-12, axis=1, keepdims=True)
             clamp_factor = jnp.minimum(1.0, max_speed / (speed + 1e-12))
             p_velocity_next = p_velocity_next * clamp_factor
 
@@ -515,7 +517,7 @@ class USLAFLIP(USLSolver):
             # CPIC safety: disable correction when near wall
             is_near_wall = min_dist_to_wall < grid_domain.cell_size
             beta_p = jnp.where(is_near_wall, 0.0, beta_p)
-            
+
 
 
             correction_term = self.alpha * beta_p[:, None] * vel_adj
