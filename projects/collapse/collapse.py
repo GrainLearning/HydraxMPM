@@ -20,13 +20,13 @@ def compute_global_measures(sim_state):
     center_of_mass = jnp.asarray([jnp.mean(x), jnp.mean(y)], dtype=jnp.float32)
     runout = jnp.max(x) - jnp.min(x)
     return {
-        "final_height": float(height),
-        "final_center_of_mass": [float(center_of_mass[0]), float(center_of_mass[1])],
-        "final_runout_distance": float(runout),
+        "final_height": height,
+        "final_center_of_mass": center_of_mass,
+        "final_runout_distance": runout,
     }
 
 
-def project_volume_fraction_field(sim_state, *, origin=(0.0, 0.0), end=(0.6, 0.11), cell_size=0.0025):
+def project_volume_fraction_field(sim_state, *, origin=(0.0, 0.0), end=(0.2, 0.04), cell_size=0.005):
     """Project the final solid volume fraction onto the background grid."""
     mp_state = sim_state.world.material_points[0]
     pos = mp_state.position_stack[:, :2]
@@ -50,22 +50,25 @@ def project_volume_fraction_field(sim_state, *, origin=(0.0, 0.0), end=(0.6, 0.1
 def save_measure_bundle(global_measures, local_field, *, prefix="collapse_ref"):
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
     npz_path = OUTPUT_DIR / f"{prefix}_measures.npz"
-    jnp.savez(npz_path, **global_measures, local_field=jnp.asarray(local_field))
+    global_arrays = {name: jnp.asarray(value) for name, value in global_measures.items()}
+    jnp.savez(npz_path, **global_arrays, local_field=jnp.asarray(local_field))
 
     json_path = OUTPUT_DIR / f"{prefix}_global.json"
     with open(json_path, "w", encoding="utf-8") as fp:
-        json.dump(global_measures, fp, indent=2)
+        json.dump({name: jnp.asarray(value).tolist() for name, value in global_measures.items()}, fp, indent=2)
 
     return npz_path, json_path
 
 
 def simulate_collapse(
-    fric_angle: float = 19.8,
-    c0: float = 1e4,
+    fric_angle: float = 20.0,
+    c0: float = 10,
     *,
     save_bundle: bool = False,
     prefix: str = "collapse_ref",
     visualize: bool = False,
+    ad_final_step_only: bool = False,
+    ad_window_steps: int | None = None,
 ):
     """Run one collapse forward solve with optional Rerun visualization."""
     import hydraxmpm as hdx
@@ -73,8 +76,8 @@ def simulate_collapse(
 
     class ColumnParameters:
         def __init__(self, fric_angle, c0):
-            self.fric_angle = float(fric_angle)
-            self.c0 = float(c0)
+            self.fric_angle = fric_angle
+            self.c0 = c0
             self.rho_0 = 2650.0
             self.rho_p = 2650.0
             self.K = 7e5
@@ -90,13 +93,13 @@ def simulate_collapse(
 
     class CollapseProcedure:
         origin: tuple[float, float] = (0.0, 0.0)
-        end: tuple[float, float] = (0.6, 0.11)
-        cell_size: float = 0.0025
-        column_width: float = 0.2
-        column_height: float = 0.1
+        end: tuple[float, float] = (0.2, 0.04)
+        cell_size: float = 0.005
+        column_width: float = 0.05
+        column_height: float = 0.025
         ppc: int = 2
-        dt: float = 1e-5
-        total_time: float = 2.0
+        dt: float = 5e-5
+        total_time: float = 0.5
         output_time: float = 0.05
         gap = 0.0025
 
@@ -115,6 +118,7 @@ def simulate_collapse(
                 nu=0.3,
                 K=default_params.K,
                 mu_1=default_params.compute_mu(),
+                mu_2=default_params.compute_mu(),
                 c0=default_params.c0,
                 rho_0=default_params.rho_0,
             )
@@ -139,7 +143,7 @@ def simulate_collapse(
             domain_sdf = hdx.DomainSDF(
                 origin=self.origin,
                 end=self.end,
-                frictions=0.9,
+                frictions=[0.0, 0.9, 0.0, 0.0],
                 wall_offset=0.75 * self.cell_size,
             )
             sim_builder.add_sdf_object(sdf_logic=domain_sdf)
@@ -148,7 +152,7 @@ def simulate_collapse(
             mpm_solver, sim_state = sim_builder.build(dt=self.dt)
             return mpm_solver, sim_state
 
-        def run(self, solver, state, call_back=None):
+        def run(self, solver, state, call_back=None, ad_final_step_only=False, ad_window_steps=None):
             steps = int(self.total_time / self.dt)
             output_step = int(self.output_time / self.dt)
 
@@ -163,13 +167,30 @@ def simulate_collapse(
                     )
                 return next_state
 
-            return jax.lax.fori_loop(0, steps, loop_body, state)
+            if ad_window_steps is None:
+                ad_window_steps_eff = 1 if ad_final_step_only else steps
+            else:
+                ad_window_steps_eff = int(ad_window_steps)
+
+            ad_window_steps_eff = max(0, min(ad_window_steps_eff, steps))
+
+            if ad_window_steps_eff == steps:
+                return jax.lax.fori_loop(0, steps, loop_body, state)
+
+            # Truncated AD mode: stop gradients through rollout and only
+            # differentiate through the trailing ad_window_steps_eff updates.
+            warm_steps = max(steps - ad_window_steps_eff, 0)
+            warm_state = jax.lax.fori_loop(0, warm_steps, loop_body, state)
+            warm_state = jax.lax.stop_gradient(warm_state)
+            if ad_window_steps_eff == 0:
+                return warm_state
+            return jax.lax.fori_loop(warm_steps, steps, loop_body, warm_state)
 
     collapse_procedure = CollapseProcedure()
     mpm_solver, sim_state = collapse_procedure.build_template()
 
     call_back = None
-    if visualize:
+    if visualize and not ad_final_step_only and ad_window_steps is None:
         viewer = hdx.RerunVisualizer(is_3d=False)
         viewer.log_static_domain(
             origin=collapse_procedure.origin,
@@ -192,7 +213,13 @@ def simulate_collapse(
 
         call_back = log_simulation
 
-    final_state = collapse_procedure.run(mpm_solver, sim_state, call_back)
+    final_state = collapse_procedure.run(
+        mpm_solver,
+        sim_state,
+        call_back,
+        ad_final_step_only=ad_final_step_only,
+        ad_window_steps=ad_window_steps,
+    )
     global_measures = compute_global_measures(final_state)
     local_field = project_volume_fraction_field(
         final_state,
@@ -213,12 +240,10 @@ def simulate_collapse(
 
 
 def run_sim():
-    import os
-
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
     result = simulate_collapse(
-        fric_angle=19.8,
-        c0=1e4,
+        fric_angle=20.0,
+        c0=10.0,
         save_bundle=True,
         prefix="collapse_ref",
         visualize=True,
