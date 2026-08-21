@@ -1,18 +1,21 @@
-"""Granular chute-flow benchmark using periodic streamwise boundaries.
+"""Periodic, gravity-driven granular chute-flow benchmark.
 
-The streamwise direction is periodic: particles exiting one side re-enter on the opposite side,
-while thevertical direction remains bounded by a domain wall and gravity drives the flow.
+Coordinates are aligned with the chute: ``x`` is streamwise and ``y`` is normal
+to the base. The background grid is periodic in ``x``; the base is represented by
+a frictional plane SDF and the top is open.
 """
 
 from __future__ import annotations
 
-import os
+import argparse
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,373 +23,481 @@ import numpy as np
 import hydraxmpm as hdx
 
 
+@dataclass(frozen=True)
 class ChuteParameters:
-    # Slim computational box while keeping a small margin around periodic cell.
-    origin = (-0.03, 0.0)
-    end = (0.07, 0.2)
-    cell_size = 0.02
-    ppc = 4
-    dt = 2.0e-4
-    total_time = 1.0
-    output_time = 0.01
-    rho_0 = 2650.0
-    K = 1.0e8
-    friction_angle = 20.0
-    chute_angle_deg = 24.0
-    periodic_x_min = 0.0
-    periodic_x_max = 0.02
-    fill_depth = 0.2
-    constitutive_model = "drucker_prager"  # or "mu_i"
+    periodic_x_min: float = 0.0
+    periodic_x_max: float = 0.10
+    base_y: float = 0.0
+    domain_height: float = 0.15
+    fill_depth: float = 0.10
+    cell_size: float = 0.02
+    ppc: int = 4
 
-    @staticmethod
-    def compute_mu():
-        theta = jnp.deg2rad(ChuteParameters.friction_angle)
-        mu = 6.0 * jnp.sin(theta) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(theta)))
-        return mu
+    dt: float = 2.0e-4
+    total_time: float = 5.0
+    output_time: float = 0.05
+
+    grain_density: float = 2650.0
+    initial_solid_fraction: float = 0.60
+    bulk_modulus: float = 1.0e6
+    friction_angle_deg: float = 20.0
+    dynamic_friction_angle_deg: float = 30.0
+    chute_angle_deg: float = 24.0
+    lateral_stress_ratio: float = 0.5
+    base_friction: float = 0.7
+    separation_density_ratio: float = 0.90
+
+    constitutive_model: str = "drucker_prager"
+    steady_start_fraction: float = 0.8
+
+    @property
+    def origin(self) -> tuple[float, float]:
+        return (self.periodic_x_min, self.base_y)
+
+    @property
+    def end(self) -> tuple[float, float]:
+        return (self.periodic_x_max, self.base_y + self.domain_height)
+
+    @property
+    def bulk_density(self) -> float:
+        return self.grain_density * self.initial_solid_fraction
+
+    @property
+    def particles_per_axis(self) -> int:
+        value = int(round(np.sqrt(self.ppc)))
+        if value * value != self.ppc:
+            raise ValueError("ppc must be a perfect square in this 2D benchmark")
+        return value
+
+    @property
+    def particle_spacing(self) -> float:
+        return self.cell_size / self.particles_per_axis
+
+    @property
+    def gravity(self) -> jax.Array:
+        theta = jnp.deg2rad(self.chute_angle_deg)
+        return jnp.array(
+            [9.81 * jnp.sin(theta), -9.81 * jnp.cos(theta)],
+            dtype=jnp.float32,
+        )
+
+    @property
+    def drucker_prager_mu(self) -> jax.Array:
+        phi = jnp.deg2rad(self.friction_angle_deg)
+        return 6.0 * jnp.sin(phi) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(phi)))
 
 
 class ChuteProcedure:
-    def __init__(self):
-        self.params = ChuteParameters()
-        self.origin = self.params.origin
-        self.end = self.params.end
-        self.cell_size = self.params.cell_size
-        self.ppc = self.params.ppc
+    def __init__(self, params: ChuteParameters | None = None):
+        self.params = params or ChuteParameters()
         self.dt = self.params.dt
-        self.total_steps = int(self.params.total_time / self.dt)
-        self.output_steps = int(self.params.output_time / self.dt)
+        self.total_steps = int(round(self.params.total_time / self.dt))
+        self.output_steps = max(1, int(round(self.params.output_time / self.dt)))
 
     def generate_particles(self):
-        sep = self.cell_size / self.ppc
-        stream = jnp.arange(
-            self.params.periodic_x_min + sep,
-            self.params.periodic_x_max,
-            sep,
-        )
-        normal = jnp.arange(
-            self.origin[1] + sep,
-            self.origin[1] + self.params.fill_depth + sep,
-            sep,
-        )
-        ss, nn = jnp.meshgrid(stream, normal)
-        pos = jnp.stack([ss.ravel(), nn.ravel()], axis=-1).astype(jnp.float32)
-        vel = jnp.zeros_like(pos)
-        density = jnp.full(pos.shape[0], self.params.rho_0)
-        return pos, vel, density
+        params = self.params
+        length = params.periodic_x_max - params.periodic_x_min
+        n_cells_x = int(round(length / params.cell_size))
+        n_cells_y = int(round(params.fill_depth / params.cell_size))
+        if not np.isclose(n_cells_x * params.cell_size, length):
+            raise ValueError("periodic length must be an integer number of cells")
+        if not np.isclose(n_cells_y * params.cell_size, params.fill_depth):
+            raise ValueError("fill depth must be an integer number of cells")
 
-    def initialize_lithostatic_stress(self, pos, density):
-        """Initialize a realistic confining stress field for a tilted chute.
+        spacing = params.particle_spacing
+        stream = params.periodic_x_min + (
+            jnp.arange(n_cells_x * params.particles_per_axis) + 0.5
+        ) * spacing
+        normal = params.base_y + (
+            jnp.arange(n_cells_y * params.particles_per_axis) + 0.5
+        ) * spacing
+        xx, yy = jnp.meshgrid(stream, normal, indexing="xy")
+        position = jnp.stack([xx.ravel(), yy.ravel()], axis=-1).astype(jnp.float32)
+        velocity = jnp.zeros_like(position)
+        density = jnp.full(
+            position.shape[0], params.bulk_density, dtype=jnp.float32
+        )
+        return position, velocity, density
 
-        The soil is initially at rest in a gravity field that is tilted by the chute
-        angle. We compute the vertical stress using the depth measured normal to the
-        chute base and rotate the principal stress tensor into the global frame.
-        """
-        gravity_mag = jnp.linalg.norm(
-            jnp.array([
-                9.81 * jnp.sin(jnp.deg2rad(self.params.chute_angle_deg)),
-                -9.81 * jnp.cos(jnp.deg2rad(self.params.chute_angle_deg)),
-            ], dtype=jnp.float32)
+    def initialize_lithostatic_stress(self, position, density):
+        """Return a compression-positive stress field in chute coordinates."""
+        params = self.params
+        depth_below_surface = jnp.maximum(
+            params.base_y + params.fill_depth - position[:, 1], 0.0
         )
-        y_depth = pos[:, 1] - self.origin[1]
-        p_stack, q_stack = hdx.precondition_from_lithostatic(
-            density_stack=density,
-            depth_stack=y_depth,
-            gravity=gravity_mag,
-            slope_angle_deg=self.params.chute_angle_deg,
-            k0=0.5,
-        )
-        stress_local = hdx.reconstruct_stress_from_triaxial(p_stack, q_stack)
+        theta = jnp.deg2rad(params.chute_angle_deg)
+        sigma_yy = density * 9.81 * jnp.cos(theta) * depth_below_surface
+        sigma_xy = -density * 9.81 * jnp.sin(theta) * depth_below_surface
+        sigma_xx = params.lateral_stress_ratio * sigma_yy
+        sigma_zz = params.lateral_stress_ratio * sigma_yy
 
-        theta = jnp.deg2rad(self.params.chute_angle_deg)
-        rot = jnp.array(
-            [
-                [jnp.cos(theta), -jnp.sin(theta), 0.0],
-                [jnp.sin(theta),  jnp.cos(theta), 0.0],
-                [0.0,            0.0,            1.0],
-            ],
-            dtype=jnp.float32,
-        )
-        stress_world = jax.vmap(lambda s: rot @ s @ rot.T)(stress_local)
-        return stress_world
+        stress = jnp.zeros((position.shape[0], 3, 3), dtype=jnp.float32)
+        stress = stress.at[:, 0, 0].set(sigma_xx)
+        stress = stress.at[:, 1, 1].set(sigma_yy)
+        stress = stress.at[:, 2, 2].set(sigma_zz)
+        stress = stress.at[:, 0, 1].set(sigma_xy)
+        stress = stress.at[:, 1, 0].set(sigma_xy)
+        return stress
 
     def build_template(self):
-        pos, vel, density = self.generate_particles()
-        stress_stack = self.initialize_lithostatic_stress(pos, density)
+        params = self.params
+        position, velocity, density = self.generate_particles()
+        stress = self.initialize_lithostatic_stress(position, density)
+        pressure = jnp.trace(stress, axis1=1, axis2=2) / 3.0
 
-        model_name = self.params.constitutive_model.lower()
+        model_name = params.constitutive_model.lower()
         if model_name == "mu_i":
             law = hdx.MuI_LC(
-                mu_s=self.params.compute_mu(),
-                mu_d=self.params.compute_mu() * 1.5,
+                mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
+                mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
                 I_0=0.35,
                 d_p=0.002,
-                K=self.params.K,
-                rho_p=self.params.rho_0,
+                K=params.bulk_modulus,
+                rho_p=params.grain_density,
                 alpha=1.0e-6,
             )
-            law_state = law.create_state_from_density(density_stack=density)
+            law_state = law.create_state_from_density(
+                density_stack=density,
+                pressure_stack=pressure,
+            )
         elif model_name == "drucker_prager":
             law = hdx.DruckerPrager(
                 nu=0.3,
-                K=self.params.K,
-                mu_1=self.params.compute_mu(),
-                rho_0=self.params.rho_0,
+                K=params.bulk_modulus,
+                mu_1=params.drucker_prager_mu,
+                rho_0=params.separation_density_ratio * params.bulk_density,
             )
-            law_state = law.create_state(stress_stack=jnp.zeros((pos.shape[0], 3, 3)))
+            law_state = law.create_state(stress_stack=stress)
         else:
             raise ValueError(
-                "Unknown constitutive model: "
-                f"{self.params.constitutive_model}. Choose 'drucker_prager' or 'mu_i'."
+                f"Unknown constitutive model {params.constitutive_model!r}; "
+                "choose 'drucker_prager' or 'mu_i'."
             )
 
-        sim_builder = hdx.SimBuilder()
-
-        sim_builder.add_material_points(
-            position_stack=pos,
-            velocity_stack=vel,
+        builder = hdx.SimBuilder()
+        builder.add_material_points(
+            position_stack=position,
+            velocity_stack=velocity,
             density_stack=density,
-            stress_stack=stress_stack,
-            cell_size=self.cell_size,
-            ppc=self.ppc,
+            stress_stack=stress,
+            cell_size=params.cell_size,
+            ppc=params.ppc,
         )
-        sim_builder.add_grid(
-            origin=self.origin,
-            end=self.end,
-            cell_size=self.cell_size,
+        builder.add_grid(
+            origin=params.origin,
+            end=params.end,
+            cell_size=params.cell_size,
+            periodic_axes=(True, False),
         )
-        sim_builder.add_constitutive_law(law=law, law_state=law_state)
-        sim_builder.couple(shapefunction="quadratic")
-        theta = jnp.deg2rad(self.params.chute_angle_deg)
-        gravity_world = jnp.array([
-            9.81 * jnp.sin(theta),
-            -9.81 * jnp.cos(theta),
-        ], dtype=jnp.float32)
-        sim_builder.add_gravity(gravity=gravity_world, is_apply_on_grid=True)
+        builder.add_constitutive_law(law=law, law_state=law_state)
+        builder.couple(shapefunction="quadratic")
+        builder.add_gravity(gravity=params.gravity, is_apply_on_grid=True)
 
-        # For the periodic streamwise direction, the left/right walls should not
-        # behave like rigid contact walls. Only the normal-direction wall and the
-        # rough lower boundary carry friction
-        # Intended physical setup for the periodic chute:
-        # - left/right walls are periodic
-        # - bottom wall is a no-slip or rough base
-        # - top is free
-        domain_sdf = hdx.DomainSDF(
-            origin=self.origin,
-            end=self.end,
-            frictions=[0.0, 0.7, 0.0, 0.0],
-            wall_offset=0.75 * self.cell_size,
+        base = hdx.PlaneSDF(normal=(0.0, 1.0))
+        builder.add_sdf_object(
+            sdf_logic=base,
+            center_of_mass=jnp.array([0.0, params.base_y]),
         )
-        sim_builder.add_sdf_object(sdf_logic=domain_sdf)
-        sim_builder.add_sdf_collider(gap=self.cell_size / self.ppc)
-        sim_builder.set_solver(scheme="usl_aflip", alpha=0.1)
+        builder.add_sdf_collider(
+            gap=params.particle_spacing,
+            friction=params.base_friction,
+        )
+        builder.set_solver(scheme="usl_aflip", alpha=0.1)
 
-        return sim_builder.build(dt=self.dt)
+        solver, state = builder.build(dt=params.dt)
+        self.validate_initial_state(solver, state)
+        return solver, state
 
-    def wrap_periodic_streamwise(self, sim_state):
-        world = sim_state.world
-        mp_states = list(world.material_points)
-        mp_state = mp_states[0]
+    def validate_initial_state(self, solver, state):
+        params = self.params
+        mp = state.world.material_points[0]
+        expected_volume = params.cell_size**2 / params.ppc
+        expected_mass = params.bulk_density * (
+            params.periodic_x_max - params.periodic_x_min
+        ) * params.fill_depth
+        actual_mass = float(jnp.sum(mp.mass_stack))
 
-        pos = mp_state.position_stack
-        vel = mp_state.velocity_stack
+        if not np.isclose(float(mp.volume_stack[0]), expected_volume):
+            raise ValueError("particle volume is inconsistent with cell_size and ppc")
+        if not np.isclose(actual_mass, expected_mass, rtol=1.0e-6):
+            raise ValueError(
+                f"particle mass {actual_mass} does not match bed mass {expected_mass}"
+            )
+        if solver.grid_domains[0].periodic_axes != (True, False):
+            raise ValueError("streamwise grid axis is not periodic")
+        if not bool(jnp.all(jnp.isfinite(mp.stress_stack))):
+            raise ValueError("initial stress contains non-finite values")
 
-        s_min = self.params.periodic_x_min
-        s_max = self.params.periodic_x_max
-        s_wrapped = jnp.mod(pos[:, 0] - s_min, s_max - s_min) + s_min
-
-        n_min = self.origin[1]
-        n_max = self.end[1]
-        n_clipped = jnp.clip(pos[:, 1], n_min, n_max)
-
-        world_pos = pos.at[:, 0].set(s_wrapped).at[:, 1].set(n_clipped)
-        # Keep velocity continuous across periodic x faces.
-        world_vel = vel
-
+    def wrap_periodic_streamwise(self, state):
+        mp_states = list(state.world.material_points)
+        mp = mp_states[0]
+        params = self.params
+        period = params.periodic_x_max - params.periodic_x_min
+        wrapped_x = (
+            jnp.mod(mp.position_stack[:, 0] - params.periodic_x_min, period)
+            + params.periodic_x_min
+        )
         updated_mp = eqx.tree_at(
-            lambda s: (s.position_stack, s.velocity_stack),
-            mp_state,
-            (world_pos, world_vel),
+            lambda item: item.position_stack,
+            mp,
+            mp.position_stack.at[:, 0].set(wrapped_x),
         )
-
         mp_states[0] = updated_mp
-        world = eqx.tree_at(lambda w: w.material_points, world, tuple(mp_states))
-        return eqx.tree_at(lambda s: s.world, sim_state, world)
+        world = eqx.tree_at(
+            lambda item: item.material_points, state.world, tuple(mp_states)
+        )
+        return eqx.tree_at(lambda item: item.world, state, world)
 
-    def compute_velocity_profile(self, sim_state):
-        mp_state = sim_state.world.material_points[0]
-        pos = np.asarray(mp_state.position_stack)
-        vel = np.asarray(mp_state.velocity_stack)
-
-        y = pos[:, 1]
-        vx = vel[:, 0]
-        y_min = self.origin[1]
-        y_max = self.end[1]
-        bins = 20
-        edges = np.linspace(y_min, y_max, bins + 1)
+    def compute_velocity_profile(self, state):
+        mp = state.world.material_points[0]
+        position = np.asarray(mp.position_stack)
+        velocity = np.asarray(mp.velocity_stack)
+        n_bins = int(round(self.params.domain_height / self.params.particle_spacing))
+        edges = np.linspace(
+            self.params.base_y,
+            self.params.base_y + self.params.domain_height,
+            n_bins + 1,
+        )
         centers = 0.5 * (edges[:-1] + edges[1:])
-        counts, _ = np.histogram(y, bins=edges)
-        weighted, _ = np.histogram(y, bins=edges, weights=vx)
-        avg_vx = np.divide(weighted, counts, out=np.zeros_like(weighted, dtype=float), where=counts > 0)
-        return centers, avg_vx
+        counts, _ = np.histogram(position[:, 1], bins=edges)
+        weighted, _ = np.histogram(position[:, 1], bins=edges, weights=velocity[:, 0])
+        mean_vx = np.full(centers.shape, np.nan)
+        np.divide(weighted, counts, out=mean_vx, where=counts > 0)
+        return centers, mean_vx, counts
 
-    def compute_time_averaged_profile(self, profiles):
+    @staticmethod
+    def compute_time_averaged_profile(profiles):
         if not profiles:
             return np.array([]), np.array([])
         y = np.asarray(profiles[0][:, 0], dtype=float)
-        stacked_vx = np.stack([np.asarray(p[:, 1], dtype=float) for p in profiles], axis=0)
-        avg_vx = np.mean(stacked_vx, axis=0)
-        return y, avg_vx
+        stacked_vx = np.stack(
+            [np.asarray(profile[:, 1], dtype=float) for profile in profiles], axis=0
+        )
+        valid_counts = np.sum(np.isfinite(stacked_vx), axis=0)
+        summed = np.nansum(stacked_vx, axis=0)
+        mean_vx = np.full(y.shape, np.nan)
+        np.divide(summed, valid_counts, out=mean_vx, where=valid_counts > 0)
+        return y, mean_vx
 
 
-def run_sim():
-    procedure = ChuteProcedure()
-    solver, sim_state = procedure.build_template()
+def _save_profile(path: Path, y, velocity, counts=None):
+    columns = [y, velocity]
+    header = "y,mean_vx"
+    if counts is not None:
+        columns.append(counts)
+        header += ",particle_count"
+    np.savetxt(
+        path,
+        np.column_stack(columns),
+        delimiter=",",
+        header=header,
+        comments="",
+    )
 
-    project_dir = Path(__file__).resolve().parent
-    output_dir = project_dir / "output"
+
+def run_sim(
+    params: ChuteParameters | None = None,
+    output_dir: Path | None = None,
+    write_visuals: bool = True,
+):
+    procedure = ChuteProcedure(params)
+    params = procedure.params
+    solver, state = procedure.build_template()
+
+    def make_advance_chunk(chunk_length):
+        def advance_chunk(current_state):
+            def step_once(carry, _):
+                next_state = solver(carry)
+                next_state = procedure.wrap_periodic_streamwise(next_state)
+                return next_state, None
+
+            return jax.lax.scan(
+                step_once,
+                current_state,
+                xs=None,
+                length=chunk_length,
+            )[0]
+
+        return eqx.filter_jit(advance_chunk)
+
+    if output_dir is None:
+        output_dir = Path(__file__).resolve().parent / "output"
+    else:
+        output_dir = Path(__file__).resolve().parent / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    visualizer = (
+        hdx.VTKVisualizer(output_dir=str(output_dir)) if write_visuals else None
+    )
 
-    vis = hdx.VTKVisualizer(output_dir=str(output_dir))
-    history = {"time": [], "mean_speed": [], "profile_y": [], "profile_vx": []}
-    profile_history = []
+    history = {"time": [], "mean_speed": [], "mean_vx": []}
+    steady_profiles = []
 
-    print("Starting granular chute flow benchmark")
-    print(f"Domain: {procedure.origin} -> {procedure.end}, dt={procedure.dt}, steps={procedure.total_steps}")
+    print("Starting granular chute-flow benchmark")
+    print(
+        f"model={params.constitutive_model}, particles="
+        f"{state.world.material_points[0].num_points}, dt={params.dt}, "
+        f"steps={procedure.total_steps}"
+    )
 
-    for step in range(procedure.total_steps):
-        sim_state = solver(sim_state)
-        sim_state = procedure.wrap_periodic_streamwise(sim_state)
+    full_chunks, remainder = divmod(
+        procedure.total_steps, procedure.output_steps
+    )
+    chunk_lengths = [procedure.output_steps] * full_chunks
+    if remainder:
+        chunk_lengths.append(remainder)
+    advance_functions = {
+        length: make_advance_chunk(length) for length in set(chunk_lengths)
+    }
 
-        if step % procedure.output_steps == 0:
-            mp_state = sim_state.world.material_points[0]
-            mean_vel = jnp.mean(jnp.linalg.norm(mp_state.velocity_stack, axis=1))
-            history["time"].append(step * procedure.dt)
-            history["mean_speed"].append(float(mean_vel))
-            vis.log_particles(
-                mp_state,
-                label="material_points",
-                property_name="velocity_stack",
-                time=float(step * procedure.dt),
-                step=int(step),
+    completed_steps = 0
+    for chunk_length in chunk_lengths:
+        state = advance_functions[chunk_length](state)
+        completed_steps += chunk_length
+
+        mp = state.world.material_points[0]
+        arrays_finite = (
+            jnp.all(jnp.isfinite(mp.position_stack))
+            & jnp.all(jnp.isfinite(mp.velocity_stack))
+            & jnp.all(jnp.isfinite(mp.stress_stack))
+        )
+        if not bool(arrays_finite):
+            raise FloatingPointError(
+                f"non-finite particle state at step {completed_steps}"
             )
 
-            pos = np.asarray(mp_state.position_stack)
-            vel_local = np.asarray(mp_state.velocity_stack)
+        time = float(state.time)
+        speed = float(jnp.mean(jnp.linalg.norm(mp.velocity_stack, axis=1)))
+        mean_vx = float(jnp.mean(mp.velocity_stack[:, 0]))
+        history["time"].append(time)
+        history["mean_speed"].append(speed)
+        history["mean_vx"].append(mean_vx)
 
+        profile_y, profile_vx, counts = procedure.compute_velocity_profile(state)
+        profile = np.column_stack([profile_y, profile_vx])
+        if time >= params.steady_start_fraction * params.total_time:
+            steady_profiles.append(profile)
+
+        _save_profile(
+            output_dir / f"velocity_profile_{completed_steps:05d}.csv",
+            profile_y,
+            profile_vx,
+            counts,
+        )
+
+        if write_visuals:
+            visualizer.log_particles(
+                mp,
+                label="material_points",
+                property_name="velocity_stack",
+                time=time,
+                step=completed_steps,
+            )
+            position = np.asarray(mp.position_stack)
+            velocity = np.asarray(mp.velocity_stack)
             plt.figure(figsize=(7, 3.5))
             plt.quiver(
-                pos[:, 0], pos[:, 1],
-                vel_local[:, 0], vel_local[:, 1],
-                np.linalg.norm(vel_local, axis=1),
+                position[:, 0],
+                position[:, 1],
+                velocity[:, 0],
+                velocity[:, 1],
+                np.linalg.norm(velocity, axis=1),
                 cmap="viridis",
                 scale=30,
                 width=0.0035,
             )
-            plt.xlim(procedure.params.periodic_x_min, procedure.params.periodic_x_max)
-            plt.ylim(procedure.origin[1], procedure.end[1])
-            plt.xlabel("periodic streamwise coordinate x")
-            plt.ylabel("vertical coordinate y")
-            plt.colorbar(label="speed")
+            plt.xlim(params.periodic_x_min, params.periodic_x_max)
+            plt.ylim(params.base_y, params.base_y + params.domain_height)
+            plt.xlabel("streamwise coordinate x [m]")
+            plt.ylabel("height above base y [m]")
+            plt.colorbar(label="speed [m/s]")
             plt.tight_layout()
-            plt.savefig(output_dir / f"snapshot_{step:05d}.png", dpi=180)
+            plt.savefig(output_dir / f"snapshot_{completed_steps:05d}.png", dpi=180)
             plt.close()
 
-            profile_y, profile_vx = procedure.compute_velocity_profile(sim_state)
-            history["profile_y"].append(profile_y)
-            history["profile_vx"].append(profile_vx)
-            profile_history.append(np.column_stack([profile_y, profile_vx]))
+        min_y = float(jnp.min(mp.position_stack[:, 1]))
+        max_y = float(jnp.max(mp.position_stack[:, 1]))
+        print(
+            f"step={completed_steps:05d}, t={time:.4f}, "
+            f"mean_vx={mean_vx:.4e}, mean_speed={speed:.4e}, "
+            f"y=[{min_y:.4f}, {max_y:.4f}]",
+            flush=True,
+        )
 
-            np.savetxt(
-                output_dir / f"velocity_profile_{step:05d}.csv",
-                np.column_stack([profile_y, profile_vx]),
-                delimiter=",",
-                header="y,mean_vx",
-                comments="",
-            )
-
-            print(f"step={step:04d}, mean_speed={float(mean_vel):.4e}")
-
-    final_mp = sim_state.world.material_points[0]
-    final_mean = float(jnp.mean(jnp.linalg.norm(final_mp.velocity_stack, axis=1)))
-    print("Final particle count:", final_mp.position_stack.shape[0])
-    print("Final mean speed:", final_mean)
-
-    times = history["time"]
-    speeds = history["mean_speed"]
-    plt.figure(figsize=(6, 4))
-    plt.plot(times, speeds, linewidth=2)
-    plt.xlabel("time [s]")
-    plt.ylabel("mean speed [m/s]")
-    plt.tight_layout()
-    plt.savefig(output_dir / "mean_speed.png", dpi=180)
-    plt.close()
-
-    with open(output_dir / "mean_speed.csv", "w", encoding="utf-8") as f:
-        f.write("time,mean_speed\n")
-        for t, v in zip(times, speeds):
-            f.write(f"{t},{v}\n")
-
-    final_pos = np.asarray(final_mp.position_stack)
-    vel_local = np.asarray(final_mp.velocity_stack)
-
-    plt.figure(figsize=(7, 3.5))
-    plt.quiver(
-        final_pos[:, 0], final_pos[:, 1],
-        vel_local[:, 0], vel_local[:, 1],
-        np.linalg.norm(vel_local, axis=1),
-        cmap="viridis",
-        scale=30,
-        width=0.0035,
-    )
-    plt.xlim(procedure.params.periodic_x_min, procedure.params.periodic_x_max)
-    plt.ylim(procedure.origin[1], procedure.end[1])
-    plt.xlabel("periodic streamwise coordinate x")
-    plt.ylabel("vertical coordinate y")
-    plt.colorbar(label="speed")
-    plt.tight_layout()
-    plt.savefig(output_dir / "final_snapshot.png", dpi=180)
-    plt.close()
-
-    final_profile_y, final_profile_vx = procedure.compute_velocity_profile(sim_state)
-    np.savetxt(
+    mp = state.world.material_points[0]
+    final_y, final_vx, final_counts = procedure.compute_velocity_profile(state)
+    _save_profile(
         output_dir / "final_velocity_profile.csv",
-        np.column_stack([final_profile_y, final_profile_vx]),
+        final_y,
+        final_vx,
+        final_counts,
+    )
+
+    avg_y, avg_vx = procedure.compute_time_averaged_profile(steady_profiles)
+    if avg_y.size:
+        _save_profile(output_dir / "steady_velocity_profile.csv", avg_y, avg_vx)
+
+    np.savetxt(
+        output_dir / "mean_velocity.csv",
+        np.column_stack(
+            [history["time"], history["mean_speed"], history["mean_vx"]]
+        ),
         delimiter=",",
-        header="y,mean_vx",
+        header="time,mean_speed,mean_vx",
         comments="",
     )
 
-    steady_window = max(1, min(20, len(profile_history)))
-    steady_profiles = profile_history[-steady_window:]
-    avg_y, avg_vx = procedure.compute_time_averaged_profile(steady_profiles)
-    if avg_y.size > 0:
-        np.savetxt(
-            output_dir / "steady_velocity_profile.csv",
-            np.column_stack([avg_y, avg_vx]),
-            delimiter=",",
-            header="y,mean_vx",
-            comments="",
-        )
+    if write_visuals and avg_y.size:
         plt.figure(figsize=(6, 4))
         plt.plot(avg_vx, avg_y, linewidth=2)
-        plt.gca().invert_yaxis()
-        plt.xlabel("mean streamwise velocity $v_x$")
-        plt.ylabel("depth y")
+        plt.xlabel("mean streamwise velocity [m/s]")
+        plt.ylabel("height above base [m]")
         plt.tight_layout()
         plt.savefig(output_dir / "steady_velocity_profile.png", dpi=180)
         plt.close()
 
-    plt.figure(figsize=(6, 4))
-    plt.plot(final_profile_vx, final_profile_y, linewidth=2)
-    plt.gca().invert_yaxis()
-    plt.xlabel("mean streamwise velocity $v_x$")
-    plt.ylabel("depth y")
-    plt.tight_layout()
-    plt.savefig(output_dir / "final_velocity_profile.png", dpi=180)
-    plt.close()
+    tail_start = max(0, int(0.8 * len(history["mean_vx"])))
+    tail_velocity = history["mean_vx"][tail_start:]
+    if len(tail_velocity) >= 2:
+        relative_tail_change = abs(tail_velocity[-1] - tail_velocity[0]) / max(
+            abs(tail_velocity[-1]), 1.0e-12
+        )
+        history["relative_tail_change"] = relative_tail_change
+        print(
+            f"Relative mean-vx change over final 20%: "
+            f"{relative_tail_change:.3%}"
+        )
 
-    print(f"Saved visualization outputs to {output_dir}")
+    print(f"Final particle count: {mp.num_points}")
+    print(f"Saved outputs to {output_dir}")
+    return state, history
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model",
+        choices=("drucker_prager", "mu_i"),
+        default=ChuteParameters.constitutive_model,
+    )
+    parser.add_argument("--total-time", type=float, default=ChuteParameters.total_time)
+    parser.add_argument(
+        "--output-time", type=float, default=ChuteParameters.output_time
+    )
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--no-visuals", action="store_true")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    run_sim()
+    args = _parse_args()
+    cli_params = replace(
+        ChuteParameters(),
+        constitutive_model=args.model,
+        total_time=args.total_time,
+        output_time=args.output_time,
+    )
+    run_sim(
+        params=cli_params,
+        output_dir=args.output_dir,
+        write_visuals=not args.no_visuals,
+    )

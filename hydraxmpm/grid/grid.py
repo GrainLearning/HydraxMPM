@@ -26,14 +26,15 @@ class GridDomain(eqx.Module):
         end: End coordinates of the grid
         cell_size: Size of each grid cell
         grid_size: Number of grid nodes along each dimension
-    
+
     """
     origin: tuple = eqx.field(static=True)
     end: tuple = eqx.field(static=True)
     cell_size: float | Float[Array, "..."] = eqx.field(static=True)
     grid_size: tuple = eqx.field(static=True)
     padding: int = eqx.field(static=True)
-    
+    periodic_axes: tuple = eqx.field(static=True)
+
     _inv_cell_size: float | Float[Array, "..."] = eqx.field(static=True)
 
     @classmethod
@@ -43,6 +44,7 @@ class GridDomain(eqx.Module):
         end: Float[Array, "dim"] | tuple,
         cell_size: float | Float[Array, "..."],
         padding: int = 2,
+        periodic_axes: tuple[bool, ...] | None = None,
     ) -> Self:
         """
         Creates a GridState with zero-initialized stacks.
@@ -56,13 +58,33 @@ class GridDomain(eqx.Module):
         if not isinstance(end, tuple):
             end = tuple(end.tolist())
 
-        # Apply Padding
-        padded_origin = tuple(o - padding * cell_size for o in origin)
-        padded_end = tuple(e + padding * cell_size for e in end)
+        dim = len(origin)
+        if periodic_axes is None:
+            periodic_axes = (False,) * dim
+        else:
+            periodic_axes = tuple(bool(axis) for axis in periodic_axes)
+            if len(periodic_axes) != dim:
+                raise ValueError(
+                    "periodic_axes must have one boolean entry per grid dimension"
+                )
+
+        # Periodic axes contain only the unique physical nodes. Non-periodic axes
+        # retain the existing ghost-node padding.
+        padded_origin = tuple(
+            o if is_periodic else o - padding * cell_size
+            for o, is_periodic in zip(origin, periodic_axes)
+        )
+        padded_end = tuple(
+            e if is_periodic else e + padding * cell_size
+            for e, is_periodic in zip(end, periodic_axes)
+        )
 
         # number of cells in each dimens (M_x,M_y) for 2D, (M_x,M_y,M_z) for 3D
         raw_size = [(e - o) / cell_size for e, o in zip(padded_end, padded_origin)]
-        grid_size = tuple(int(s + 1) for s in raw_size)
+        grid_size = tuple(
+            int(round(s)) if is_periodic else int(round(s)) + 1
+            for s, is_periodic in zip(raw_size, periodic_axes)
+        )
 
 
         return cls(
@@ -72,6 +94,7 @@ class GridDomain(eqx.Module):
             _inv_cell_size=1.0 / float(cell_size),
             grid_size=grid_size,
             padding=padding,
+            periodic_axes=periodic_axes,
         )
 
 
@@ -91,9 +114,9 @@ class GridDomain(eqx.Module):
     @property
     def position_mesh(self):
         """Create mesh of node coordinates compatible with C-Contiguous (Row-Major) layout.
-        
+
         (M_x, M_y, M_z, dim) shaped array for 3D, (M_x, M_y, dim) for 2D.
-        
+
         """
         indices = jnp.indices(self.grid_size, dtype=jnp.float32)
         # Move the dimension axis to the last position
@@ -133,7 +156,7 @@ class GridArrays(eqx.Module):
         """
         num = grid_topology.num_cells
         dim = grid_topology.dim
-        
+
         return cls(
             mass_stack=jnp.zeros((num,)),
             moment_stack=jnp.zeros((num, dim)),

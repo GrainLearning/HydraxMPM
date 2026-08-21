@@ -79,9 +79,11 @@ class DruckerPrager(ConstitutiveLaw):
 
         # Initial pressure from the material point state
         p_0_stack = jax.vmap(get_pressure)(stress_stack)
+        dev_stress_stack = jax.vmap(get_dev_stress)(stress_stack, p_0_stack)
+        eps_e_stack = dev_stress_stack / (2.0 * self.G)
 
         return DruckerPragerState(
-            eps_e_stack=jnp.zeros((num_points, 3, 3)),
+            eps_e_stack=eps_e_stack,
             eps_p_acc_stack=jnp.zeros(num_points),
             p_0_stack=p_0_stack,
         )

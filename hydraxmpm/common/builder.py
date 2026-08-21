@@ -83,6 +83,7 @@ class SimBuilder:
         end: tuple | Float[Array, "dim"] = None,
         cell_size: float | Float[Array, "..."] = None,
         padding: int = 3,
+        periodic_axes: tuple[bool, ...] | None = None,
     ) -> int:
         """Defines a physical domain.
 
@@ -94,8 +95,14 @@ class SimBuilder:
         """
         if grid_domain is None:
 
-            grid_domain = GridDomain.create(origin, end, cell_size, padding=padding)
-            
+            grid_domain = GridDomain.create(
+                origin,
+                end,
+                cell_size,
+                padding=padding,
+                periodic_axes=periodic_axes,
+            )
+
         return self.grid_domains.add(grid_domain)
 
     def add_material_points(
@@ -105,7 +112,7 @@ class SimBuilder:
         is_rigid: Optional[bool] = False,
         **particle_kwargs,
     ) -> int:
-        
+
 
         if is_rigid:
             rigid_mp_state = RigidMaterialPointState.create(
@@ -157,7 +164,7 @@ class SimBuilder:
         rotation=None,
         sdf_state=None,
     ):
-        
+
         if sdf_state is None:
             # if center of mass is not get it from bounding box center
             if center_of_mass is None:
@@ -215,6 +222,7 @@ class SimBuilder:
         shp = ShapeFunctionMapping(
             shapefunction=shapefunction,
             dim=dim,
+            periodic_axes=grid_state.periodic_axes,
         )
 
         couple = BodyCoupling(
@@ -309,7 +317,7 @@ class SimBuilder:
         sdf_idx_list = (
             list(range(len(self.sdf_logics))) if sdf_idx_list is None else sdf_idx_list
         )
-        
+
         couplings = tuple(self.couplings[i] for i in b_idx_list)
         forces = tuple(self.force_logics[i] for i in f_idx_list)
         sdf_logics = tuple(self.sdf_logics[i] for i in sdf_idx_list)
@@ -420,7 +428,7 @@ class SimBuilder:
         self,
         sdf_idx: int = None,
         g_idx_list: list[int] = None,
-        friction: float = 0.0,
+        friction: float = 1.0,
         gap: float = 1e-4,
     ):
         """Convenience method for adding objects."""
@@ -436,6 +444,7 @@ class SimBuilder:
             sdf_idx=sdf_idx,
             g_idx_list=g_idx_list,
             gap=gap,
+            friction=friction,
         )
 
         f_idx = self.force_logics.add(sdf_collider)
