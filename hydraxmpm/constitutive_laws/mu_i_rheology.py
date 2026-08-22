@@ -20,7 +20,7 @@ from typing import Tuple, Optional, Any
 
 class MuIState(ConstitutiveLawState):
     """State for Mu(I) rheology.
-    
+
     Stores the reference density to compute pressure via a linear Equation of State.
     """
     density_ref_stack: Float[Array, "num_points"]
@@ -32,7 +32,7 @@ class MuI_LC(ConstitutiveLaw):
 
     Based on:
     Jop et al. (2006) "A constitutive law for dense granular flows."
-    
+
     With regularization from:
     Franci and Cremonesi (2019) "3D regularized μ(I)-rheology..."
 
@@ -51,7 +51,7 @@ class MuI_LC(ConstitutiveLaw):
     d_p: float | Float[Array, ""]   # Mean particle diameter
 
     # Regularization parameters
-    alpha: float | Float[Array, ""] 
+    alpha: float | Float[Array, ""]
     alpha_sq: float | Float[Array, ""]
 
     # Stability parameters
@@ -90,11 +90,11 @@ class MuI_LC(ConstitutiveLaw):
         self.d_p = d_p
         self.K = K
         self.rho_p = rho_p
-        
-     
+
+
         self.alpha = alpha
         self.alpha_sq = alpha * alpha
-        
+
         self.p_min_calc = p_min_calc
         self.requires_F_reset = requires_F_reset
 
@@ -104,12 +104,12 @@ class MuI_LC(ConstitutiveLaw):
         pressure_stack: Optional[Float[Array, "num_points"]] = None,
     ) -> MuIState:
         """
-        Initializes state. Calculates reference density from current P and Rho 
+        Initializes state. Calculates reference density from current P and Rho
         assuming p = K * (rho/rho_ref - 1).
         """
         if pressure_stack is None:
             pressure_stack = jnp.zeros_like(density_stack)
-        
+
         # Invert linear EOS: rho_ref = rho / (p/K + 1)
         density_ref_stack = density_stack / ((pressure_stack / self.K) + 1.0)
         jax.debug.print("Initial density range: [{min:.2f}, {max:.2f}]",
@@ -123,7 +123,7 @@ class MuI_LC(ConstitutiveLaw):
         material_points: MaterialPointState
     ) -> MuIState:
         """Creates state using initial material point configuration."""
-        
+
         density_initial_stack = material_points.mass_stack / material_points.volume0_stack
 
         return self.create_state_from_density(
@@ -141,25 +141,25 @@ class MuI_LC(ConstitutiveLaw):
     ) -> Float[Array, "3 3"]:
         """Calculates the Cauchy stress for a single particle."""
 
-        deps_dt = 0.5 * (L + L.T) 
+        deps_dt = 0.5 * (L + L.T)
 
-        
+
 
         deps_v = jnp.trace(deps_dt)
         deps_dev = deps_dt - (deps_v / 3.0) * jnp.eye(3)
-        
+
 
         dot_gamma = jnp.sqrt(2.0 * jnp.sum(deps_dev * deps_dev))
 
 
         current_density = mass / volume
         rho_ratio = current_density / density_ref
-        
+
         # Linear EOS
         p = self.K * (rho_ratio - 1.0)
 
-        is_connected = (rho_ratio > 1.0) 
-        
+        is_connected = (rho_ratio > 1.0)
+
         def connected_update():
 
             p_safe = jnp.maximum(p, self.p_min_calc)
@@ -167,38 +167,38 @@ class MuI_LC(ConstitutiveLaw):
             eta_s = (self.mu_s * p_safe) / jnp.sqrt(dot_gamma**2 + self.alpha**2)
 
             delta_mu = self.mu_d - self.mu_s
-            
+
             #  pressure confinement term
             pconf = self.I_0 * jnp.sqrt(p_safe / self.rho_p)
-            
+
 
             eta_d = (self.d_p * p_safe * delta_mu) / (pconf + self.d_p * dot_gamma)
 
             eta_total = eta_s + eta_d
-            
 
-            stress = p_safe * jnp.eye(3) + eta_total * deps_dev
+
+            stress = p_safe * jnp.eye(3) + 2 * eta_total * deps_dev
             return stress
 
 
         stress_next = jax.lax.cond(
             is_connected,
             connected_update,
-            lambda: jnp.zeros((3, 3)) 
+            lambda: jnp.zeros((3, 3))
         )
-        
+
         return stress_next
 
     def update(
         self,
-        material_points_state: MaterialPointState, 
+        material_points_state: MaterialPointState,
         law_state: MuIState,
         dt: float | Float[Array, "..."]
     ) -> Tuple[MaterialPointState, MuIState]:
-        
+
         # Vectorized update
         new_stress_stack = jax.vmap(
-            self._update_stress, 
+            self._update_stress,
             in_axes=(0, 0, 0, 0, None)
         )(
             material_points_state.L_stack,
@@ -213,21 +213,21 @@ class MuI_LC(ConstitutiveLaw):
             material_points_state,
             new_stress_stack
         )
-        
+
         return new_mp_state, law_state
 
     def get_dt_crit(self, mp_state, cell_size: float, alpha: float = 0.5) -> Float[Array, ""]:
         """Critical timestep based on Bulk Modulus wave speed."""
-        
+
         def particle_wave_speed(rho):
             # c = sqrt(K / rho)
             return jnp.sqrt(self.K / rho)
 
         rho_stack = mp_state.mass_stack / mp_state.volume_stack
         c_stack = jax.vmap(particle_wave_speed)(rho_stack)
-        
+
         vel_mag_stack = jnp.linalg.norm(mp_state.velocity_stack, axis=1)
-        
+
         max_wave_speed = jnp.max(c_stack + vel_mag_stack)
-        
+
         return (alpha * cell_size) / (max_wave_speed + 1e-9)
