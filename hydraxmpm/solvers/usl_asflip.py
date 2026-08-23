@@ -218,6 +218,9 @@ class USLAFLIP(USLSolver):
             intr_volume_stack = mp_state.volume_stack.at[intr_cache.point_ids].get()
             intr_ext_forces_stack = mp_state.force_stack.at[intr_cache.point_ids].get()
             intr_stress_stack = mp_state.stress_stack.at[intr_cache.point_ids].get()
+            intr_stress_stack = self._get_p2g_stress(
+                self.constitutive_laws[c.c_idx], intr_stress_stack
+            )
 
             # AFLIP compute affine velocity contribution,  C * (x_node - x_p)
             # with C @ dist over N interactions (batched matmul)
@@ -290,6 +293,15 @@ class USLAFLIP(USLSolver):
             tuple(grids),
         )
         return world, mechanics, sim_cache
+
+    def _get_p2g_stress(self, law, stress_stack):
+        """Return stress used by the explicit grid-force update.
+
+        Projection solvers override this hook to exclude the pressure part,
+        which they integrate implicitly.
+        """
+        del law
+        return stress_stack
 
     def _g2p(
         self,

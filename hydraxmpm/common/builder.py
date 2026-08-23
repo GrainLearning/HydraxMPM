@@ -30,7 +30,7 @@ from ..constitutive_laws.constitutive_law import (
 )
 from ..constitutive_laws.linearelastic import LinearElasticLaw
 from ..constitutive_laws.newtonfluid import NewtonFluid
-from ..constitutive_laws.mu_i_rheology import MuI_LC
+from ..constitutive_laws.mu_i_rheology import MuI_Incompressible, MuI_LC
 
 from typing import List, Tuple, Optional, Any, Dict, Callable
 
@@ -41,6 +41,7 @@ from ..solvers.coupling import BodyCoupling
 from jaxtyping import Array, Float, Int, UInt, Bool
 
 from ..solvers.usl_asflip import USLAFLIP
+from ..solvers.usl_incompressible import USLIncompressibleAFLIP
 
 from ..sdf.sdfcollection import PlaneSDF,CompositeSDF
 
@@ -143,6 +144,10 @@ class SimBuilder:
         elif isinstance(law, MuI_LC) and law_state is None:
             law_state = law.create_state_from_density(
                 density_stack=law_kwargs.get("density_stack", None)
+            )
+        elif isinstance(law, MuI_Incompressible) and law_state is None:
+            law_state = law.create_state_from_pressure(
+                pressure_stack=law_kwargs.get("pressure_stack", None)
             )
 
         elif isinstance(law, LinearElasticLaw):
@@ -349,7 +354,15 @@ class SimBuilder:
                 grid_domains=grid_domains,
                 **solver_params,
             )
-
+        elif scheme.lower() == "usl_incompressible_aflip":
+            solver = USLIncompressibleAFLIP(
+                constitutive_laws=laws,
+                forces=forces,
+                couplings=couplings,
+                sdf_logics=sdf_logics,
+                grid_domains=grid_domains,
+                **solver_params,
+            )
         # Here we assume that each coupling maps
         # to one solver state
         for coupling in couplings:

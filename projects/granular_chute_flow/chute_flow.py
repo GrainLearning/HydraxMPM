@@ -42,12 +42,16 @@ class ChuteParameters:
     bulk_modulus: float = 1.0e6
     friction_angle_deg: float = 20.0
     dynamic_friction_angle_deg: float = 30.0
+    # Calibrated for the 24 degree Bagnold benchmark with 0.005 m cells.
+    mu_i_max_shear_viscosity: float = 6.65
+    mu_i_regularization_rate: float = 31.5
     chute_angle_deg: float = 24.0
     lateral_stress_ratio: float = 0.5
     base_friction: float = 0.7
     separation_density_ratio: float = 0.90
 
     constitutive_model: str = "drucker_prager"
+    incompressible_wall_ghost_no_slip: bool = True
     steady_start_fraction: float = 0.8
 
     @property
@@ -160,6 +164,32 @@ class ChuteProcedure:
                 density_stack=density,
                 pressure_stack=pressure,
             )
+        elif model_name == "mu_i_incompressible":
+            law = hdx.MuI_Incompressible(
+                mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
+                mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
+                I_0=0.35,
+                d_p=0.002,
+                rho_p=params.grain_density,
+                max_shear_viscosity=params.mu_i_max_shear_viscosity,
+                cell_size=params.cell_size,
+            )
+            law_state = law.create_state_from_pressure(
+                pressure_stack=pressure,
+            )
+        elif model_name == "mu_i_regularized":
+            law = hdx.MuI_regularized(
+                mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
+                mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
+                I_0=0.35,
+                d_p=0.002,
+                rho_p=params.grain_density,
+                regularization_rate=params.mu_i_regularization_rate,
+                cell_size=params.cell_size,
+            )
+            law_state = law.create_state_from_pressure(
+                pressure_stack=pressure,
+            )
         elif model_name == "drucker_prager":
             law = hdx.DruckerPrager(
                 nu=0.3,
@@ -171,7 +201,8 @@ class ChuteProcedure:
         else:
             raise ValueError(
                 f"Unknown constitutive model {params.constitutive_model!r}; "
-                "choose 'drucker_prager' or 'mu_i'."
+                "choose 'drucker_prager', 'mu_i', 'mu_i_incompressible', "
+                "or 'mu_i_regularized'."
             )
 
         builder = hdx.SimBuilder()
@@ -202,7 +233,14 @@ class ChuteProcedure:
             gap=params.particle_spacing,
             friction=params.base_friction,
         )
-        builder.set_solver(scheme="usl_aflip", alpha=0.1)
+        if model_name in ("mu_i_incompressible", "mu_i_regularized"):
+            builder.set_solver(
+                scheme="usl_incompressible_aflip",
+                alpha=0.1,
+                wall_ghost_no_slip=params.incompressible_wall_ghost_no_slip,
+            )
+        else:
+            builder.set_solver(scheme="usl_aflip", alpha=0.1)
 
         solver, state = builder.build(dt=params.dt)
         self.validate_initial_state(solver, state)
@@ -476,7 +514,12 @@ def _parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model",
-        choices=("drucker_prager", "mu_i"),
+        choices=(
+            "drucker_prager",
+            "mu_i",
+            "mu_i_incompressible",
+            "mu_i_regularized",
+        ),
         default=ChuteParameters.constitutive_model,
     )
     parser.add_argument("--total-time", type=float, default=ChuteParameters.total_time)

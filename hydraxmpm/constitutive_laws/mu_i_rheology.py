@@ -7,16 +7,16 @@
 
 """Implementation of the regularized µ(I) rheology for dense granular flows."""
 
+from typing import Optional, Tuple
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Float
 
-from .constitutive_law import ConstitutiveLawState, ConstitutiveLaw
 from ..material_points.material_points import MaterialPointState
-from ..utils.math_helpers import get_volumetric_strain, get_dev_strain
+from .constitutive_law import ConstitutiveLaw, ConstitutiveLawState
 
-from jaxtyping import Float, Array
-from typing import Tuple, Optional, Any
 
 class MuIState(ConstitutiveLawState):
     """State for Mu(I) rheology.
@@ -24,6 +24,214 @@ class MuIState(ConstitutiveLawState):
     Stores the reference density to compute pressure via a linear Equation of State.
     """
     density_ref_stack: Float[Array, "num_points"]
+
+
+class MuIIncompressibleState(ConstitutiveLawState):
+    """Pressure Lagrange multiplier carried at material points.
+
+    Pressure is solved by an incompressible MPM solver.  It is not computed
+    from density or the deformation gradient by this constitutive law.
+    """
+
+    pressure_stack: Float[Array, "num_points"]
+
+
+class MuI_Incompressible(ConstitutiveLaw):
+    """Isochoric local µ(I) rheology for use with a pressure-projection solver.
+
+    The constitutive part supplies only the pressure-dependent deviatoric
+    response.  ``USLIncompressibleAFLIP`` supplies pressure as a Lagrange
+    multiplier and enforces the discrete constraint ``div(v) = 0``.
+
+    ``max_shear_viscosity`` and the explicit viscous CFL limit are numerical
+    regularizations, not material parameters.  If either limit is active in a
+    steady flow, the response is a capped Newtonian branch rather than the
+    requested local mu(I) rheology, and the selected flow rate is cap-dependent.
+    """
+
+    mu_s: float | Float[Array, ""]
+    mu_d: float | Float[Array, ""]
+    I_0: float | Float[Array, ""]
+    rho_p: float | Float[Array, ""]
+    d_p: float | Float[Array, ""]
+    p_min_calc: float | Float[Array, ""]
+    cell_size: float | Float[Array, ""]
+    viscosity_cfl: float | Float[Array, ""]
+    max_shear_viscosity: Optional[float | Float[Array, ""]] = None
+
+    def __init__(
+        self,
+        *,
+        mu_s: float | Float[Array, ""],
+        mu_d: float | Float[Array, ""],
+        I_0: float | Float[Array, ""],
+        d_p: float | Float[Array, ""],
+        cell_size: float | Float[Array, ""],
+        rho_p: float | Float[Array, ""] = 2650.0,
+        p_min_calc: float | Float[Array, ""] = 0.0,
+        viscosity_cfl: float | Float[Array, ""] = 0.125,
+        max_shear_viscosity: Optional[float | Float[Array, ""]] = None,
+        requires_F_reset: bool = True,
+    ):
+        self.mu_s = mu_s
+        self.mu_d = mu_d
+        self.I_0 = I_0
+        self.d_p = d_p
+        self.rho_p = rho_p
+        self.p_min_calc = p_min_calc
+        self.cell_size = cell_size
+        self.viscosity_cfl = viscosity_cfl
+        self.max_shear_viscosity = max_shear_viscosity
+        self.requires_F_reset = requires_F_reset
+
+    def create_state_from_pressure(
+        self, pressure_stack: Float[Array, "num_points"]
+    ) -> MuIIncompressibleState:
+        return MuIIncompressibleState(pressure_stack=jnp.maximum(pressure_stack, 0.0))
+
+    def create_state(
+        self, material_points: MaterialPointState
+    ) -> MuIIncompressibleState:
+        return self.create_state_from_pressure(material_points.pressure_stack)
+
+    def _kinematics(self, L):
+        """Return deviatoric strain rate and its Jop et al. invariant."""
+        D = 0.5 * (L + L.T)
+        D_dev = D - (jnp.trace(D) / 3.0) * jnp.eye(3)
+        shear_rate = jnp.sqrt(2.0 * jnp.sum(D_dev * D_dev))
+        return D_dev, shear_rate
+
+    def _viscosity_components(self, shear_rate, pressure):
+        """Return the static-friction and finite dynamic viscosity terms."""
+        pressure = jnp.maximum(pressure, 0.0)
+        pressure_safe = jnp.maximum(pressure, self.p_min_calc)
+
+        shear_rate_safe = jnp.maximum(
+            shear_rate, jnp.finfo(shear_rate.dtype).tiny
+        )
+        eta_static = self.mu_s * pressure_safe / shear_rate_safe
+        pressure_scale = self.I_0 * jnp.sqrt(pressure_safe / self.rho_p)
+        eta_dynamic = (
+            self.d_p * pressure_safe * (self.mu_d - self.mu_s)
+        ) / (pressure_scale + self.d_p * shear_rate + 1.0e-30)
+        return eta_static, eta_dynamic
+
+    def _limit_viscosity(self, viscosity, density, dt):
+        """Apply fixed and explicit-CFL viscosity safeguards."""
+        dt_safe = jnp.maximum(dt, jnp.finfo(jnp.asarray(dt).dtype).tiny)
+        viscosity_limit = (
+            self.viscosity_cfl * density * self.cell_size**2 / dt_safe
+        )
+        if self.max_shear_viscosity is not None:
+            viscosity = jnp.minimum(viscosity, self.max_shear_viscosity)
+        return jnp.minimum(viscosity, viscosity_limit)
+
+    def _update_stress(self, L, pressure, density, dt):
+        """Return total compression-positive stress for one material point."""
+        D_dev, shear_rate = self._kinematics(L)
+        pressure = jnp.maximum(pressure, 0.0)
+        eta_static, eta_dynamic = self._viscosity_components(
+            shear_rate, pressure
+        )
+        viscosity = self._limit_viscosity(
+            eta_static + eta_dynamic, density, dt
+        )
+
+        return pressure * jnp.eye(3) + 2.0 * viscosity * D_dev
+
+    def update(self, material_points_state, law_state, dt):
+        density_stack = (
+            material_points_state.mass_stack / material_points_state.volume0_stack
+        )
+        stress_stack = jax.vmap(self._update_stress, in_axes=(0, 0, 0, None))(
+            material_points_state.L_stack,
+            law_state.pressure_stack,
+            density_stack,
+            dt,
+        )
+        material_points_state = eqx.tree_at(
+            lambda state: state.stress_stack,
+            material_points_state,
+            stress_stack,
+        )
+        return material_points_state, law_state
+
+    def get_dt_crit(self, mp_state, cell_size: float, alpha: float = 0.5):
+        """Limit the step by advection and the explicit viscosity update."""
+        del alpha
+        speed = jnp.max(jnp.linalg.norm(mp_state.velocity_stack, axis=1))
+        advective_dt = cell_size / (speed + 1.0e-9)
+        if self.max_shear_viscosity is None:
+            return advective_dt
+        density = jnp.min(mp_state.mass_stack / mp_state.volume0_stack)
+        viscous_dt = (
+            self.viscosity_cfl * density * cell_size**2 / self.max_shear_viscosity
+        )
+        return jnp.minimum(advective_dt, viscous_dt)
+
+
+class MuI_regularized(MuI_Incompressible):
+    """Exponentially regularized incompressible local mu(I).
+
+    Only the divergent static contribution ``mu_s p / shear_rate`` is
+    regularized, exactly as in Eqs. (13)--(16) of Franci and Cremonesi (2019).
+    The Papanastasiou form has the finite zero-shear limit
+    ``mu_s p / regularization_rate``.
+
+    ``regularization_rate`` is the paper's lambda in inverse seconds.  The
+    inherited viscosity limits are separate safeguards required by this
+    explicit MPM momentum update; they are not part of the cited model.
+    """
+
+    regularization_rate: float | Float[Array, ""]
+
+    def __init__(
+        self,
+        *,
+        mu_s: float | Float[Array, ""],
+        mu_d: float | Float[Array, ""],
+        I_0: float | Float[Array, ""],
+        d_p: float | Float[Array, ""],
+        cell_size: float | Float[Array, ""],
+        rho_p: float | Float[Array, ""] = 2650.0,
+        regularization_rate: float | Float[Array, ""] = 1.0e-2,
+        p_min_calc: float | Float[Array, ""] = 0.0,
+        viscosity_cfl: float | Float[Array, ""] = 0.125,
+        requires_F_reset: bool = True,
+    ):
+        if regularization_rate <= 0.0:
+            raise ValueError("regularization_rate must be positive")
+        super().__init__(
+            mu_s=mu_s,
+            mu_d=mu_d,
+            I_0=I_0,
+            d_p=d_p,
+            cell_size=cell_size,
+            rho_p=rho_p,
+            p_min_calc=p_min_calc,
+            viscosity_cfl=viscosity_cfl,
+            requires_F_reset=requires_F_reset,
+        )
+        self.regularization_rate = regularization_rate
+
+    def _viscosity_components(self, shear_rate, pressure):
+        pressure_safe = jnp.maximum(
+            jnp.maximum(pressure, 0.0), self.p_min_calc
+        )
+        rate = self.regularization_rate
+        ratio = jnp.where(
+            shear_rate > 0.0,
+            -jnp.expm1(-shear_rate / rate)
+            / jnp.maximum(shear_rate, jnp.finfo(shear_rate.dtype).tiny),
+            1.0 / rate,
+        )
+        eta_static = self.mu_s * pressure_safe * ratio
+
+        pressure_scale = self.I_0 * jnp.sqrt(pressure_safe / self.rho_p)
+        eta_dynamic = (
+            self.d_p * pressure_safe * (self.mu_d - self.mu_s)
+        ) / (pressure_scale + self.d_p * shear_rate + 1.0e-30)
+        return eta_static, eta_dynamic
 
 
 class MuI_LC(ConstitutiveLaw):
@@ -177,7 +385,7 @@ class MuI_LC(ConstitutiveLaw):
             eta_total = eta_s + eta_d
 
 
-            stress = p_safe * jnp.eye(3) + 2 * eta_total * deps_dev
+            stress = p_safe * jnp.eye(3) + 2.0 * eta_total * deps_dev
             return stress
 
 
