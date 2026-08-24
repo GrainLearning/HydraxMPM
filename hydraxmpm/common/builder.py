@@ -30,7 +30,7 @@ from ..constitutive_laws.constitutive_law import (
 )
 from ..constitutive_laws.linearelastic import LinearElasticLaw
 from ..constitutive_laws.newtonfluid import NewtonFluid
-from ..constitutive_laws.mu_i_rheology import MuI_LC
+from ..constitutive_laws.mu_i_rheology import MuI_Incompressible, MuI_LC
 
 from typing import List, Tuple, Optional, Any, Dict, Callable
 
@@ -41,6 +41,7 @@ from ..solvers.coupling import BodyCoupling
 from jaxtyping import Array, Float, Int, UInt, Bool
 
 from ..solvers.usl_asflip import USLAFLIP
+from ..solvers.usl_incompressible import USLIncompressibleAFLIP
 
 from ..sdf.sdfcollection import PlaneSDF,CompositeSDF
 
@@ -83,6 +84,7 @@ class SimBuilder:
         end: tuple | Float[Array, "dim"] = None,
         cell_size: float | Float[Array, "..."] = None,
         padding: int = 3,
+        periodic_axes: tuple[bool, ...] | None = None,
     ) -> int:
         """Defines a physical domain.
 
@@ -94,8 +96,14 @@ class SimBuilder:
         """
         if grid_domain is None:
 
-            grid_domain = GridDomain.create(origin, end, cell_size, padding=padding)
-            
+            grid_domain = GridDomain.create(
+                origin,
+                end,
+                cell_size,
+                padding=padding,
+                periodic_axes=periodic_axes,
+            )
+
         return self.grid_domains.add(grid_domain)
 
     def add_material_points(
@@ -105,7 +113,7 @@ class SimBuilder:
         is_rigid: Optional[bool] = False,
         **particle_kwargs,
     ) -> int:
-        
+
 
         if is_rigid:
             rigid_mp_state = RigidMaterialPointState.create(
@@ -137,6 +145,10 @@ class SimBuilder:
             law_state = law.create_state_from_density(
                 density_stack=law_kwargs.get("density_stack", None)
             )
+        elif isinstance(law, MuI_Incompressible) and law_state is None:
+            law_state = law.create_state_from_pressure(
+                pressure_stack=law_kwargs.get("pressure_stack", None)
+            )
 
         elif isinstance(law, LinearElasticLaw):
             law_state = None
@@ -158,7 +170,7 @@ class SimBuilder:
         sdf_state=None,
         return_state=False
     ):
-        
+
         if sdf_state is None:
             # if center of mass is not get it from bounding box center
             if center_of_mass is None:
@@ -219,6 +231,7 @@ class SimBuilder:
         shp = ShapeFunctionMapping(
             shapefunction=shapefunction,
             dim=dim,
+            periodic_axes=grid_state.periodic_axes,
         )
 
         couple = BodyCoupling(
@@ -313,7 +326,7 @@ class SimBuilder:
         sdf_idx_list = (
             list(range(len(self.sdf_logics))) if sdf_idx_list is None else sdf_idx_list
         )
-        
+
         couplings = tuple(self.couplings[i] for i in b_idx_list)
         forces = tuple(self.force_logics[i] for i in f_idx_list)
         sdf_logics = tuple(self.sdf_logics[i] for i in sdf_idx_list)
@@ -345,7 +358,15 @@ class SimBuilder:
                 grid_domains=grid_domains,
                 **solver_params,
             )
-
+        elif scheme.lower() == "usl_incompressible_aflip":
+            solver = USLIncompressibleAFLIP(
+                constitutive_laws=laws,
+                forces=forces,
+                couplings=couplings,
+                sdf_logics=sdf_logics,
+                grid_domains=grid_domains,
+                **solver_params,
+            )
         # Here we assume that each coupling maps
         # to one solver state
         for coupling in couplings:
@@ -424,7 +445,7 @@ class SimBuilder:
         self,
         sdf_idx: int = None,
         g_idx_list: list[int] = None,
-        friction: float = 0.0,
+        friction: float = 1.0,
         gap: float = 1e-4,
     ):
         """Convenience method for adding objects."""
@@ -440,6 +461,7 @@ class SimBuilder:
             sdf_idx=sdf_idx,
             g_idx_list=g_idx_list,
             gap=gap,
+            friction=friction,
         )
 
         f_idx = self.force_logics.add(sdf_collider)

@@ -48,7 +48,13 @@ from .constitutive_laws.constitutive_law import (
 )
 
 from .constitutive_laws.newtonfluid import NewtonFluid, NewtonFluidState
-from .constitutive_laws.mu_i_rheology import MuI_LC, MuIState
+from .constitutive_laws.mu_i_rheology import (
+    MuI_Incompressible,
+    MuIIncompressibleState,
+    MuI_LC,
+    MuI_regularized,
+    MuIState,
+)
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay, ModifiedCamClayState
 from .constitutive_laws.linearelastic import LinearElasticLaw, LinearElasticState
 from .constitutive_laws.druckerprager import DruckerPrager, DruckerPragerState
@@ -57,6 +63,7 @@ from .constitutive_laws.druckerprager import DruckerPrager, DruckerPragerState
 from .solvers.usl import USLSolver, USLSolverState
 
 from .solvers.usl_asflip import USLAFLIPState, USLAFLIP
+from .solvers.usl_incompressible import USLIncompressibleAFLIP
 
 from .forces.force import Force, BaseForceState
 

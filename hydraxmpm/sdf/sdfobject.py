@@ -5,13 +5,13 @@
         This module provides the logic and sdf_state for a Signed Distance Function (SDF) object.
 
     Features
-        - Automatic differentiation for normal calculation. 
+        - Automatic differentiation for normal calculation.
         Exact penetration normal without approximate mesh intersection algorithms (GJK/EPA), smooth boundaries.
         - Transformation between world and local SDF coordinates.
         - Vectorized batched interfaces
 
     Usage:
-        - Generate material points 
+        - Generate material points
         - Apply boundary conditions based on geometric shapes.
 
 """
@@ -27,7 +27,8 @@ from ..utils.math_helpers import (
     rotation_2d_inv,
     quaternion_inv,
     quaternion_rotate,
-    integrate_quaternion
+    integrate_quaternion,
+    safe_norm,
 )
 
 
@@ -45,7 +46,7 @@ class SDFObjectState(eqx.Module):
     """
     center_of_mass: Float[Array, "dim"]
     rotation: float | Float[Array, "..."] | Float[Array, "4"]
-    velocity: Float[Array, "dim"] 
+    velocity: Float[Array, "dim"]
     angular_velocity: float | Float[Array, "..."] | Float[Array, "3"]
 
 
@@ -63,7 +64,7 @@ class SDFObjectBase(eqx.Module):
         angular_velocity: Optional[float | Float[Array, ""] | Float[Array, "3"]] = None,
         rotation: Optional[float | Float[Array, ""] | Float[Array, "4"]] = None,
     ) -> Self:
-        """ Helper function to create default SDFObjectState """        
+        """ Helper function to create default SDFObjectState """
         dim = center_of_mass.shape[0]
         if velocity is None:
             velocity = jnp.zeros(dim)
@@ -97,11 +98,11 @@ class SDFObjectBase(eqx.Module):
         else:
             return quaternion_rotate(quaternion_inv(sdf_state.rotation), p_local)
 
-    
+
     def signed_distance_local(self, sdf_state: SDFObjectState,  p_local: Float[Array, "dim"]) -> Float[Array, ""]:
         """
         Get the signed distance for in a local coordinate system (Negative = Inside, Positive = Outside).
-        
+
         Note these must be implemented by subclasses.
         """
 
@@ -129,30 +130,30 @@ class SDFObjectBase(eqx.Module):
         return eqx.tree_at(
             lambda s: (s.center_of_mass, s.rotation), sdf_state, (new_pos, new_rot)
         )
-    
+
     def signed_distance(self, sdf_state: SDFObjectState,  pos_world: Float[Array, "dim"]) -> Float[Array, ""]:
         """
-        Top level function to get signed distance in world coordinates. 
+        Top level function to get signed distance in world coordinates.
         """
         return self.signed_distance_local(sdf_state, self.transform_to_local(sdf_state, pos_world))
-    
+
 
     def get_local_aabb(self, sdf_state:SDFObjectState) -> Tuple[Array, Array]:
         raise NotImplementedError
-    
+
     def get_world_aabb(self, sdf_state) -> Tuple[Array, Array]:
         raise NotImplementedError
-    
+
     def get_normal(self, sdf_state: SDFObjectState, pos_world: Float[Array, "dim"]) -> Float[Array, "dim"]:
         """
         Calculates Normal for a single point using Autograd by default.
         """
         grad_fn = jax.grad(self.signed_distance, argnums=1)
-        
+
         normal = grad_fn(sdf_state, pos_world)
-        
+
         # Safe normalization
-        norm = jnp.linalg.norm(normal)
+        norm = safe_norm(normal, eps=1e-12)
         return normal / (norm + 1e-12)
     def get_velocity(self, sdf_state: SDFObjectState, pos_world: Float[Array, "dim"],dt) -> Float[Array, "dim"]:
         """
@@ -160,7 +161,7 @@ class SDFObjectBase(eqx.Module):
         """
 
         p_local = pos_world - sdf_state.center_of_mass
-        
+
         # v = v_lin + w x r
         # Handle 2D vs 3D cross product
         if p_local.shape[0] == 2:
@@ -170,12 +171,12 @@ class SDFObjectBase(eqx.Module):
         else:
             # 3D in WORLD frame
             cross = jnp.cross(sdf_state.angular_velocity, p_local)
-            
+
 
         v_body = sdf_state.velocity + cross
 
         return v_body
-    
+
     def get_surface_friction_local(self, sdf_state, p_local: Float[Array, "dim"]) -> Float[Array, ""] | float:
         """
         Returns the friction coefficient at this local point.
@@ -191,7 +192,7 @@ class SDFObjectBase(eqx.Module):
     def get_surface_friction_stack(self, sdf_state, p_world_stack):
         """Vectorized wrapper."""
         return jax.vmap(self.get_surface_friction, in_axes=(None, 0))(sdf_state, p_world_stack)
-    
+
 
     def get_signed_distance_stack(self, sdf_state: SDFObjectState,  pos_world_stack: Float[Array, "n dim"]) -> Float[Array, "n"]:
         """Vectorized interface for SDF calculation."""
@@ -200,7 +201,7 @@ class SDFObjectBase(eqx.Module):
     def get_normal_stack(self, sdf_state: SDFObjectState, pos_world_stack: Float[Array, "n dim"]) -> Float[Array, "n dim"]:
         """Vectorized normals calculation."""
         return jax.vmap(self.get_normal, in_axes=(None, 0))(sdf_state, pos_world_stack)
-    
+
 
     def get_velocity_stack(self, sdf_state: SDFObjectState, pos_world_stack: Float[Array, "n dim"],dt) -> Float[Array, "n dim"]:
         """Vectorized Velocity."""

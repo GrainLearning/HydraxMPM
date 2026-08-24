@@ -16,7 +16,7 @@ class ConstitutiveLawState(eqx.Module):
 
 class ConstitutiveLaw(eqx.Module):
     requires_F_reset: bool = eqx.field(static=True, default=False)
-    
+
 
     def remove_accumulated_shear(self, mp_state):
         """
@@ -27,27 +27,28 @@ class ConstitutiveLaw(eqx.Module):
         numerical issues when computing volume change within g2p update
 
         Remove shear component from deformation gradient F.
-        
+
         - Called within MPM update if `requires_F_reset` is True.
         - Used for fluids to avoid shear history accumulation.
         - Also hypoelastic solids that do not depend on F to compute stress
-        
+
         """
         if not self.requires_F_reset:
             return mp_state
-        
+
         dim = mp_state.dim
         def compute_cbar(F):
             J = jnp.linalg.det(F)
             if dim == 2:
 
                 scale = jnp.sqrt(J)
-                return jnp.diag(jnp.array([scale, scale, 0.0]))
+                # For plane strain condition
+                return jnp.diag(jnp.array([scale, scale, 1.0]))
             else:
                 # 3D cbar element-wise cube root
                 scale = jnp.cbrt(J)
                 return scale * jnp.eye(3)
-            
+
 
         new_F_stack = jax.vmap(compute_cbar)(mp_state.F_stack)
 

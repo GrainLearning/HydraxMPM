@@ -100,6 +100,7 @@ class ShapeFunctionMapping(eqx.Module):
     _shapefunction_call: Callable = eqx.field(static=True)
 
     shapefunction: str = eqx.field(static=True)
+    periodic_axes: tuple = eqx.field(static=True)
 
     _stencil_offsets: Int[Array, "window dim"]
 
@@ -112,6 +113,7 @@ class ShapeFunctionMapping(eqx.Module):
         self,
         shapefunction: str,
         dim: int,
+        periodic_axes: tuple[bool, ...] | None = None,
     ):
         self.dim = dim
         self._padding = (0, 3 - dim)
@@ -119,6 +121,13 @@ class ShapeFunctionMapping(eqx.Module):
         # select Kernel and 1D window support based on name
         self._shapefunction_call = kernels[shapefunction][0]
         self.shapefunction = shapefunction
+        if periodic_axes is None:
+            periodic_axes = (False,) * dim
+        self.periodic_axes = tuple(bool(axis) for axis in periodic_axes)
+        if len(self.periodic_axes) != dim:
+            raise ValueError(
+                "periodic_axes must have one boolean entry per mapping dimension"
+            )
 
 
         window_1d = kernels[self.shapefunction][1]
@@ -144,9 +153,9 @@ class ShapeFunctionMapping(eqx.Module):
         origin = jnp.array(origin)
 
         num_points = position_stack.shape[0]
-        
+
         window_size = self._stencil_offsets.shape[0]
-        
+
         num_interactions = num_points * window_size
 
 
@@ -169,7 +178,7 @@ class ShapeFunctionMapping(eqx.Module):
 
             # normalized grid coordinate to float
             base_pos = (xp - origin) * inv_cell_size
-            
+
             # apply shift for quadratic splines
             if needs_shift:
                 base_id_float = jnp.floor(base_pos - 0.5)
@@ -179,11 +188,22 @@ class ShapeFunctionMapping(eqx.Module):
 
 
             # compute node index
-            node_idx = base_id_float.astype(jnp.int32) + offset
+            node_idx_unwrapped = base_id_float.astype(jnp.int32) + offset
+
+            periodic_mask = jnp.asarray(self.periodic_axes)
+            grid_size_array = jnp.asarray(grid_size)
+            node_idx = jnp.where(
+                periodic_mask,
+                jnp.mod(node_idx_unwrapped, grid_size_array),
+                node_idx_unwrapped,
+            )
 
             # check if node_idx is strictly inside [0, grid_size)
             # if not, set shapefunctions to zero
-            is_valid = jnp.all((node_idx >= 0) & (node_idx < jnp.array(grid_size)))
+            is_in_bounds = (node_idx_unwrapped >= 0) & (
+                node_idx_unwrapped < grid_size_array
+            )
+            is_valid = jnp.all(periodic_mask | is_in_bounds)
 
             # clip/wrap mode handles BCs implicitly or prevents crash
             node_hash = jnp.ravel_multi_index(node_idx, grid_size, mode="clip").astype(
@@ -192,7 +212,9 @@ class ShapeFunctionMapping(eqx.Module):
 
             # compute shape function
             # dist_vec = (pos material point - pos grid) / cell size
-            dist_vec = base_pos - node_idx
+            # Use the virtual (unwrapped) node position for the kernel distance,
+            # while hashing periodic images onto the same physical node.
+            dist_vec = base_pos - node_idx_unwrapped
 
             # TODO interaction type, for closed nodes in cubic splines?
             val, grad = self._shapefunction_call(
