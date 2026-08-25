@@ -42,16 +42,14 @@ class ChuteParameters:
     bulk_modulus: float = 1.0e6
     friction_angle_deg: float = 20.0
     dynamic_friction_angle_deg: float = 30.0
-    # Calibrated for the 24 degree Bagnold benchmark with 0.005 m cells.
-    mu_i_max_shear_viscosity: float = 6.65
-    mu_i_regularization_rate: float = 31.5
+    mu_i_max_shear_viscosity: float = 6.4
+    mu_i_regularization_rate: float = 41.3
     chute_angle_deg: float = 24.0
     lateral_stress_ratio: float = 0.5
     base_friction: float = 0.7
     separation_density_ratio: float = 0.90
 
     constitutive_model: str = "drucker_prager"
-    incompressible_wall_ghost_no_slip: bool = True
     steady_start_fraction: float = 0.8
 
     @property
@@ -237,7 +235,6 @@ class ChuteProcedure:
             builder.set_solver(
                 scheme="usl_incompressible_aflip",
                 alpha=0.1,
-                wall_ghost_no_slip=params.incompressible_wall_ghost_no_slip,
             )
         else:
             builder.set_solver(scheme="usl_aflip", alpha=0.1)

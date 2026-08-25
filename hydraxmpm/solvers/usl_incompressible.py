@@ -49,7 +49,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
     pressure_stabilization: float = eqx.field(static=True)
     projection_iterations: int = eqx.field(static=True)
     nonnegative_pressure: bool = eqx.field(static=True)
-    wall_ghost_no_slip: bool = eqx.field(static=True)
 
     def __init__(
         self,
@@ -64,7 +63,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
         pressure_stabilization: float = 1.0e-3,
         projection_iterations: int = 32,
         nonnegative_pressure: bool = True,
-        wall_ghost_no_slip: bool = False,
         **aflip_parameters,
     ):
         if len(couplings) != 1 or couplings[0].skip_mpm_logic:
@@ -106,7 +104,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
         self.pressure_stabilization = pressure_stabilization
         self.projection_iterations = projection_iterations
         self.nonnegative_pressure = nonnegative_pressure
-        self.wall_ghost_no_slip = wall_ghost_no_slip
 
     @staticmethod
     def _build_divergence_matrix(domain):
@@ -397,64 +394,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
             velocity = jnp.where(contact_mask[:, None], corrected, velocity)
         return velocity
 
-    def _apply_wall_ghost_no_slip(self, velocity, grid, sim_cache):
-        """Apply an odd velocity extension across a stationary no-slip wall.
-
-        Quadratic particle-grid interpolation reaches one node through a
-        grid-aligned wall. Merely fixing the surface node leaves that ghost
-        degree of freedom dynamically inconsistent with the no-slip velocity
-        field. Reflecting the nearest fluid-node velocity about the wall value
-        preserves the wall location without clamping a finite fluid layer.
-        """
-        if not self.wall_ghost_no_slip:
-            return velocity
-
-        domain = self.grid_domains[0]
-        node_position = domain.position_stack
-        grid_size = jnp.asarray(domain.grid_size, dtype=jnp.int32)
-        periodic_axes = jnp.asarray(domain.periodic_axes)
-        strides = jnp.asarray(
-            [
-                _product(domain.grid_size[axis + 1 :])
-                for axis in range(domain.dim)
-            ],
-            dtype=jnp.int32,
-        )
-
-        for force in self.forces:
-            if not isinstance(force, SDFCollider) or 0 not in force.g_idx_list:
-                continue
-            geometry = sim_cache.node_geoms[(0, force.sdf_idx)]
-            normal = geometry.normals[:, : domain.dim]
-            wall_velocity = geometry.wall_vels[:, : domain.dim]
-            reflected_position = (
-                node_position - 2.0 * geometry.dists[:, None] * normal
-            )
-            reflected_index = jnp.rint(
-                (reflected_position - jnp.asarray(domain.origin))
-                / domain.cell_size
-            ).astype(jnp.int32)
-            reflected_index = jnp.where(
-                periodic_axes,
-                jnp.mod(reflected_index, grid_size),
-                reflected_index,
-            )
-            reflected_index = jnp.clip(reflected_index, 0, grid_size - 1)
-            reflected_hash = jnp.sum(reflected_index * strides, axis=1)
-            ghost_velocity = 2.0 * wall_velocity - velocity[reflected_hash]
-
-            tolerance = 1.0e-6 * domain.cell_size
-            surface = jnp.abs(geometry.dists) <= tolerance
-            inside = geometry.dists < -tolerance
-            has_mass = grid.mass_stack > self.projection_mass_cutoff
-            velocity = jnp.where(
-                (surface & has_mass)[:, None], wall_velocity, velocity
-            )
-            velocity = jnp.where(
-                (inside & has_mass)[:, None], ghost_velocity, velocity
-            )
-        return velocity
-
     def _integrate_grid(self, world, mechanics, sim_cache, dt, time):
         world, mechanics, sim_cache = super()._integrate_grid(
             world, mechanics, sim_cache, dt, time
@@ -478,7 +417,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
         velocity = self._apply_projected_pressure_friction(
             velocity, grid, cell_pressure, active_cells, sim_cache, dt
         )
-        velocity = self._apply_wall_ghost_no_slip(velocity, grid, sim_cache)
         grid = eqx.tree_at(
             lambda value: value.moment_nt_stack,
             grid,
