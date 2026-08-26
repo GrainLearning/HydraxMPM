@@ -8,16 +8,13 @@ a frictional plane SDF and the top is open.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, replace
+import json
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 import hydraxmpm as hdx
@@ -34,7 +31,7 @@ class ChuteParameters:
     ppc: int = 4
 
     dt: float = 2.0e-4
-    total_time: float = 5.0
+    total_time: float = 15.0
     output_time: float = 0.05
 
     grain_density: float = 2650.0
@@ -50,7 +47,7 @@ class ChuteParameters:
     separation_density_ratio: float = 0.90
 
     constitutive_model: str = "drucker_prager"
-    steady_start_fraction: float = 0.8
+    solver_alpha: float = 0.1
 
     @property
     def origin(self) -> tuple[float, float]:
@@ -156,7 +153,7 @@ class ChuteProcedure:
                 d_p=0.002,
                 K=params.bulk_modulus,
                 rho_p=params.grain_density,
-                alpha=1.0e-6,
+                alpha=0.1,
             )
             law_state = law.create_state_from_density(
                 density_stack=density,
@@ -192,7 +189,7 @@ class ChuteProcedure:
             law = hdx.DruckerPrager(
                 nu=0.3,
                 K=params.bulk_modulus,
-                mu_1=params.drucker_prager_mu,
+                mu_1=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
                 rho_0=params.separation_density_ratio * params.bulk_density,
             )
             law_state = law.create_state(stress_stack=stress)
@@ -234,10 +231,10 @@ class ChuteProcedure:
         if model_name in ("mu_i_incompressible", "mu_i_regularized"):
             builder.set_solver(
                 scheme="usl_incompressible_aflip",
-                alpha=0.1,
+                alpha=params.solver_alpha,
             )
         else:
-            builder.set_solver(scheme="usl_aflip", alpha=0.1)
+            builder.set_solver(scheme="usl_aflip", alpha=params.solver_alpha)
 
         solver, state = builder.build(dt=params.dt)
         self.validate_initial_state(solver, state)
@@ -283,50 +280,20 @@ class ChuteProcedure:
         )
         return eqx.tree_at(lambda item: item.world, state, world)
 
-    def compute_velocity_profile(self, state):
-        mp = state.world.material_points[0]
-        position = np.asarray(mp.position_stack)
-        velocity = np.asarray(mp.velocity_stack)
-        n_bins = int(round(self.params.domain_height / self.params.particle_spacing))
-        edges = np.linspace(
-            self.params.base_y,
-            self.params.base_y + self.params.domain_height,
-            n_bins + 1,
-        )
-        centers = 0.5 * (edges[:-1] + edges[1:])
-        counts, _ = np.histogram(position[:, 1], bins=edges)
-        weighted, _ = np.histogram(position[:, 1], bins=edges, weights=velocity[:, 0])
-        mean_vx = np.full(centers.shape, np.nan)
-        np.divide(weighted, counts, out=mean_vx, where=counts > 0)
-        return centers, mean_vx, counts
 
-    @staticmethod
-    def compute_time_averaged_profile(profiles):
-        if not profiles:
-            return np.array([]), np.array([])
-        y = np.asarray(profiles[0][:, 0], dtype=float)
-        stacked_vx = np.stack(
-            [np.asarray(profile[:, 1], dtype=float) for profile in profiles], axis=0
-        )
-        valid_counts = np.sum(np.isfinite(stacked_vx), axis=0)
-        summed = np.nansum(stacked_vx, axis=0)
-        mean_vx = np.full(y.shape, np.nan)
-        np.divide(summed, valid_counts, out=mean_vx, where=valid_counts > 0)
-        return y, mean_vx
-
-
-def _save_profile(path: Path, y, velocity, counts=None):
-    columns = [y, velocity]
-    header = "y,mean_vx"
-    if counts is not None:
-        columns.append(counts)
-        header += ",particle_count"
-    np.savetxt(
-        path,
-        np.column_stack(columns),
-        delimiter=",",
-        header=header,
-        comments="",
+def _save_particle_state(output_dir: Path, step: int, time: float, mp) -> None:
+    """Write one raw particle snapshot for independent postprocessing."""
+    snapshot_dir = output_dir / "particle_states"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        snapshot_dir / f"step_{step:08d}.npz",
+        step=np.asarray(step),
+        time=np.asarray(time),
+        position=np.asarray(mp.position_stack),
+        velocity=np.asarray(mp.velocity_stack),
+        mass=np.asarray(mp.mass_stack),
+        density=np.asarray(mp.density_stack),
+        stress=np.asarray(mp.stress_stack),
     )
 
 
@@ -360,12 +327,15 @@ def run_sim(
     else:
         output_dir = Path(__file__).resolve().parent / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "parameters.json").write_text(
+        json.dumps(asdict(params), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     visualizer = (
         hdx.VTKVisualizer(output_dir=str(output_dir)) if write_visuals else None
     )
 
     history = {"time": [], "mean_speed": [], "mean_vx": []}
-    steady_profiles = []
 
     print("Starting granular chute-flow benchmark")
     print(
@@ -400,24 +370,14 @@ def run_sim(
                 f"non-finite particle state at step {completed_steps}"
             )
 
-        time = float(state.time)
+        time = completed_steps * params.dt
         speed = float(jnp.mean(jnp.linalg.norm(mp.velocity_stack, axis=1)))
         mean_vx = float(jnp.mean(mp.velocity_stack[:, 0]))
         history["time"].append(time)
         history["mean_speed"].append(speed)
         history["mean_vx"].append(mean_vx)
 
-        profile_y, profile_vx, counts = procedure.compute_velocity_profile(state)
-        profile = np.column_stack([profile_y, profile_vx])
-        if time >= params.steady_start_fraction * params.total_time:
-            steady_profiles.append(profile)
-
-        _save_profile(
-            output_dir / f"velocity_profile_{completed_steps:05d}.csv",
-            profile_y,
-            profile_vx,
-            counts,
-        )
+        _save_particle_state(output_dir, completed_steps, time, mp)
 
         if write_visuals:
             visualizer.log_particles(
@@ -427,27 +387,6 @@ def run_sim(
                 time=time,
                 step=completed_steps,
             )
-            position = np.asarray(mp.position_stack)
-            velocity = np.asarray(mp.velocity_stack)
-            plt.figure(figsize=(7, 3.5))
-            plt.quiver(
-                position[:, 0],
-                position[:, 1],
-                velocity[:, 0],
-                velocity[:, 1],
-                np.linalg.norm(velocity, axis=1),
-                cmap="viridis",
-                scale=30,
-                width=0.0035,
-            )
-            plt.xlim(params.periodic_x_min, params.periodic_x_max)
-            plt.ylim(params.base_y, params.base_y + params.domain_height)
-            plt.xlabel("streamwise coordinate x [m]")
-            plt.ylabel("height above base y [m]")
-            plt.colorbar(label="speed [m/s]")
-            plt.tight_layout()
-            plt.savefig(output_dir / f"snapshot_{completed_steps:05d}.png", dpi=180)
-            plt.close()
 
         min_y = float(jnp.min(mp.position_stack[:, 1]))
         max_y = float(jnp.max(mp.position_stack[:, 1]))
@@ -459,49 +398,6 @@ def run_sim(
         )
 
     mp = state.world.material_points[0]
-    final_y, final_vx, final_counts = procedure.compute_velocity_profile(state)
-    _save_profile(
-        output_dir / "final_velocity_profile.csv",
-        final_y,
-        final_vx,
-        final_counts,
-    )
-
-    avg_y, avg_vx = procedure.compute_time_averaged_profile(steady_profiles)
-    if avg_y.size:
-        _save_profile(output_dir / "steady_velocity_profile.csv", avg_y, avg_vx)
-
-    np.savetxt(
-        output_dir / "mean_velocity.csv",
-        np.column_stack(
-            [history["time"], history["mean_speed"], history["mean_vx"]]
-        ),
-        delimiter=",",
-        header="time,mean_speed,mean_vx",
-        comments="",
-    )
-
-    if write_visuals and avg_y.size:
-        plt.figure(figsize=(6, 4))
-        plt.plot(avg_vx, avg_y, linewidth=2)
-        plt.xlabel("mean streamwise velocity [m/s]")
-        plt.ylabel("height above base [m]")
-        plt.tight_layout()
-        plt.savefig(output_dir / "steady_velocity_profile.png", dpi=180)
-        plt.close()
-
-    tail_start = max(0, int(0.8 * len(history["mean_vx"])))
-    tail_velocity = history["mean_vx"][tail_start:]
-    if len(tail_velocity) >= 2:
-        relative_tail_change = abs(tail_velocity[-1] - tail_velocity[0]) / max(
-            abs(tail_velocity[-1]), 1.0e-12
-        )
-        history["relative_tail_change"] = relative_tail_change
-        print(
-            f"Relative mean-vx change over final 20%: "
-            f"{relative_tail_change:.3%}"
-        )
-
     print(f"Final particle count: {mp.num_points}")
     print(f"Saved outputs to {output_dir}")
     return state, history
