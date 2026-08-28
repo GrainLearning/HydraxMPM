@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import runpy
+import subprocess
 import sys
 from dataclasses import dataclass
 
@@ -111,14 +112,24 @@ def generate_benchmark_data() -> dict[str, AnalyticalResult]:
     return {mode: analytical_result(mode) for mode in ("drained", "undrained")}
 
 
-def load_prediction(mode: str) -> np.ndarray:
+def numerical_result(mode: str) -> np.ndarray:
+    command = [sys.executable, str(BASE_PATH / "mcc.py")]
+    if mode == "undrained":
+        command.append("--undrained")
+    elif mode == "drained":
+        command.append("--drained")
+    subprocess.run(command, check=True)
+
     path = DATA_PATH / f"mcc_numerical_{mode}.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"Run projects/mcc_trx/mcc.py first; missing {path}")
     prediction = np.genfromtxt(path, delimiter=",", names=True)
     if prediction.shape[0] != NUM_STEPS + 1:
         raise ValueError(f"Expected {NUM_STEPS + 1} rows in {path}")
     return prediction
+
+
+def generate_prediction() -> dict[str, np.ndarray]:
+    DATA_PATH.mkdir(parents=True, exist_ok=True)
+    return {mode: numerical_result(mode) for mode in ("drained", "undrained")}
 
 
 def comparison_metrics(
@@ -373,7 +384,7 @@ def plot_error_evolution(histories) -> None:
 def main() -> None:
     configure_plotting()
     analytical = generate_benchmark_data()
-    predictions = {mode: load_prediction(mode) for mode in ("drained", "undrained")}
+    predictions = generate_prediction()
     metrics = {
         mode: comparison_metrics(
             analytical[mode],
