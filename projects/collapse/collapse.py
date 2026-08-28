@@ -30,10 +30,21 @@ TOTAL_TIME = 0.5
 OUTPUT_TIME = 0.05
 
 
-def compute_dp_mu(fric_angle_deg: float | jnp.ndarray) -> jnp.ndarray:
-    """Compute Drucker–Prager friction coefficient from friction angle (deg)."""
+def compute_dp_coefficients(
+    fric_angle_deg: float | jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Map Mohr-Coulomb friction and cohesion to Drucker-Prager factors.
+
+    The constitutive law uses ``sqrt(J2) - mu_1 * p - mu_2 * c = 0``.
+    These coefficients match the Mohr-Coulomb surface on the triaxial-extension
+    meridian, following the convention used by the JAX-MPM collapse benchmark.
+    """
     fric_angle_rad = jnp.deg2rad(fric_angle_deg)
-    return 6.0 * jnp.sin(fric_angle_rad) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(fric_angle_rad)))
+    sin_phi = jnp.sin(fric_angle_rad)
+    denominator = jnp.sqrt(3.0) * (3.0 + sin_phi)
+    mu_1 = 6.0 * sin_phi / denominator
+    mu_2 = 6.0 * jnp.cos(fric_angle_rad) / denominator
+    return mu_1, mu_2
 
 
 def compute_global_measures(sim_state: Any) -> dict[str, jnp.ndarray]:
@@ -45,7 +56,7 @@ def compute_global_measures(sim_state: Any) -> dict[str, jnp.ndarray]:
 
     return {
         "final_height": jnp.max(y) - jnp.min(y),
-        "final_center_of_mass": jnp.asarray([jnp.mean(x), jnp.mean(y)], dtype=jnp.float32),
+        "final_center_of_mass": jnp.stack((jnp.mean(x), jnp.mean(y))),
         "final_runout_distance": jnp.max(x) - jnp.min(x),
     }
 
@@ -104,15 +115,17 @@ def simulate_collapse(
     prefix: str = "collapse_ref",
     visualize: bool = False,
     num_steps: int | None = None,
+    compute_local: bool = True,
 ) -> dict[str, Any]:
     """Run one forward collapse simulation.
 
     Parameters
     ----------
     fric_angle:
-        Friction angle (deg) used to compute DP ``mu_1`` and ``mu_2``.
+        Mohr-Coulomb friction angle (deg) used to compute the distinct DP
+        friction and cohesion factors ``mu_1`` and ``mu_2``.
     c0:
-        Mohr–Coulomb cohesion mapped into the DP law.
+        Mohr-Coulomb cohesion mapped into the DP law.
     save_bundle:
         If True, save global/local outputs under [output/](/home/hcheng/GrainLearning/HydraxMPM/projects/collapse/output).
     prefix:
@@ -122,6 +135,10 @@ def simulate_collapse(
     num_steps:
         Optional override for number of explicit solver steps. If None, uses
         ``int(TOTAL_TIME / DT)``.
+    compute_local:
+        If False, skip the final volume-fraction projection. This is useful for
+        inverse runs that consume only terminal global measures. Saving a
+        bundle still computes the local field because it is part of the bundle.
     """
     import hydraxmpm as hdx
 
@@ -133,13 +150,14 @@ def simulate_collapse(
     num_particles = position_stack.shape[0]
 
     density_stack = jnp.full((num_particles,), 2650.0)
-    mu = compute_dp_mu(fric_angle)
+    mu_1, mu_2 = compute_dp_coefficients(fric_angle)
     law = hdx.DruckerPrager(
         nu=0.3,
         K=7e5,
-        mu_1=mu,
-        mu_2=mu,
+        mu_1=mu_1,
+        mu_2=mu_2,
         c0=c0,
+        mu_1_hat=0.0,
         rho_0=2650.0,
     )
     law_state = law.create_state(stress_stack=jnp.zeros((num_particles, 3, 3)))
@@ -204,14 +222,17 @@ def simulate_collapse(
 
     final_state = jax.lax.fori_loop(0, steps, loop_body, sim_state)
     global_measures = compute_global_measures(final_state)
-    local_field = project_volume_fraction_field(
-        final_state,
-        origin=ORIGIN,
-        end=END,
-        cell_size=CELL_SIZE,
-    )
+    local_field = None
+    if compute_local or save_bundle:
+        local_field = project_volume_fraction_field(
+            final_state,
+            origin=ORIGIN,
+            end=END,
+            cell_size=CELL_SIZE,
+        )
 
     if save_bundle:
+        assert local_field is not None
         save_measure_bundle(global_measures, local_field, prefix=prefix)
 
     return {
