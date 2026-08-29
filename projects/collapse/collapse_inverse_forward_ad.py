@@ -44,6 +44,9 @@ PHI_BOUNDS = (5.0, 45.0)
 TOTAL_STEPS = int(round(TOTAL_TIME / DT))
 SCALE_FLOOR = 1.0e-12
 ITERATION_DATA_DIR = Path(__file__).resolve().parent / "output" / "inverse_iterations"
+DEFAULT_LEARNING_RATE = 0.5
+DEFAULT_EARLY_STOPPING_PATIENCE = 50
+DEFAULT_EARLY_STOPPING_MIN_DELTA = 1.0e-10
 
 
 def normalize_measure_keys(
@@ -130,6 +133,35 @@ def measures_and_jvp(
     return jax.jvp(measure_fn, (phi,), (jnp.ones_like(phi),))
 
 
+def normalize_measure_weights(
+    measure_weights: float | Sequence[float] | jax.Array | None,
+    *,
+    num_measures: int,
+    dtype: jnp.dtype = jnp.float64,
+) -> jax.Array:
+    """Validate and return one nonnegative loss weight per selected measure."""
+    if num_measures <= 0:
+        raise ValueError("num_measures must be positive")
+    if measure_weights is None:
+        return jnp.ones((num_measures,), dtype=dtype)
+
+    weights = jnp.atleast_1d(jnp.asarray(measure_weights, dtype=dtype))
+    expected_shape = (num_measures,)
+    if weights.shape == (1,) and num_measures > 1:
+        weights = jnp.broadcast_to(weights, expected_shape)
+    if weights.shape != expected_shape:
+        raise ValueError(
+            f"measure_weights must have shape {expected_shape}, got {weights.shape}"
+        )
+    if bool(jnp.any(~jnp.isfinite(weights))):
+        raise ValueError("measure_weights must be finite")
+    if bool(jnp.any(weights < 0.0)):
+        raise ValueError("measure_weights must be nonnegative")
+    if float(jnp.sum(weights)) <= 0.0:
+        raise ValueError("at least one measure weight must be positive")
+    return weights
+
+
 def loss_and_gradient(
     fric_angle: float | jax.Array,
     reference_measures: float | Sequence[float] | jax.Array,
@@ -137,18 +169,20 @@ def loss_and_gradient(
     measure_keys: str | Sequence[str] = DEFAULT_MEASURE_KEYS,
     num_steps: int = TOTAL_STEPS,
     scales: float | Sequence[float] | jax.Array | None = None,
+    measure_weights: float | Sequence[float] | jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Return normalized loss, gradient, measures, and measure sensitivities.
 
     For selected measures ``y_i``, references ``y_i*``, and scales ``s_i``,
-    the equally weighted loss and its forward-mode gradient are
+    weights ``w_i``, the normalized loss and its forward-mode gradient are
 
-    ``L = 0.5 * mean(((y - y*) / s) ** 2)``
+    ``L = 0.5 * sum(w * ((y - y*) / s) ** 2) / sum(w)``
 
-    ``dL/dphi = mean(((y - y*) / s) * (dy/dphi) / s)``.
+    ``dL/dphi = sum(w * ((y-y*)/s) * (dy/dphi)/s) / sum(w)``.
 
     By default, each scale is the absolute value of its reference measure.
-    A scalar ``scales`` value is broadcast to every selected measure.
+    Scalar scales and weights are broadcast to every selected measure. Equal
+    positive weights reproduce the previous equally weighted mean.
     """
     keys = normalize_measure_keys(measure_keys)
     reference = jnp.atleast_1d(jnp.asarray(reference_measures, dtype=jnp.float64))
@@ -177,8 +211,17 @@ def loss_and_gradient(
         scale_values = jnp.maximum(jnp.abs(scale_values), SCALE_FLOOR)
 
     residuals = (measures - reference) / scale_values
-    loss = 0.5 * jnp.mean(residuals**2)
-    gradient = jnp.mean(residuals * sensitivities / scale_values)
+    weight_values = normalize_measure_weights(
+        measure_weights,
+        num_measures=len(keys),
+        dtype=reference.dtype,
+    )
+    weight_sum = jnp.sum(weight_values)
+    loss = 0.5 * jnp.sum(weight_values * residuals**2) / weight_sum
+    gradient = (
+        jnp.sum(weight_values * residuals * sensitivities / scale_values)
+        / weight_sum
+    )
     return loss, gradient, measures, sensitivities
 
 
@@ -226,9 +269,12 @@ def run_inverse_analysis(
     num_steps: int = 25,
     *,
     measure_keys: str | Sequence[str] = DEFAULT_MEASURE_KEYS,
+    measure_weights: float | Sequence[float] | jax.Array | None = None,
     forward_steps: int = TOTAL_STEPS,
     phi_init: float = 10.0,
-    learning_rate: float = 0.5,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    early_stopping_patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
+    early_stopping_min_delta: float = DEFAULT_EARLY_STOPPING_MIN_DELTA,
     save_plots: bool = True,
     figure_dir: str | Path | None = None,
     save_iterations: bool = True,
@@ -236,27 +282,57 @@ def run_inverse_analysis(
 ) -> tuple[float, list[float]]:
     """Recover one friction angle and save optional plots and checkpoints."""
     keys = normalize_measure_keys(measure_keys)
+    if early_stopping_patience == 0:
+        early_stopping_patience = None
+    if early_stopping_min_delta < 0.0:
+        raise ValueError("early_stopping_min_delta must be nonnegative")
+    if learning_rate <= 0.0:
+        raise ValueError("learning_rate must be positive")
     measure_fn = compiled_terminal_measures(forward_steps, keys)
     reference = measure_fn(jnp.asarray(REF_PHI, dtype=jnp.float64))
-    theta = jnp.asarray(phi_init, dtype=jnp.float64)
+    weight_values = normalize_measure_weights(
+        measure_weights,
+        num_measures=len(keys),
+        dtype=reference.dtype,
+    )
+    theta = jnp.clip(
+        jnp.asarray(phi_init, dtype=jnp.float64),
+        PHI_BOUNDS[0],
+        PHI_BOUNDS[1],
+    )
     optimizer = optax.adam(learning_rate=learning_rate)
     opt_state = optimizer.init(theta)
     history: list[float] = []
-    friction_angle_history = [float(theta)]
+    friction_angle_history: list[float] = []
+    best_loss = float("inf")
+    best_theta = float(theta)
+    iterations_without_improvement = 0
+    stopped_early = False
 
     print(
         f"reference phi={REF_PHI:.6f} deg | steps={forward_steps} | "
         f"measures={','.join(keys)}"
     )
-    for key, value in zip(keys, reference, strict=True):
-        print(f"  reference {key}={float(value):.12e}")
+    for key, value, weight in zip(keys, reference, weight_values, strict=True):
+        print(
+            f"  reference {key}={float(value):.12e} | "
+            f"loss_weight={float(weight):.6g}"
+        )
+    print(f"learning rate={learning_rate:.6e}")
+    if early_stopping_patience is not None:
+        print(
+            f"early stopping patience={early_stopping_patience} | "
+            f"minimum improvement={early_stopping_min_delta:.3e}"
+        )
 
     for step in range(num_steps):
+        evaluated_theta = float(theta)
         loss, gradient, measures, sensitivities = loss_and_gradient(
             theta,
             reference,
             measure_keys=keys,
             num_steps=forward_steps,
+            measure_weights=weight_values,
         )
         if save_iterations:
             checkpoint_path = save_iteration_state(
@@ -267,17 +343,13 @@ def run_inverse_analysis(
                 output_dir=iteration_dir,
             )
             print(f"  saved iteration state: {checkpoint_path}")
-        updates, opt_state = optimizer.update(gradient, opt_state, theta)
-        theta = jnp.clip(
-            optax.apply_updates(theta, updates),
-            PHI_BOUNDS[0],
-            PHI_BOUNDS[1],
-        )
-        history.append(float(loss))
-        friction_angle_history.append(float(theta))
+        loss_value = float(loss)
+        history.append(loss_value)
+        friction_angle_history.append(evaluated_theta)
         print(
-            f"step={step:03d} | loss={float(loss):.6e} | "
-            f"phi={float(theta):.6f} deg | dL/dphi={float(gradient):.9e}"
+            f"step={step:03d} | loss={loss_value:.6e} | "
+            f"phi={evaluated_theta:.6f} deg | dL/dphi={float(gradient):.9e} | "
+            f"lr={learning_rate:.6e}"
         )
         for key, value, sensitivity in zip(keys, measures, sensitivities, strict=True):
             print(
@@ -285,7 +357,38 @@ def run_inverse_analysis(
                 f"d({key})/dphi={float(sensitivity):.9e}"
             )
 
-    print(f"recovered friction angle: {float(theta):.9f} deg")
+        if loss_value < best_loss - early_stopping_min_delta:
+            best_loss = loss_value
+            best_theta = evaluated_theta
+            iterations_without_improvement = 0
+        else:
+            iterations_without_improvement += 1
+
+        if (
+            early_stopping_patience is not None
+            and iterations_without_improvement >= early_stopping_patience
+        ):
+            stopped_early = True
+            print(
+                f"early stopping at step {step}: no loss improvement greater "
+                f"than {early_stopping_min_delta:.3e} for "
+                f"{early_stopping_patience} evaluations"
+            )
+            break
+
+        updates, opt_state = optimizer.update(gradient, opt_state, theta)
+        theta = jnp.clip(
+            optax.apply_updates(theta, updates),
+            PHI_BOUNDS[0],
+            PHI_BOUNDS[1],
+        )
+
+    theta = jnp.asarray(best_theta, dtype=jnp.float64)
+    stop_reason = "early stopping" if stopped_early else "iteration limit"
+    print(
+        f"best loss={best_loss:.12e} | recovered friction angle="
+        f"{best_theta:.9f} deg | stop={stop_reason}"
+    )
     if save_plots:
         from projects.collapse.collapse_inverse_forward_ad_plots import (
             FIGURES_DIR,
@@ -310,7 +413,23 @@ def main() -> None:
     parser.add_argument("--phi-init", type=float, default=10.0)
     parser.add_argument("--forward-steps", type=int, default=TOTAL_STEPS)
     parser.add_argument("--iterations", type=int, default=25)
-    parser.add_argument("--learning-rate", type=float, default=0.5)
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=DEFAULT_LEARNING_RATE,
+    )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=DEFAULT_EARLY_STOPPING_PATIENCE,
+        help="evaluations without improvement before stopping; 0 disables",
+    )
+    parser.add_argument(
+        "--early-stopping-min-delta",
+        type=float,
+        default=DEFAULT_EARLY_STOPPING_MIN_DELTA,
+        help="minimum absolute loss decrease counted as an improvement",
+    )
     parser.add_argument(
         "--figure-dir",
         type=Path,
@@ -340,14 +459,27 @@ def main() -> None:
         default=list(DEFAULT_MEASURE_KEYS),
         help="one or more terminal global measures used by the inverse loss",
     )
+    parser.add_argument(
+        "--measure-weights",
+        type=float,
+        nargs="+",
+        default=None,
+        help=(
+            "nonnegative loss weights aligned with --measures; "
+            "default: equal weights"
+        ),
+    )
     args = parser.parse_args()
 
     run_inverse_analysis(
         num_steps=args.iterations,
         measure_keys=args.measures,
+        measure_weights=args.measure_weights,
         forward_steps=args.forward_steps,
         phi_init=args.phi_init,
         learning_rate=args.learning_rate,
+        early_stopping_patience=args.early_stopping_patience,
+        early_stopping_min_delta=args.early_stopping_min_delta,
         save_plots=not args.no_plots,
         figure_dir=args.figure_dir,
         save_iterations=not args.no_iteration_data,
