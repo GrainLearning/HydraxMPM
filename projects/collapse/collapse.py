@@ -116,6 +116,7 @@ def simulate_collapse(
     visualize: bool = False,
     num_steps: int | None = None,
     compute_local: bool = True,
+    return_final_state: bool = False,
 ) -> dict[str, Any]:
     """Run one forward collapse simulation.
 
@@ -139,6 +140,9 @@ def simulate_collapse(
         If False, skip the final volume-fraction projection. This is useful for
         inverse runs that consume only terminal global measures. Saving a
         bundle still computes the local field because it is part of the bundle.
+    return_final_state:
+        If True, include the final simulation state for HydraxMPM
+        postprocessing. The inverse forward kernel leaves this disabled.
     """
     import hydraxmpm as hdx
 
@@ -235,12 +239,15 @@ def simulate_collapse(
         assert local_field is not None
         save_measure_bundle(global_measures, local_field, prefix=prefix)
 
-    return {
+    result = {
         "global": global_measures,
         "local": local_field,
         "fric_angle": fric_angle,
         "c0": c0,
     }
+    if return_final_state:
+        result["final_state"] = final_state
+    return result
 
 
 def run_sim() -> dict[str, Any]:

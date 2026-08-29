@@ -1,21 +1,21 @@
 """Full-horizon forward-AD inverse analysis for granular collapse.
 
-This module addresses the single-parameter problem: recover the friction angle
+This module addresses the single-parameter problem: infer the friction angle
 from one or more final global measures. The physical simulation always reaches
 the requested terminal time. A single forward-mode JVP carries the friction-
 angle tangent through the complete trajectory and returns the sensitivity of
-every selected terminal measure. This script performs inverse optimization;
-sensitivity and finite-difference diagnostics live in
-``collapse_inverse_forward_ad_diagnostics.py``.
+every selected terminal measure.
 """
 
 import argparse
 from collections.abc import Callable, Sequence
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 
 import hydraxmpm  # noqa: F401 - Avoid a lazy import during a JAX trace.
@@ -43,6 +43,7 @@ REF_C0 = 10.0
 PHI_BOUNDS = (5.0, 45.0)
 TOTAL_STEPS = int(round(TOTAL_TIME / DT))
 SCALE_FLOOR = 1.0e-12
+ITERATION_DATA_DIR = Path(__file__).resolve().parent / "output" / "inverse_iterations"
 
 
 def normalize_measure_keys(
@@ -181,6 +182,46 @@ def loss_and_gradient(
     return loss, gradient, measures, sensitivities
 
 
+def save_iteration_state(
+    iteration: int,
+    *,
+    loss: float | jax.Array,
+    friction_angle: float | jax.Array,
+    forward_steps: int,
+    output_dir: str | Path = ITERATION_DATA_DIR,
+) -> Path:
+    """Save one consistent loss, parameter, and terminal field checkpoint.
+
+    The saved loss and friction angle are the values at which the optimizer
+    gradient was evaluated. Computing the volume-fraction field requires one
+    additional primal collapse simulation; it is not included in the AD loss.
+    """
+    from projects.collapse.collapse_inverse_forward_ad_plots import (
+        simulate_volume_fraction,
+    )
+
+    phi = float(friction_angle)
+    x, y, volume_fraction, crop_extent = simulate_volume_fraction(
+        phi,
+        cohesion=REF_C0,
+        num_steps=forward_steps,
+    )
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / f"collapse_inverse_iteration_{iteration:04d}.npz"
+    np.savez_compressed(
+        path,
+        iteration=np.asarray(iteration, dtype=np.int64),
+        loss=np.asarray(float(loss), dtype=np.float64),
+        friction_angle=np.asarray(phi, dtype=np.float64),
+        x=x,
+        y=y,
+        volume_fraction=volume_fraction,
+        crop_extent=np.asarray(crop_extent, dtype=np.float64),
+    )
+    return path
+
+
 def run_inverse_analysis(
     num_steps: int = 25,
     *,
@@ -188,8 +229,12 @@ def run_inverse_analysis(
     forward_steps: int = TOTAL_STEPS,
     phi_init: float = 10.0,
     learning_rate: float = 0.5,
+    save_plots: bool = True,
+    figure_dir: str | Path | None = None,
+    save_iterations: bool = True,
+    iteration_dir: str | Path = ITERATION_DATA_DIR,
 ) -> tuple[float, list[float]]:
-    """Recover one friction angle from selected full-horizon terminal measures."""
+    """Recover one friction angle and save optional plots and checkpoints."""
     keys = normalize_measure_keys(measure_keys)
     measure_fn = compiled_terminal_measures(forward_steps, keys)
     reference = measure_fn(jnp.asarray(REF_PHI, dtype=jnp.float64))
@@ -197,6 +242,7 @@ def run_inverse_analysis(
     optimizer = optax.adam(learning_rate=learning_rate)
     opt_state = optimizer.init(theta)
     history: list[float] = []
+    friction_angle_history = [float(theta)]
 
     print(
         f"reference phi={REF_PHI:.6f} deg | steps={forward_steps} | "
@@ -212,6 +258,15 @@ def run_inverse_analysis(
             measure_keys=keys,
             num_steps=forward_steps,
         )
+        if save_iterations:
+            checkpoint_path = save_iteration_state(
+                step,
+                loss=loss,
+                friction_angle=theta,
+                forward_steps=forward_steps,
+                output_dir=iteration_dir,
+            )
+            print(f"  saved iteration state: {checkpoint_path}")
         updates, opt_state = optimizer.update(gradient, opt_state, theta)
         theta = jnp.clip(
             optax.apply_updates(theta, updates),
@@ -219,6 +274,7 @@ def run_inverse_analysis(
             PHI_BOUNDS[1],
         )
         history.append(float(loss))
+        friction_angle_history.append(float(theta))
         print(
             f"step={step:03d} | loss={float(loss):.6e} | "
             f"phi={float(theta):.6f} deg | dL/dphi={float(gradient):.9e}"
@@ -230,6 +286,21 @@ def run_inverse_analysis(
             )
 
     print(f"recovered friction angle: {float(theta):.9f} deg")
+    if save_plots:
+        from projects.collapse.collapse_inverse_forward_ad_plots import (
+            FIGURES_DIR,
+            create_inverse_plots,
+        )
+
+        create_inverse_plots(
+            loss_history=history,
+            friction_angle_history=friction_angle_history,
+            identified_friction_angle=float(theta),
+            reference_friction_angle=REF_PHI,
+            cohesion=REF_C0,
+            num_steps=forward_steps,
+            output_dir=FIGURES_DIR if figure_dir is None else figure_dir,
+        )
     return float(theta), history
 
 
@@ -240,6 +311,28 @@ def main() -> None:
     parser.add_argument("--forward-steps", type=int, default=TOTAL_STEPS)
     parser.add_argument("--iterations", type=int, default=25)
     parser.add_argument("--learning-rate", type=float, default=0.5)
+    parser.add_argument(
+        "--figure-dir",
+        type=Path,
+        default=None,
+        help="directory for inverse figures (default: collapse/output/figures)",
+    )
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="skip final summary figures and their two field simulations",
+    )
+    parser.add_argument(
+        "--iteration-dir",
+        type=Path,
+        default=ITERATION_DATA_DIR,
+        help="directory for per-iteration loss, parameter, and field checkpoints",
+    )
+    parser.add_argument(
+        "--no-iteration-data",
+        action="store_true",
+        help="skip per-iteration volume-fraction checkpoints",
+    )
     parser.add_argument(
         "--measures",
         nargs="+",
@@ -255,6 +348,10 @@ def main() -> None:
         forward_steps=args.forward_steps,
         phi_init=args.phi_init,
         learning_rate=args.learning_rate,
+        save_plots=not args.no_plots,
+        figure_dir=args.figure_dir,
+        save_iterations=not args.no_iteration_data,
+        iteration_dir=args.iteration_dir,
     )
 
 
