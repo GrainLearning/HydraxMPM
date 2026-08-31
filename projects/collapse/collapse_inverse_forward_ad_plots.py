@@ -5,16 +5,17 @@ from pathlib import Path
 from typing import Any
 
 import jax
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import rcParams
 
 import hydraxmpm as hdx
 from projects.collapse.collapse import (
+    BULK_HEIGHT_CUTOFF,
     CELL_SIZE,
     END,
     ORIGIN,
+    project_nodal_volume_fraction_field,
     simulate_collapse,
 )
 
@@ -81,71 +82,50 @@ def plot_loss_history(
 
 
 def plot_parameter_history(
-    friction_angle_history: Sequence[float],
+    parameter_history: dict[str, Sequence[float]],
     *,
-    reference_friction_angle: float,
+    reference_parameters: dict[str, float],
     output_dir: Path = FIGURES_DIR,
 ) -> Path:
-    """Plot the identified friction-angle trajectory."""
-    friction_angle = np.asarray(friction_angle_history, dtype=float)
-    if friction_angle.ndim != 1 or friction_angle.size < 2:
-        raise ValueError(
-            "friction_angle_history must contain the initial value and one update"
+    """Plot each identified material-parameter trajectory."""
+    if not parameter_history:
+        raise ValueError("parameter_history must not be empty")
+    labels = {
+        "friction_angle": r"Friction angle $\phi$ [$^\circ$]",
+        "cohesion": r"Cohesion $c_0$ [Pa]",
+    }
+    count = len(parameter_history)
+    fig, axes = plt.subplots(
+        1, count, figsize=(FIGSIZE[0] * count, FIGSIZE[1]), constrained_layout=True
+    )
+    axes = np.atleast_1d(axes)
+    for axis, (key, values) in zip(axes, parameter_history.items(), strict=True):
+        history = np.asarray(values, dtype=float)
+        if history.ndim != 1 or history.size < 2:
+            raise ValueError(f"history for {key} must contain at least two values")
+        iterations = np.arange(history.size)
+        axis.plot(
+            iterations, history, color="#0072B2", linewidth=1.2,
+            marker="o", markersize=3.5, markerfacecolor="white", label="Inferred",
         )
-
-    iterations = np.arange(friction_angle.size)
-    fig, axis = plt.subplots(figsize=FIGSIZE, constrained_layout=True)
-    axis.plot(
-        iterations,
-        friction_angle,
-        color="#0072B2",
-        linewidth=1.2,
-        marker="o",
-        markersize=3.5,
-        markerfacecolor="white",
-        label="Inferred",
-    )
-    axis.axhline(
-        reference_friction_angle,
-        color="darkred",
-        linestyle="--",
-        linewidth=1.0,
-        label="Reference",
-    )
-    axis.set(
-        xlabel="Iteration [-]",
-        ylabel=r"Friction angle $\phi$ [$^\circ$]",
-        xlim=(0, friction_angle.size - 1),
-    )
-    axis.legend(frameon=False)
+        axis.axhline(
+            reference_parameters[key], color="darkred", linestyle="--",
+            linewidth=1.0, label="Reference",
+        )
+        axis.set(
+            xlabel="Iteration [-]", ylabel=labels[key],
+            xlim=(0, history.size - 1),
+        )
+        axis.legend(frameon=False)
     return save_figure(fig, output_dir, "collapse_inverse_parameter.png")
 
 
 def project_volume_fraction(
     final_state: Any,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Project particle volumes with HydraxMPM's quadratic P2G mapping."""
-    material_points = final_state.world.material_points[0]
+    """Project actual solid volume fraction with the quadratic P2G mapping."""
     domain = hdx.GridDomain.create(ORIGIN, END, CELL_SIZE, padding=0)
-    mapping = hdx.ShapeFunctionMapping("quadratic", dim=2)
-    cache = mapping.compute(
-        material_points.position_stack[:, :2],
-        domain.origin,
-        domain.grid_size,
-        domain._inv_cell_size,
-    )
-    nodal_volume = mapping.scatter_to_grid(
-        cache,
-        jnp.ones_like(material_points.volume_stack),
-        material_points.volume_stack,
-        domain.num_cells,
-        normalize=False,
-    )
-    volume_fraction = nodal_volume / CELL_SIZE**2
-    volume_fraction = volume_fraction / jnp.maximum(
-        jnp.max(volume_fraction),
-        FIELD_ERROR_FLOOR,
-    )
+    volume_fraction = project_nodal_volume_fraction_field(final_state)
     position_mesh = domain.position_mesh
     return (
         np.asarray(jax.device_get(position_mesh[..., 0])),
@@ -174,25 +154,95 @@ def simulate_volume_fraction(
     return (*project_volume_fraction(final_state), right_extent)
 
 
+def simulate_height_profile(
+    friction_angle: float,
+    *,
+    cohesion: float,
+    num_steps: int,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Run one collapse and return its bulk height profile and endpoint."""
+    result = simulate_collapse(
+        fric_angle=friction_angle,
+        c0=cohesion,
+        num_steps=num_steps,
+        compute_local=False,
+        compute_height_profile=True,
+    )
+    profile = np.asarray(jax.device_get(result["height_profile"]), dtype=float)
+    x = ORIGIN[0] + CELL_SIZE * np.arange(profile.size)
+    active = np.flatnonzero(profile >= BULK_HEIGHT_CUTOFF)
+    endpoint = float(x[active[-1]]) if active.size else float(ORIGIN[0])
+    return x, profile, endpoint
+
+
+def plot_height_profile_comparison(
+    identified_friction_angle: float,
+    *,
+    identified_cohesion: float,
+    reference_friction_angle: float,
+    reference_cohesion: float,
+    num_steps: int,
+    output_dir: Path = FIGURES_DIR,
+) -> Path:
+    """Plot reference and inferred bulk height profiles over their bulk extent."""
+    x_ref, reference, reference_endpoint = simulate_height_profile(
+        reference_friction_angle,
+        cohesion=reference_cohesion,
+        num_steps=num_steps,
+    )
+    x_identified, identified, identified_endpoint = simulate_height_profile(
+        identified_friction_angle,
+        cohesion=identified_cohesion,
+        num_steps=num_steps,
+    )
+    if not np.array_equal(x_ref, x_identified):
+        raise ValueError("reference and identified height-profile grids differ")
+    endpoint = max(reference_endpoint, identified_endpoint)
+    mask = x_ref <= endpoint
+    relative_l2_error = np.linalg.norm(identified[mask] - reference[mask]) / max(
+        np.linalg.norm(reference[mask]), FIELD_ERROR_FLOOR
+    )
+
+    fig, axis = plt.subplots(figsize=FIGSIZE, constrained_layout=True)
+    axis.plot(x_ref[mask], reference[mask], color="black", label="Ground truth")
+    axis.plot(
+        x_ref[mask],
+        identified[mask],
+        color="#0072B2",
+        linestyle="--",
+        label=rf"Inferred ($L_2={relative_l2_error:.2e}$)",
+    )
+    axis.set(
+        xlabel=r"$x$ [m]",
+        ylabel=r"Equivalent solid height $h_v(x)$ [m]",
+        xlim=(ORIGIN[0], endpoint),
+        ylim=(ORIGIN[1], END[1]),
+    )
+    axis.legend(frameon=False)
+    return save_figure(fig, output_dir, "collapse_inverse_height_profile.png")
+
+
 def plot_volume_fraction_error(
     identified_friction_angle: float,
     *,
+    identified_cohesion: float,
     reference_friction_angle: float,
-    cohesion: float,
+    reference_cohesion: float,
     num_steps: int,
     output_dir: Path = FIGURES_DIR,
 ) -> Path:
     """Plot ground-truth, identified, and signed-error volume-fraction fields."""
     x_ref, y_ref, reference, reference_extent = simulate_volume_fraction(
         reference_friction_angle,
-        cohesion=cohesion,
+        cohesion=reference_cohesion,
         num_steps=num_steps,
     )
-    x_identified, y_identified, identified, identified_extent = simulate_volume_fraction(
+    identified_result = simulate_volume_fraction(
         identified_friction_angle,
-        cohesion=cohesion,
+        cohesion=identified_cohesion,
         num_steps=num_steps,
     )
+    x_identified, y_identified, identified, identified_extent = identified_result
     if reference.shape != identified.shape:
         raise ValueError("reference and identified volume-fraction grids differ")
     if not (
@@ -299,10 +349,13 @@ def plot_volume_fraction_error(
 def create_inverse_plots(
     *,
     loss_history: Sequence[float],
-    friction_angle_history: Sequence[float],
+    parameter_history: dict[str, Sequence[float]],
+    reference_parameters: dict[str, float],
     identified_friction_angle: float,
+    identified_cohesion: float,
     reference_friction_angle: float,
-    cohesion: float,
+    reference_cohesion: float,
+    measure_keys: Sequence[str] = (),
     num_steps: int,
     output_dir: str | Path = FIGURES_DIR,
 ) -> dict[str, Path]:
@@ -312,18 +365,28 @@ def create_inverse_plots(
     paths = {
         "loss": plot_loss_history(loss_history, output_dir=destination),
         "parameter": plot_parameter_history(
-            friction_angle_history,
-            reference_friction_angle=reference_friction_angle,
+            parameter_history,
+            reference_parameters=reference_parameters,
             output_dir=destination,
         ),
         "volume_fraction_error": plot_volume_fraction_error(
             identified_friction_angle,
+            identified_cohesion=identified_cohesion,
             reference_friction_angle=reference_friction_angle,
-            cohesion=cohesion,
+            reference_cohesion=reference_cohesion,
             num_steps=num_steps,
             output_dir=destination,
         ),
     }
+    if "terminal_height_profile" in measure_keys:
+        paths["height_profile"] = plot_height_profile_comparison(
+            identified_friction_angle,
+            identified_cohesion=identified_cohesion,
+            reference_friction_angle=reference_friction_angle,
+            reference_cohesion=reference_cohesion,
+            num_steps=num_steps,
+            output_dir=destination,
+        )
     for name, path in paths.items():
         print(f"saved {name} figure: {path}")
     return paths

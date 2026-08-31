@@ -20,14 +20,59 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
 # Benchmark geometry / discretization defaults.
 ORIGIN = (0.0, 0.0)
-END = (0.2, 0.04)
+END = (2.0, 0.4)
 CELL_SIZE = 0.005
-COLUMN_WIDTH = 0.05
-COLUMN_HEIGHT = 0.025
-PPC = 2
+BULK_HEIGHT_CUTOFF = 2.0 * CELL_SIZE
+COLUMN_WIDTH = 0.5
+COLUMN_HEIGHT = 0.25
+PPC = 4
 DT = 5e-5
 TOTAL_TIME = 0.5
 OUTPUT_TIME = 0.05
+
+# Initial granular-state parameters. ``density_stack`` is the bulk density of
+# the porous continuum, not the intrinsic density of the solid grains.
+GRAIN_DENSITY = 2650.0
+INITIAL_SOLID_VOLUME_FRACTION = 0.60
+BULK_DENSITY = GRAIN_DENSITY * INITIAL_SOLID_VOLUME_FRACTION
+LATERAL_STRESS_RATIO = 0.5
+SEPARATION_DENSITY_RATIO = 0.90
+GRAVITY_MAGNITUDE = 9.81
+
+
+def initialize_lithostatic_stress(
+    position_stack: jnp.ndarray,
+    density_stack: jnp.ndarray,
+    *,
+    surface_elevation: float,
+    lateral_stress_ratio: float = LATERAL_STRESS_RATIO,
+) -> jnp.ndarray:
+    """Initialize gravity-equilibrated, compression-positive stress.
+
+    This is the horizontal-bed specialization of the initialization used by
+    ``projects/granular_chute_flow.chute_flow``. The vertical stress is
+    hydrostatic/lithostatic, the lateral stresses follow a constant K0 ratio,
+    and there is no initial shear stress on the level bed.
+    """
+    if position_stack.ndim != 2 or position_stack.shape[1] < 2:
+        raise ValueError("position_stack must have shape (num_particles, >=2)")
+    if density_stack.shape != (position_stack.shape[0],):
+        raise ValueError("density_stack must have one value per particle")
+
+    depth_below_surface = jnp.maximum(
+        jnp.asarray(surface_elevation, dtype=position_stack.dtype)
+        - position_stack[:, 1],
+        0.0,
+    )
+    sigma_yy = density_stack * GRAVITY_MAGNITUDE * depth_below_surface
+    sigma_lateral = lateral_stress_ratio * sigma_yy
+    stress_stack = jnp.zeros(
+        (position_stack.shape[0], 3, 3), dtype=position_stack.dtype
+    )
+    stress_stack = stress_stack.at[:, 0, 0].set(sigma_lateral)
+    stress_stack = stress_stack.at[:, 1, 1].set(sigma_yy)
+    stress_stack = stress_stack.at[:, 2, 2].set(sigma_lateral)
+    return stress_stack
 
 
 def compute_dp_coefficients(
@@ -68,23 +113,87 @@ def project_volume_fraction_field(
     end: tuple[float, float] = END,
     cell_size: float = CELL_SIZE,
 ) -> jnp.ndarray:
-    """Project final solid volume fraction onto the background grid."""
+    """Bin final solid volume fraction onto background-grid cells."""
     mp_state = sim_state.world.material_points[0]
     pos = mp_state.position_stack[:, :2]
-    volume_stack = mp_state.volume_stack
 
     x0, y0 = origin
     x1, y1 = end
     nx = int(round((x1 - x0) / cell_size))
     ny = int(round((y1 - y0) / cell_size))
 
-    cell_x = jnp.clip(jnp.floor((pos[:, 0] - x0) / cell_size).astype(jnp.int32), 0, nx - 1)
-    cell_y = jnp.clip(jnp.floor((pos[:, 1] - y0) / cell_size).astype(jnp.int32), 0, ny - 1)
+    cell_x = jnp.clip(
+        jnp.floor((pos[:, 0] - x0) / cell_size).astype(jnp.int32), 0, nx - 1
+    )
+    cell_y = jnp.clip(
+        jnp.floor((pos[:, 1] - y0) / cell_size).astype(jnp.int32), 0, ny - 1
+    )
     flat_idx = cell_x + nx * cell_y
-    weights = volume_stack / (cell_size**2)
+    solid_volume_stack = mp_state.mass_stack / GRAIN_DENSITY
+    weights = solid_volume_stack / (cell_size**2)
 
-    field = jnp.bincount(flat_idx, weights=weights, length=nx * ny).reshape(nx, ny)
-    return field / jnp.maximum(jnp.max(field), 1e-12)
+    return jnp.bincount(flat_idx, weights=weights, length=nx * ny).reshape(
+        ny, nx
+    ).T
+
+
+def project_nodal_volume_fraction_field(
+    sim_state: Any,
+    *,
+    origin: tuple[float, float] = ORIGIN,
+    end: tuple[float, float] = END,
+    cell_size: float = CELL_SIZE,
+) -> jnp.ndarray:
+    """Project solid volume fraction with the simulation's quadratic mapping."""
+    import hydraxmpm as hdx
+
+    material_points = sim_state.world.material_points[0]
+    domain = hdx.GridDomain.create(origin, end, cell_size, padding=0)
+    mapping = hdx.ShapeFunctionMapping("quadratic", dim=2)
+    cache = mapping.compute(
+        material_points.position_stack[:, :2],
+        domain.origin,
+        domain.grid_size,
+        domain._inv_cell_size,
+    )
+    solid_volume_stack = material_points.mass_stack / GRAIN_DENSITY
+    nodal_solid_volume = mapping.scatter_to_grid(
+        cache,
+        jnp.ones_like(solid_volume_stack),
+        solid_volume_stack,
+        domain.num_cells,
+        normalize=False,
+    )
+    return (nodal_solid_volume / cell_size**2).reshape(domain.grid_size)
+
+
+def compute_bulk_height_profile(
+    volume_fraction: jnp.ndarray,
+    *,
+    cell_size: float = CELL_SIZE,
+    reference_solid_fraction: float = INITIAL_SOLID_VOLUME_FRACTION,
+) -> jnp.ndarray:
+    """Return equivalent solid-volume height at every horizontal grid node.
+
+    The profile is the vertical integral of solid volume fraction divided by
+    the initial packing fraction,
+
+    ``h_v(x) = integral(phi_s(x, y), dy) / phi_s0``.
+
+    It is linear in projected solid volume, contains no occupancy threshold,
+    and preserves material area when integrated horizontally.
+    """
+    if volume_fraction.ndim != 2:
+        raise ValueError("volume_fraction must be a two-dimensional grid")
+    if cell_size <= 0.0:
+        raise ValueError("cell_size must be positive")
+    if reference_solid_fraction <= 0.0:
+        raise ValueError("reference_solid_fraction must be positive")
+    return (
+        cell_size
+        * jnp.sum(volume_fraction, axis=1)
+        / reference_solid_fraction
+    )
 
 
 def save_measure_bundle(
@@ -93,29 +202,39 @@ def save_measure_bundle(
     *,
     prefix: str = "collapse_ref",
 ) -> tuple[Path, Path]:
-    """Save global and local measures as NPZ + JSON under ``projects/collapse/output``."""
+    """Save global and local measures under ``projects/collapse/output``."""
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
     npz_path = OUTPUT_DIR / f"{prefix}_measures.npz"
-    global_arrays = {name: jnp.asarray(value) for name, value in global_measures.items()}
+    global_arrays = {
+        name: jnp.asarray(value) for name, value in global_measures.items()
+    }
     jnp.savez(npz_path, **global_arrays, local_field=jnp.asarray(local_field))
 
     json_path = OUTPUT_DIR / f"{prefix}_global.json"
     with open(json_path, "w", encoding="utf-8") as fp:
-        json.dump({name: jnp.asarray(value).tolist() for name, value in global_measures.items()}, fp, indent=2)
+        json.dump(
+            {
+                name: jnp.asarray(value).tolist()
+                for name, value in global_measures.items()
+            },
+            fp,
+            indent=2,
+        )
 
     return npz_path, json_path
 
 
 def simulate_collapse(
     fric_angle: float = 20.0,
-    c0: float = 10.0,
+    c0: float = 150.0,
     *,
     save_bundle: bool = False,
     prefix: str = "collapse_ref",
     visualize: bool = False,
     num_steps: int | None = None,
     compute_local: bool = True,
+    compute_height_profile: bool = False,
     return_final_state: bool = False,
 ) -> dict[str, Any]:
     """Run one forward collapse simulation.
@@ -128,7 +247,7 @@ def simulate_collapse(
     c0:
         Mohr-Coulomb cohesion mapped into the DP law.
     save_bundle:
-        If True, save global/local outputs under [output/](/home/hcheng/GrainLearning/HydraxMPM/projects/collapse/output).
+        If True, save global/local outputs under the collapse output directory.
     prefix:
         Prefix for saved files.
     visualize:
@@ -140,20 +259,33 @@ def simulate_collapse(
         If False, skip the final volume-fraction projection. This is useful for
         inverse runs that consume only terminal global measures. Saving a
         bundle still computes the local field because it is part of the bundle.
+    compute_height_profile:
+        If True, project the final state with the quadratic mapping and return
+        a differentiable equivalent solid-volume height profile on the fixed
+        horizontal grid.
     return_final_state:
         If True, include the final simulation state for HydraxMPM
         postprocessing. The inverse forward kernel leaves this disabled.
     """
     import hydraxmpm as hdx
 
-    sep = CELL_SIZE / PPC
+    particles_per_axis = int(round(PPC**0.5))
+    if particles_per_axis**2 != PPC:
+        raise ValueError("PPC must be a perfect square for the 2D particle lattice")
+    sep = CELL_SIZE / particles_per_axis
     x = jnp.arange(0.0, COLUMN_WIDTH, sep) + 2.0 * sep
     y = jnp.arange(0.0, COLUMN_HEIGHT, sep) + 2.0 * sep
     xv, yv = jnp.meshgrid(x, y)
     position_stack = jnp.column_stack((xv.ravel(), yv.ravel()))
     num_particles = position_stack.shape[0]
 
-    density_stack = jnp.full((num_particles,), 2650.0)
+    density_stack = jnp.full((num_particles,), BULK_DENSITY)
+    column_surface_elevation = 2.0 * sep + COLUMN_HEIGHT
+    stress_stack = initialize_lithostatic_stress(
+        position_stack,
+        density_stack,
+        surface_elevation=column_surface_elevation,
+    )
     mu_1, mu_2 = compute_dp_coefficients(fric_angle)
     law = hdx.DruckerPrager(
         nu=0.3,
@@ -162,21 +294,25 @@ def simulate_collapse(
         mu_2=mu_2,
         c0=c0,
         mu_1_hat=0.0,
-        rho_0=2650.0,
+        rho_0=SEPARATION_DENSITY_RATIO * BULK_DENSITY,
     )
-    law_state = law.create_state(stress_stack=jnp.zeros((num_particles, 3, 3)))
+    law_state = law.create_state(stress_stack=stress_stack)
 
     sim_builder = hdx.SimBuilder()
     sim_builder.add_material_points(
         position_stack=position_stack,
         density_stack=density_stack,
+        stress_stack=stress_stack,
         cell_size=CELL_SIZE,
         ppc=PPC,
     )
     sim_builder.add_grid(origin=ORIGIN, end=END, cell_size=CELL_SIZE)
     sim_builder.add_constitutive_law(law=law, law_state=law_state)
     sim_builder.couple(shapefunction="quadratic")
-    sim_builder.add_gravity(gravity=jnp.array([0.0, -9.81]), is_apply_on_grid=True)
+    sim_builder.add_gravity(
+        gravity=jnp.array([0.0, -GRAVITY_MAGNITUDE]),
+        is_apply_on_grid=True,
+    )
     sim_builder.add_sdf_object(
         sdf_logic=hdx.DomainSDF(
             origin=ORIGIN,
@@ -234,6 +370,10 @@ def simulate_collapse(
             end=END,
             cell_size=CELL_SIZE,
         )
+    height_profile = None
+    if compute_height_profile:
+        nodal_volume_fraction = project_nodal_volume_fraction_field(final_state)
+        height_profile = compute_bulk_height_profile(nodal_volume_fraction)
 
     if save_bundle:
         assert local_field is not None
@@ -242,6 +382,7 @@ def simulate_collapse(
     result = {
         "global": global_measures,
         "local": local_field,
+        "height_profile": height_profile,
         "fric_angle": fric_angle,
         "c0": c0,
     }
@@ -255,7 +396,7 @@ def run_sim() -> dict[str, Any]:
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
     result = simulate_collapse(
         fric_angle=20.0,
-        c0=10.0,
+        c0=150.0,
         save_bundle=True,
         prefix="collapse_ref",
         visualize=True,

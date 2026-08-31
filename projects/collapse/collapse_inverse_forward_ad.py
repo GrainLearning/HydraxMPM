@@ -1,10 +1,9 @@
 """Full-horizon forward-AD inverse analysis for granular collapse.
 
-This module addresses the single-parameter problem: infer the friction angle
-from one or more final global measures. The physical simulation always reaches
-the requested terminal time. A single forward-mode JVP carries the friction-
-angle tangent through the complete trajectory and returns the sensitivity of
-every selected terminal measure.
+This module infers one or more material parameters from final global measures.
+The physical simulation always reaches the requested terminal time. Forward-
+mode JVPs carry each selected parameter tangent through the complete trajectory
+and return the Jacobian of every selected terminal measure.
 """
 
 import argparse
@@ -19,7 +18,19 @@ import numpy as np
 import optax
 
 import hydraxmpm  # noqa: F401 - Avoid a lazy import during a JAX trace.
-from projects.collapse.collapse import DT, TOTAL_TIME, simulate_collapse
+from projects.collapse.collapse import (
+    BULK_DENSITY,
+    BULK_HEIGHT_CUTOFF,
+    CELL_SIZE,
+    COLUMN_HEIGHT,
+    DT,
+    END,
+    INITIAL_SOLID_VOLUME_FRACTION,
+    LATERAL_STRESS_RATIO,
+    ORIGIN,
+    TOTAL_TIME,
+    simulate_collapse,
+)
 
 jax.config.update("jax_enable_x64", True)
 
@@ -28,25 +39,35 @@ GlobalMeasureKey = Literal[
     "terminal_com_x",
     "terminal_com_y",
     "terminal_runout",
+    "terminal_height_profile",
 ]
+ParameterKey = Literal["friction_angle", "cohesion"]
 
 GLOBAL_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = (
     "terminal_height",
     "terminal_com_x",
     "terminal_com_y",
     "terminal_runout",
+    "terminal_height_profile",
 )
-DEFAULT_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = ("terminal_runout",)
+DEFAULT_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = (
+    "terminal_height_profile",
+)
+PARAMETER_KEYS: tuple[ParameterKey, ...] = ("friction_angle", "cohesion")
+DEFAULT_PARAMETER_KEYS: tuple[ParameterKey, ...] = ("friction_angle",)
 
 REF_PHI = 20.0
-REF_C0 = 10.0
+REF_C0 = 150.0
 PHI_BOUNDS = (5.0, 45.0)
+COHESION_BOUNDS = (0.0, 500.0)
 TOTAL_STEPS = int(round(TOTAL_TIME / DT))
 SCALE_FLOOR = 1.0e-12
 ITERATION_DATA_DIR = Path(__file__).resolve().parent / "output" / "inverse_iterations"
 DEFAULT_LEARNING_RATE = 0.5
+DEFAULT_COHESION_LEARNING_RATE = 5.0
 DEFAULT_EARLY_STOPPING_PATIENCE = 50
 DEFAULT_EARLY_STOPPING_MIN_DELTA = 1.0e-10
+HEIGHT_PROFILE_SIZE = int(round((END[0] - ORIGIN[0]) / CELL_SIZE)) + 1
 
 
 def normalize_measure_keys(
@@ -68,13 +89,83 @@ def normalize_measure_keys(
     return cast(tuple[GlobalMeasureKey, ...], keys)
 
 
-def _pack_global_measures(
+def normalize_parameter_keys(
+    parameter_keys: str | Sequence[str],
+) -> tuple[ParameterKey, ...]:
+    """Validate parameter names and return a nonempty, duplicate-free tuple."""
+    keys = (
+        (parameter_keys,)
+        if isinstance(parameter_keys, str)
+        else tuple(parameter_keys)
+    )
+    if not keys:
+        raise ValueError("at least one material parameter must be selected")
+    invalid = tuple(key for key in keys if key not in PARAMETER_KEYS)
+    if invalid:
+        valid = ", ".join(PARAMETER_KEYS)
+        raise ValueError(f"unsupported parameter(s) {invalid}; choose from: {valid}")
+    if len(set(keys)) != len(keys):
+        raise ValueError("parameter keys must not contain duplicates")
+    return cast(tuple[ParameterKey, ...], keys)
+
+
+def _parameter_vector(
+    parameters: float | Sequence[float] | jax.Array,
+    parameter_keys: tuple[ParameterKey, ...],
+) -> jax.Array:
+    """Convert selected material parameters to a consistently shaped vector."""
+    values = jnp.atleast_1d(jnp.asarray(parameters, dtype=jnp.float64))
+    expected_shape = (len(parameter_keys),)
+    if values.shape != expected_shape:
+        raise ValueError(
+            f"parameters must have shape {expected_shape}, got {values.shape}"
+        )
+    return values
+
+
+def _unpack_parameters(
+    parameters: jax.Array,
+    parameter_keys: tuple[ParameterKey, ...],
+) -> tuple[jax.Array, jax.Array]:
+    """Combine selected values with fixed reference values."""
+    values = {key: parameters[index] for index, key in enumerate(parameter_keys)}
+    dtype = parameters.dtype
+    return (
+        values.get("friction_angle", jnp.asarray(REF_PHI, dtype=dtype)),
+        values.get("cohesion", jnp.asarray(REF_C0, dtype=dtype)),
+    )
+
+
+def measure_component_sizes(
+    measure_keys: tuple[GlobalMeasureKey, ...],
+) -> tuple[int, ...]:
+    """Return the flattened component count for every selected observable."""
+    return tuple(
+        HEIGHT_PROFILE_SIZE if key == "terminal_height_profile" else 1
+        for key in measure_keys
+    )
+
+
+def measure_component_slices(
+    measure_keys: tuple[GlobalMeasureKey, ...],
+) -> tuple[slice, ...]:
+    """Return slices into the flattened terminal-observable vector."""
+    sizes = measure_component_sizes(measure_keys)
+    starts = np.cumsum((0, *sizes[:-1]))
+    return tuple(
+        slice(int(start), int(start + size))
+        for start, size in zip(starts, sizes, strict=True)
+    )
+
+
+def _pack_terminal_measures(
     global_measures: dict[str, jax.Array],
+    height_profile: jax.Array | None,
     measure_keys: tuple[GlobalMeasureKey, ...],
     *,
     dtype: jnp.dtype,
 ) -> jax.Array:
-    """Pack selected scalar terminal measures in the requested order."""
+    """Flatten selected scalar and profile observables in requested order."""
     center_of_mass = global_measures["final_center_of_mass"]
     available = {
         "terminal_height": global_measures["final_height"],
@@ -82,42 +173,85 @@ def _pack_global_measures(
         "terminal_com_y": center_of_mass[1],
         "terminal_runout": global_measures["final_runout_distance"],
     }
-    return jnp.stack(tuple(available[key] for key in measure_keys)).astype(dtype)
+    parts = []
+    for key in measure_keys:
+        if key == "terminal_height_profile":
+            if height_profile is None:
+                raise ValueError("height profile was not computed")
+            parts.append(jnp.asarray(height_profile, dtype=dtype))
+        else:
+            parts.append(jnp.atleast_1d(jnp.asarray(available[key], dtype=dtype)))
+    return jnp.concatenate(parts)
 
 
 def terminal_measures(
-    fric_angle: jax.Array,
+    parameters: float | Sequence[float] | jax.Array,
     *,
     measure_keys: str | Sequence[str] = DEFAULT_MEASURE_KEYS,
+    parameter_keys: str | Sequence[str] = DEFAULT_PARAMETER_KEYS,
     num_steps: int = TOTAL_STEPS,
 ) -> jax.Array:
     """Return selected final global measures after the requested trajectory."""
     keys = normalize_measure_keys(measure_keys)
-    phi = jnp.asarray(fric_angle, dtype=jnp.float64)
+    selected_parameters = normalize_parameter_keys(parameter_keys)
+    theta = _parameter_vector(parameters, selected_parameters)
+    phi, cohesion = _unpack_parameters(theta, selected_parameters)
     result = simulate_collapse(
         fric_angle=phi,
-        c0=jnp.asarray(REF_C0, dtype=phi.dtype),
+        c0=cohesion,
         num_steps=num_steps,
         compute_local=False,
+        compute_height_profile="terminal_height_profile" in keys,
     )
-    return _pack_global_measures(result["global"], keys, dtype=phi.dtype)
+    return _pack_terminal_measures(
+        result["global"],
+        result["height_profile"],
+        keys,
+        dtype=phi.dtype,
+    )
 
 
 @lru_cache(maxsize=None)
 def compiled_terminal_measures(
     num_steps: int,
     measure_keys: tuple[GlobalMeasureKey, ...],
+    parameter_keys: tuple[ParameterKey, ...] = DEFAULT_PARAMETER_KEYS,
 ) -> Callable[[jax.Array], jax.Array]:
     """Build and cache a terminal-measure program for one static configuration."""
     if num_steps <= 0:
         raise ValueError("num_steps must be positive")
     return jax.jit(
-        lambda phi: terminal_measures(
-            phi,
+        lambda theta: terminal_measures(
+            theta,
             measure_keys=measure_keys,
+            parameter_keys=parameter_keys,
             num_steps=num_steps,
         )
     )
+
+
+def measures_and_jacobian(
+    parameters: float | Sequence[float] | jax.Array,
+    *,
+    measure_keys: str | Sequence[str] = DEFAULT_MEASURE_KEYS,
+    parameter_keys: str | Sequence[str] = DEFAULT_PARAMETER_KEYS,
+    num_steps: int = TOTAL_STEPS,
+) -> tuple[jax.Array, jax.Array]:
+    """Evaluate terminal measures and their forward-mode parameter Jacobian."""
+    measures_selected = normalize_measure_keys(measure_keys)
+    parameters_selected = normalize_parameter_keys(parameter_keys)
+    theta = _parameter_vector(parameters, parameters_selected)
+    measure_fn = compiled_terminal_measures(
+        num_steps,
+        measures_selected,
+        parameters_selected,
+    )
+    measures = measure_fn(theta)
+    columns = tuple(
+        jax.jvp(measure_fn, (theta,), (basis,))[1]
+        for basis in jnp.eye(len(parameters_selected), dtype=theta.dtype)
+    )
+    return measures, jnp.stack(columns, axis=1)
 
 
 def measures_and_jvp(
@@ -127,10 +261,13 @@ def measures_and_jvp(
     num_steps: int = TOTAL_STEPS,
 ) -> tuple[jax.Array, jax.Array]:
     """Evaluate selected terminal measures and all their friction sensitivities."""
-    keys = normalize_measure_keys(measure_keys)
-    phi = jnp.asarray(fric_angle, dtype=jnp.float64)
-    measure_fn = compiled_terminal_measures(num_steps, keys)
-    return jax.jvp(measure_fn, (phi,), (jnp.ones_like(phi),))
+    measures, jacobian = measures_and_jacobian(
+        fric_angle,
+        measure_keys=measure_keys,
+        parameter_keys=DEFAULT_PARAMETER_KEYS,
+        num_steps=num_steps,
+    )
+    return measures, jacobian[:, 0]
 
 
 def normalize_measure_weights(
@@ -163,10 +300,11 @@ def normalize_measure_weights(
 
 
 def loss_and_gradient(
-    fric_angle: float | jax.Array,
+    parameters: float | Sequence[float] | jax.Array,
     reference_measures: float | Sequence[float] | jax.Array,
     *,
     measure_keys: str | Sequence[str] = DEFAULT_MEASURE_KEYS,
+    parameter_keys: str | Sequence[str] = DEFAULT_PARAMETER_KEYS,
     num_steps: int = TOTAL_STEPS,
     scales: float | Sequence[float] | jax.Array | None = None,
     measure_weights: float | Sequence[float] | jax.Array | None = None,
@@ -180,29 +318,48 @@ def loss_and_gradient(
 
     ``dL/dphi = sum(w * ((y-y*)/s) * (dy/dphi)/s) / sum(w)``.
 
-    By default, each scale is the absolute value of its reference measure.
-    Scalar scales and weights are broadcast to every selected measure. Equal
-    positive weights reproduce the previous equally weighted mean.
+    Scalar measures use their reference magnitude as the default scale. Height-
+    profile components use the initial column height. A measure's loss weight
+    is divided equally among all of its flattened components, so a profile does
+    not gain weight merely because it contains many horizontal samples.
     """
     keys = normalize_measure_keys(measure_keys)
     reference = jnp.atleast_1d(jnp.asarray(reference_measures, dtype=jnp.float64))
-    expected_shape = (len(keys),)
+    component_sizes = measure_component_sizes(keys)
+    component_slices = measure_component_slices(keys)
+    expected_shape = (sum(component_sizes),)
     if reference.shape != expected_shape:
         raise ValueError(
             f"reference_measures must have shape {expected_shape}, "
             f"got {reference.shape}"
         )
 
-    measures, sensitivities = measures_and_jvp(
-        fric_angle,
+    selected_parameters = normalize_parameter_keys(parameter_keys)
+    measures, jacobian = measures_and_jacobian(
+        parameters,
         measure_keys=keys,
+        parameter_keys=selected_parameters,
         num_steps=num_steps,
     )
     if scales is None:
-        scale_values = jnp.maximum(jnp.abs(reference), SCALE_FLOOR)
+        default_scale_parts = []
+        for key, component_slice in zip(keys, component_slices, strict=True):
+            if key == "terminal_height_profile":
+                default_scale_parts.append(
+                    jnp.full(
+                        (component_slice.stop - component_slice.start,),
+                        COLUMN_HEIGHT,
+                        dtype=reference.dtype,
+                    )
+                )
+            else:
+                default_scale_parts.append(jnp.abs(reference[component_slice]))
+        scale_values = jnp.maximum(
+            jnp.concatenate(default_scale_parts), SCALE_FLOOR
+        )
     else:
         scale_values = jnp.atleast_1d(jnp.asarray(scales, dtype=reference.dtype))
-        if scale_values.shape == (1,) and len(keys) > 1:
+        if scale_values.shape == (1,) and expected_shape != (1,):
             scale_values = jnp.broadcast_to(scale_values, expected_shape)
         if scale_values.shape != expected_shape:
             raise ValueError(
@@ -211,18 +368,45 @@ def loss_and_gradient(
         scale_values = jnp.maximum(jnp.abs(scale_values), SCALE_FLOOR)
 
     residuals = (measures - reference) / scale_values
-    weight_values = normalize_measure_weights(
+    measure_weight_values = normalize_measure_weights(
         measure_weights,
         num_measures=len(keys),
         dtype=reference.dtype,
     )
-    weight_sum = jnp.sum(weight_values)
-    loss = 0.5 * jnp.sum(weight_values * residuals**2) / weight_sum
-    gradient = (
-        jnp.sum(weight_values * residuals * sensitivities / scale_values)
-        / weight_sum
+    positive_components = sum(
+        size
+        for size, weight in zip(
+            component_sizes, measure_weight_values, strict=True
+        )
+        if float(weight) > 0.0
     )
-    return loss, gradient, measures, sensitivities
+    if positive_components < len(selected_parameters):
+        raise ValueError(
+            "the number of positively weighted measures must be at least the "
+            "number of inferred parameters"
+        )
+    component_weights = jnp.concatenate(
+        tuple(
+            jnp.full(
+                (size,),
+                measure_weight_values[index] / size,
+                dtype=reference.dtype,
+            )
+            for index, size in enumerate(component_sizes)
+        )
+    )
+    weight_sum = jnp.sum(component_weights)
+    loss = 0.5 * jnp.sum(component_weights * residuals**2) / weight_sum
+    gradient = jnp.sum(
+        component_weights[:, None]
+        * residuals[:, None]
+        * jacobian
+        / scale_values[:, None],
+        axis=0,
+    ) / weight_sum
+    if len(selected_parameters) == 1:
+        return loss, gradient[0], measures, jacobian[:, 0]
+    return loss, gradient, measures, jacobian
 
 
 def save_iteration_state(
@@ -230,14 +414,15 @@ def save_iteration_state(
     *,
     loss: float | jax.Array,
     friction_angle: float | jax.Array,
+    cohesion: float | jax.Array = REF_C0,
     forward_steps: int,
     output_dir: str | Path = ITERATION_DATA_DIR,
 ) -> Path:
-    """Save one consistent loss, parameter, and terminal field checkpoint.
+    """Save one consistent loss, parameters, and terminal field checkpoint.
 
-    The saved loss and friction angle are the values at which the optimizer
-    gradient was evaluated. Computing the volume-fraction field requires one
-    additional primal collapse simulation; it is not included in the AD loss.
+    The saved loss, friction angle, and cohesion are the values at which the
+    optimizer gradient was evaluated. Computing the volume-fraction field
+    requires one additional primal collapse simulation; it is not in the loss.
     """
     from projects.collapse.collapse_inverse_forward_ad_plots import (
         simulate_volume_fraction,
@@ -246,7 +431,7 @@ def save_iteration_state(
     phi = float(friction_angle)
     x, y, volume_fraction, crop_extent = simulate_volume_fraction(
         phi,
-        cohesion=REF_C0,
+        cohesion=float(cohesion),
         num_steps=forward_steps,
     )
     destination = Path(output_dir)
@@ -257,6 +442,7 @@ def save_iteration_state(
         iteration=np.asarray(iteration, dtype=np.int64),
         loss=np.asarray(float(loss), dtype=np.float64),
         friction_angle=np.asarray(phi, dtype=np.float64),
+        cohesion=np.asarray(float(cohesion), dtype=np.float64),
         x=x,
         y=y,
         volume_fraction=volume_fraction,
@@ -270,55 +456,123 @@ def run_inverse_analysis(
     *,
     measure_keys: str | Sequence[str] = DEFAULT_MEASURE_KEYS,
     measure_weights: float | Sequence[float] | jax.Array | None = None,
+    parameter_keys: str | Sequence[str] = DEFAULT_PARAMETER_KEYS,
     forward_steps: int = TOTAL_STEPS,
     phi_init: float = 10.0,
+    cohesion_init: float = 100.0,
     learning_rate: float = DEFAULT_LEARNING_RATE,
+    cohesion_learning_rate: float = DEFAULT_COHESION_LEARNING_RATE,
     early_stopping_patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
     early_stopping_min_delta: float = DEFAULT_EARLY_STOPPING_MIN_DELTA,
     save_plots: bool = True,
     figure_dir: str | Path | None = None,
     save_iterations: bool = True,
     iteration_dir: str | Path = ITERATION_DATA_DIR,
-) -> tuple[float, list[float]]:
-    """Recover one friction angle and save optional plots and checkpoints."""
+) -> tuple[float | dict[ParameterKey, float], list[float]]:
+    """Recover selected material parameters and save plots and checkpoints."""
     keys = normalize_measure_keys(measure_keys)
+    selected_parameters = normalize_parameter_keys(parameter_keys)
     if early_stopping_patience == 0:
         early_stopping_patience = None
     if early_stopping_min_delta < 0.0:
         raise ValueError("early_stopping_min_delta must be nonnegative")
     if learning_rate <= 0.0:
         raise ValueError("learning_rate must be positive")
-    measure_fn = compiled_terminal_measures(forward_steps, keys)
-    reference = measure_fn(jnp.asarray(REF_PHI, dtype=jnp.float64))
+    if cohesion_learning_rate <= 0.0:
+        raise ValueError("cohesion_learning_rate must be positive")
+
+    reference_values = {"friction_angle": REF_PHI, "cohesion": REF_C0}
+    initial_values = {"friction_angle": phi_init, "cohesion": cohesion_init}
+    bounds = {"friction_angle": PHI_BOUNDS, "cohesion": COHESION_BOUNDS}
+    rates = {
+        "friction_angle": learning_rate,
+        "cohesion": cohesion_learning_rate,
+    }
+    reference_theta = jnp.asarray(
+        [reference_values[key] for key in selected_parameters], dtype=jnp.float64
+    )
     weight_values = normalize_measure_weights(
         measure_weights,
         num_measures=len(keys),
-        dtype=reference.dtype,
+        dtype=jnp.float64,
+    )
+    positive_components = sum(
+        size
+        for size, weight in zip(
+            measure_component_sizes(keys), weight_values, strict=True
+        )
+        if float(weight) > 0.0
+    )
+    if positive_components < len(selected_parameters):
+        raise ValueError(
+            "the number of positively weighted measures must be at least the "
+            "number of inferred parameters"
+        )
+    measure_fn = compiled_terminal_measures(
+        forward_steps, keys, selected_parameters
+    )
+    reference = measure_fn(reference_theta)
+    lower_bounds = jnp.asarray(
+        [bounds[key][0] for key in selected_parameters], dtype=jnp.float64
+    )
+    upper_bounds = jnp.asarray(
+        [bounds[key][1] for key in selected_parameters], dtype=jnp.float64
     )
     theta = jnp.clip(
-        jnp.asarray(phi_init, dtype=jnp.float64),
-        PHI_BOUNDS[0],
-        PHI_BOUNDS[1],
+        jnp.asarray([initial_values[key] for key in selected_parameters]),
+        lower_bounds,
+        upper_bounds,
     )
-    optimizer = optax.adam(learning_rate=learning_rate)
+    optimizer = optax.adam(
+        learning_rate=jnp.asarray(
+            [rates[key] for key in selected_parameters], dtype=theta.dtype
+        )
+    )
     opt_state = optimizer.init(theta)
     history: list[float] = []
-    friction_angle_history: list[float] = []
+    parameter_history: dict[ParameterKey, list[float]] = {
+        key: [] for key in selected_parameters
+    }
     best_loss = float("inf")
-    best_theta = float(theta)
+    best_theta = np.asarray(theta, dtype=float)
     iterations_without_improvement = 0
     stopped_early = False
 
     print(
-        f"reference phi={REF_PHI:.6f} deg | steps={forward_steps} | "
-        f"measures={','.join(keys)}"
+        f"reference phi={REF_PHI:.6f} deg, c0={REF_C0:.6f} Pa | "
+        f"steps={forward_steps} | "
+        f"measures={','.join(keys)} | parameters={','.join(selected_parameters)}"
     )
-    for key, value, weight in zip(keys, reference, weight_values, strict=True):
-        print(
-            f"  reference {key}={float(value):.12e} | "
-            f"loss_weight={float(weight):.6g}"
-        )
-    print(f"learning rate={learning_rate:.6e}")
+    print(
+        "initial state: "
+        f"solid_fraction={INITIAL_SOLID_VOLUME_FRACTION:.3f} | "
+        f"bulk_density={BULK_DENSITY:.3f} kg/m^3 | "
+        f"lithostatic_K0={LATERAL_STRESS_RATIO:.3f}"
+    )
+    component_slices = measure_component_slices(keys)
+    for key, component_slice, weight in zip(
+        keys, component_slices, weight_values, strict=True
+    ):
+        values = reference[component_slice]
+        if key == "terminal_height_profile":
+            active = np.flatnonzero(np.asarray(values) >= BULK_HEIGHT_CUTOFF)
+            endpoint = (
+                ORIGIN[0] + CELL_SIZE * int(active[-1])
+                if active.size
+                else ORIGIN[0]
+            )
+            print(
+                f"  reference {key}: {values.size} samples | "
+                f"bulk_x_max={endpoint:.6f} m | "
+                f"loss_weight={float(weight):.6g}"
+            )
+        else:
+            print(
+                f"  reference {key}={float(values[0]):.12e} | "
+                f"loss_weight={float(weight):.6g}"
+            )
+    for key in selected_parameters:
+        print(f"  constant learning rate {key}={rates[key]:.6e}")
     if early_stopping_patience is not None:
         print(
             f"early stopping patience={early_stopping_patience} | "
@@ -326,11 +580,15 @@ def run_inverse_analysis(
         )
 
     for step in range(num_steps):
-        evaluated_theta = float(theta)
+        evaluated_theta = np.asarray(theta, dtype=float)
+        parameter_map = dict(zip(selected_parameters, evaluated_theta, strict=True))
+        friction_angle = parameter_map.get("friction_angle", REF_PHI)
+        cohesion = parameter_map.get("cohesion", REF_C0)
         loss, gradient, measures, sensitivities = loss_and_gradient(
             theta,
             reference,
             measure_keys=keys,
+            parameter_keys=selected_parameters,
             num_steps=forward_steps,
             measure_weights=weight_values,
         )
@@ -338,28 +596,50 @@ def run_inverse_analysis(
             checkpoint_path = save_iteration_state(
                 step,
                 loss=loss,
-                friction_angle=theta,
+                friction_angle=friction_angle,
+                cohesion=cohesion,
                 forward_steps=forward_steps,
                 output_dir=iteration_dir,
             )
             print(f"  saved iteration state: {checkpoint_path}")
         loss_value = float(loss)
         history.append(loss_value)
-        friction_angle_history.append(evaluated_theta)
+        for key, value in parameter_map.items():
+            parameter_history[key].append(float(value))
+        parameter_text = " | ".join(
+            f"{key}={value:.6f}" for key, value in parameter_map.items()
+        )
         print(
             f"step={step:03d} | loss={loss_value:.6e} | "
-            f"phi={evaluated_theta:.6f} deg | dL/dphi={float(gradient):.9e} | "
-            f"lr={learning_rate:.6e}"
+            f"{parameter_text}"
         )
-        for key, value, sensitivity in zip(keys, measures, sensitivities, strict=True):
-            print(
-                f"  {key}={float(value):.9e} | "
-                f"d({key})/dphi={float(sensitivity):.9e}"
-            )
+        sensitivity_matrix = jnp.atleast_2d(sensitivities)
+        if sensitivity_matrix.shape == (1, len(keys)):
+            sensitivity_matrix = sensitivity_matrix.T
+        for key, component_slice in zip(keys, component_slices, strict=True):
+            values = measures[component_slice]
+            sensitivities_for_measure = sensitivity_matrix[component_slice]
+            if key == "terminal_height_profile":
+                derivatives = " | ".join(
+                    f"||d(profile)/d({parameter_key})||="
+                    f"{float(jnp.linalg.norm(sensitivities_for_measure[:, index])):.9e}"
+                    for index, parameter_key in enumerate(selected_parameters)
+                )
+                print(
+                    f"  {key}: min={float(jnp.min(values)):.9e} | "
+                    f"max={float(jnp.max(values)):.9e} | {derivatives}"
+                )
+            else:
+                derivatives = " | ".join(
+                    f"d({key})/d({parameter_key})="
+                    f"{float(sensitivities_for_measure[0, index]):.9e}"
+                    for index, parameter_key in enumerate(selected_parameters)
+                )
+                print(f"  {key}={float(values[0]):.9e} | {derivatives}")
 
         if loss_value < best_loss - early_stopping_min_delta:
             best_loss = loss_value
-            best_theta = evaluated_theta
+            best_theta = evaluated_theta.copy()
             iterations_without_improvement = 0
         else:
             iterations_without_improvement += 1
@@ -379,15 +659,20 @@ def run_inverse_analysis(
         updates, opt_state = optimizer.update(gradient, opt_state, theta)
         theta = jnp.clip(
             optax.apply_updates(theta, updates),
-            PHI_BOUNDS[0],
-            PHI_BOUNDS[1],
+            lower_bounds,
+            upper_bounds,
         )
 
     theta = jnp.asarray(best_theta, dtype=jnp.float64)
+    recovered = {
+        key: float(value)
+        for key, value in zip(selected_parameters, best_theta, strict=True)
+    }
     stop_reason = "early stopping" if stopped_early else "iteration limit"
     print(
-        f"best loss={best_loss:.12e} | recovered friction angle="
-        f"{best_theta:.9f} deg | stop={stop_reason}"
+        f"best loss={best_loss:.12e} | recovered "
+        + ", ".join(f"{key}={value:.9f}" for key, value in recovered.items())
+        + f" | stop={stop_reason}"
     )
     if save_plots:
         from projects.collapse.collapse_inverse_forward_ad_plots import (
@@ -397,26 +682,44 @@ def run_inverse_analysis(
 
         create_inverse_plots(
             loss_history=history,
-            friction_angle_history=friction_angle_history,
-            identified_friction_angle=float(theta),
+            parameter_history=parameter_history,
+            reference_parameters=reference_values,
+            identified_friction_angle=recovered.get("friction_angle", REF_PHI),
+            identified_cohesion=recovered.get("cohesion", REF_C0),
             reference_friction_angle=REF_PHI,
-            cohesion=REF_C0,
+            reference_cohesion=REF_C0,
+            measure_keys=keys,
             num_steps=forward_steps,
             output_dir=FIGURES_DIR if figure_dir is None else figure_dir,
         )
-    return float(theta), history
+    if selected_parameters == DEFAULT_PARAMETER_KEYS:
+        return recovered["friction_angle"], history
+    return recovered, history
 
 
 def main() -> None:
-    """Command-line entry point for single-parameter inverse analysis."""
+    """Command-line entry point for material-parameter inverse analysis."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phi-init", type=float, default=10.0)
+    parser.add_argument("--cohesion-init", type=float, default=200.0)
     parser.add_argument("--forward-steps", type=int, default=TOTAL_STEPS)
     parser.add_argument("--iterations", type=int, default=25)
     parser.add_argument(
         "--learning-rate",
         type=float,
         default=DEFAULT_LEARNING_RATE,
+    )
+    parser.add_argument(
+        "--cohesion-learning-rate",
+        type=float,
+        default=DEFAULT_COHESION_LEARNING_RATE,
+    )
+    parser.add_argument(
+        "--parameters",
+        nargs="+",
+        choices=PARAMETER_KEYS,
+        default=list(DEFAULT_PARAMETER_KEYS),
+        help="one or more material parameters to infer",
     )
     parser.add_argument(
         "--early-stopping-patience",
@@ -475,9 +778,12 @@ def main() -> None:
         num_steps=args.iterations,
         measure_keys=args.measures,
         measure_weights=args.measure_weights,
+        parameter_keys=args.parameters,
         forward_steps=args.forward_steps,
         phi_init=args.phi_init,
+        cohesion_init=args.cohesion_init,
         learning_rate=args.learning_rate,
+        cohesion_learning_rate=args.cohesion_learning_rate,
         early_stopping_patience=args.early_stopping_patience,
         early_stopping_min_delta=args.early_stopping_min_delta,
         save_plots=not args.no_plots,
