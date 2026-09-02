@@ -9,55 +9,37 @@ import equinox as eqx
 import jax.numpy as jnp
 
 import jax
+from jaxtyping import Float, Array
+from typing import Tuple, Optional, Self
+
+
+class Convergence(eqx.Module):
+    residuals: Float[Array, "..."]
+    unknowns: Float[Array, "..."]
+    jacobians: Float[Array, "..."]
+
 
 class ConstitutiveLawState(eqx.Module):
     pass
 
 
+def dummy_convergence(
+    debug_convergence: bool,
+    NUM_NEWTON_ITERS: int,
+    NUM_RESIDUALS: int,
+    NUM_UNKNOWNS: int,
+) -> Optional[Convergence]:
+
+    if not debug_convergence:
+        return None
+
+    convergence = Convergence(
+        residuals=jnp.zeros((NUM_NEWTON_ITERS, NUM_RESIDUALS)),
+        unknowns=jnp.zeros((NUM_NEWTON_ITERS, NUM_UNKNOWNS)),
+        jacobians=jnp.zeros((NUM_NEWTON_ITERS, NUM_UNKNOWNS, NUM_UNKNOWNS)),
+    )
+    return convergence
+
+
 class ConstitutiveLaw(eqx.Module):
-    requires_F_reset: bool = eqx.field(static=True, default=False)
-
-
-    def remove_accumulated_shear(self, mp_state):
-        """
-        This is necessary for stability in MPM
-
-        When shear components accumulate in F over time,
-        the condition number of F worsens, leading to
-        numerical issues when computing volume change within g2p update
-
-        Remove shear component from deformation gradient F.
-
-        - Called within MPM update if `requires_F_reset` is True.
-        - Used for fluids to avoid shear history accumulation.
-        - Also hypoelastic solids that do not depend on F to compute stress
-
-        """
-        if not self.requires_F_reset:
-            return mp_state
-
-        dim = mp_state.dim
-        def compute_cbar(F):
-            J = jnp.linalg.det(F)
-            if dim == 2:
-
-                scale = jnp.sqrt(J)
-                # For plane strain condition
-                return jnp.diag(jnp.array([scale, scale, 1.0]))
-            else:
-                # 3D cbar element-wise cube root
-                scale = jnp.cbrt(J)
-                return scale * jnp.eye(3)
-
-
-        new_F_stack = jax.vmap(compute_cbar)(mp_state.F_stack)
-
-        if mp_state.F_store_stack is not None:
-            new_F_store_stack = mp_state.F_stack
-        else:
-            new_F_store_stack = None
-
-        new_mp = eqx.tree_at(lambda m: (m.F_stack,m.F_store_stack), mp_state, (new_F_stack, new_F_store_stack))
-
-
-        return new_mp
+    debug_convergence: bool = eqx.field(static=True)

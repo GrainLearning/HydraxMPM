@@ -48,7 +48,7 @@ from .constitutive_laws.constitutive_law import (
 )
 
 from .constitutive_laws.newtonfluid import NewtonFluid, NewtonFluidState
-from .constitutive_laws.mu_i_rheology import (
+from .constitutive_laws.mu_i_incompressible import (
     MuI_Incompressible,
     MuIIncompressibleState,
     MuI_LC,
@@ -59,6 +59,10 @@ from .constitutive_laws.modifiedcamclay import ModifiedCamClay, ModifiedCamClayS
 from .constitutive_laws.linearelastic import LinearElasticLaw, LinearElasticState
 from .constitutive_laws.druckerprager import DruckerPrager, DruckerPragerState
 
+# Hyperelastic versions of some constitutive laws
+from .constitutive_laws.druckerprager_he import DruckerPragerHE, DruckerPragerHEState
+from .constitutive_laws.modifiedcamclay_he import ModifiedCamClayHE, ModifiedCamClayHEState
+from .constitutive_laws.linearelastic_he import LinearElasticHE, LinearElasticHEState
 
 from .solvers.usl import USLSolver, USLSolverState
 
@@ -117,8 +121,11 @@ from .utils.math_helpers import (
     get_dev_strain,
     get_volumetric_strain,
     get_q_vm,
-    inv_2x2_robust
+    inv_2x2_robust,
+    rotation_2d
 )
+
+from jaxtyping import Array, Float
 
 
 hook.uninstall()

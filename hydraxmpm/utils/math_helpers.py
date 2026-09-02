@@ -195,9 +195,9 @@ def get_strain_rate_tensor(L):
 def get_shear_strain_vm(strain=None, dev_strain=None):
     """
     Get the scalar von-Mises equivalent shear strain.
-
+    
     This is the work-conjugate variable to the von-Mises shear stress q.
-
+    
     $$
     \\varepsilon_q = \\sqrt{\\frac{2}{3} \\mathbf{e} : \\mathbf{e}}
     $$
@@ -269,24 +269,23 @@ def get_volumetric_strain_stack(strain_stack):
 
 
 def get_hencky_strain_stack(F_stack):
-    """Vectorized version of get Hencky strain from a stack of deformation gradients.
+    """Vectorized version of get Hencky strain."""
+    if F_stack is None:
+        return None
+    
+    # Optional: Check if the array is empty to avoid JAX errors
+    if hasattr(F_stack, "shape") and (0 in F_stack.shape):
+        return jnp.zeros_like(F_stack)
 
-    See [get_hencky_strain][utils.math_helpers.get_hencky_strain] for more details.
-
-    Args:
-        F_stack: deformation gradient stack
-
-    Returns:
-        strain tensor, left stretch tensor (stacked)
-    """
     vmap_get_hencky = jax.vmap(get_hencky_strain)
     return vmap_get_hencky(F_stack)
 
 
 
 def get_dev_strain_stack(strain_stack):
-    """Get strain rate tensor from a stack of velocity gradients."""
-    return get_dev_strain_stack(strain_stack)
+    """Get deviatoric strain from a stack of strain tensors."""
+    # This was calling itself recursively; change to call the rank-agnostic function
+    return get_dev_strain(strain_stack)
 
 def get_strain_rate_tensor_stack(L_stack):
     """Get strain rate tensor from a stack of velocity gradients."""
@@ -541,7 +540,7 @@ def get_phi_from_bulk_density_stack(absolute_density_stack, bulk_density_stack):
 
 
 def precondition_from_lithostatic(
-    density_stack: Float[Array, "num_points"],
+    density0_stack: Float[Array, "num_points"],
     depth_stack: Float[Array, "num_points"],
     gravity,
     slope_angle_deg: float = 0.0,
@@ -554,10 +553,10 @@ def precondition_from_lithostatic(
     theta = jnp.radians(slope_angle_deg)
 
     # calculate vertical stress (lithostatic)
-    # sigma_v = rho * g * z
-    sigma_v_stack = density_stack * gravity * depth_stack*jnp.cos(theta)
+    # sigma_v = rho_c * g * z
+    sigma_v_stack = density0_stack * gravity * depth_stack*jnp.cos(theta)
 
-    tau_stack = density_stack * gravity * depth_stack * jnp.sin(theta)
+    tau_stack = density0_stack * gravity * depth_stack * jnp.sin(theta)
 
     # calculate horizontal stress (K0 assumption)
     sigma_h_stack = k0 * sigma_v_stack

@@ -30,7 +30,7 @@ from ..constitutive_laws.constitutive_law import (
 )
 from ..constitutive_laws.linearelastic import LinearElasticLaw
 from ..constitutive_laws.newtonfluid import NewtonFluid
-from ..constitutive_laws.mu_i_rheology import MuI_Incompressible, MuI_LC
+from ..constitutive_laws.mu_i_incompressible import MuI_Incompressible, MuI_LC
 
 from typing import List, Tuple, Optional, Any, Dict, Callable
 
@@ -43,7 +43,9 @@ from jaxtyping import Array, Float, Int, UInt, Bool
 from ..solvers.usl_asflip import USLAFLIP
 from ..solvers.usl_incompressible import USLIncompressibleAFLIP
 
-from ..sdf.sdfcollection import PlaneSDF,CompositeSDF
+from ..sdf.sdfcollection import PlaneSDF, CompositeSDF
+
+from typing import NamedTuple
 
 
 class Registry(list):
@@ -52,6 +54,16 @@ class Registry(list):
     def add(self, item):
         self.append(item)
         return len(self) - 1
+
+
+class IndexMap(NamedTuple):
+    """Static addresses for simulation components."""
+
+    particles: tuple[int, ...]
+    sdfs: tuple[int, ...]
+    laws: tuple[int, ...]
+    solvers: tuple[int, ...]
+    forces: tuple[int, ...]
 
 
 class SimBuilder:
@@ -168,6 +180,7 @@ class SimBuilder:
         angular_velocity=None,
         rotation=None,
         sdf_state=None,
+        return_state=False
     ):
 
         if sdf_state is None:
@@ -189,6 +202,9 @@ class SimBuilder:
 
         #  these two must be in sync
         assert sdf_state_idx == sdf_idx, "SDF Logic and State indices out of sync!"
+
+        if return_state:
+            return sdf_idx, sdf_state
         return sdf_idx
 
     def couple(
@@ -441,8 +457,10 @@ class SimBuilder:
         self,
         sdf_idx: int = None,
         g_idx_list: list[int] = None,
-        friction: float = 1.0,
+        friction: float = 0.0,
         gap: float = 1e-4,
+        custom_collider = None,
+        custom_collider_state = None,
     ):
         """Convenience method for adding objects."""
 
@@ -452,14 +470,74 @@ class SimBuilder:
         g_idx_list = (
             list(range(len(self.grid_domains))) if g_idx_list is None else g_idx_list
         )
-
-        sdf_collider = SDFCollider(
-            sdf_idx=sdf_idx,
-            g_idx_list=g_idx_list,
-            gap=gap,
-            friction=friction,
+        
+        if custom_collider is not None:
+            sdf_collider = custom_collider
+        else:
+            sdf_collider = SDFCollider(
+                sdf_idx=sdf_idx,
+                g_idx_list=g_idx_list,
+                gap=gap,
         )
 
         f_idx = self.force_logics.add(sdf_collider)
+        
+        if custom_collider_state is not None:
+            self.force_states.append(custom_collider_state)
+        else:
+            self.force_states.append(sdf_collider.create_state())
+
 
         return f_idx
+
+    def summary(self, dt: float = None):
+        """Prints an overview of the simulation."""
+        print(f"\n{' Simulation Configuration ':=^50}")
+
+        # Temporal Information
+        if dt is not None:
+            print(f"dt = {dt:.2e} s")
+
+        # Grid / Domain Information
+        for i, gd in enumerate(self.grid_domains):
+            dim = gd.dim
+            res = " × ".join(map(str, gd.grid_size))
+            bounds = " to ".join([str(gd.origin), str(gd.end)])
+            print(f"Grid [{i}]:    {res} nodes | cell size: {gd.cell_size:.4f} | {dim}D Domain")
+            print(f"            bounds: {bounds}")
+
+        # Material Points
+        total_p = 0
+        for i, mp in enumerate(self.particle_states):
+            n_p = mp.num_points
+            total_p += n_p
+            p_type = "Rigid" if isinstance(mp, RigidMaterialPointState) else "Deformable"
+            print(f"Body [{i}]:    {n_p} particles ({p_type})")
+        print(f"Total |P|:  {total_p}")
+
+        # Physics / Mechanics
+        print(f"{' Physics Logics ':-^50}")
+        for i, law in enumerate(self.law_logics):
+            name = law.__class__.__name__
+            print(f"Law [{i}]:     {name}")
+
+        for i, force in enumerate(self.force_logics):
+            name = force.__class__.__name__
+            print(f"Force [{i}]:   {name}")
+
+        # Solvers
+        for i, solver in enumerate(self.solver_logics):
+            name = solver.__class__.__name__
+            print(f"Solver [{i}]:  {name}")
+
+        print(f"{'':=^50}\n")
+
+    def get_index_map(self) -> IndexMap:
+        """Returns the static index structure of the simulation."""
+        return IndexMap(
+            particles=tuple(range(len(self.particle_states))),
+            sdfs=tuple(range(len(self.sdf_states))),
+            laws=tuple(range(len(self.law_logics))),
+            solvers=tuple(range(len(self.solver_logics))),
+            forces=tuple(range(len(self.force_logics))),
+        )

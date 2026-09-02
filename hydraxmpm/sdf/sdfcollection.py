@@ -52,6 +52,7 @@ class BoxSDF(SDFObjectBase):
     def signed_distance_local(
         self, state: SDFObjectState, pos_local: Float[Array, "dim"]
     ) -> Float[Array, ""]:
+        
         d = jnp.abs(pos_local) - self.half_size
         d_vec = jnp.maximum(d, 0.0)
         outside = safe_norm(d_vec)
@@ -160,7 +161,7 @@ class HollowCylinderSDF(SDFObjectBase):
     r_inner: float
     is_2d_ring: bool = eqx.field(static=True)
 
-    def __init__(self, height, outer_radius, inner_radius, is_2d_ring=True):
+    def __init__(self, outer_radius, inner_radius,height=1.0, is_2d_ring=True):
         self.height = height
         self.r_outer = outer_radius
         self.r_inner = inner_radius

@@ -17,47 +17,68 @@ from typing import Self, Optional
 from jaxtyping import Float, Array
 
 from ..sdf.sdfobject import SDFObjectBase, SDFObjectState
-from .force import Force
+from .force import Force, BaseForceState
 from ..utils.math_helpers import safe_norm
 
 
 import jax
 import jax.numpy as jnp
 
+
 def apply_frictional_contact(
     v_in, dist, normal, v_wall, friction_coeff, dt, gap, bias_factor=0.0
 ):
-    """
-    Standard MPM Frictional Contact Logic.
-    Works for both Grid Nodes and Particle Ghost Velocities.
-    """
+
+    # relative velocity
     v_rel = v_in - v_wall
+
+    # Normal component magnitude
+    #  (positive if moving away, negative if approaching)
     v_n_mag = jnp.dot(v_rel, normal)
 
-    # 1. Normal Impulse (Kinematic)
-    # The velocity needed to reach the 'gap' distance in one timestep
-    v_bias = jnp.maximum(0.0, (gap - dist) / dt * bias_factor)
-    delta_v_kinematic = jnp.maximum(0.0, v_bias - v_n_mag)
+    # 2. Collision Criteria (Logic Gate)
+    # We collide if we are within the gap AND moving towards the wall
+    is_inside = dist <= gap
+    # is_approaching = v_n_mag < 0.0
+    should_collide = is_inside
+
+    # ghost particles need to check this?
+    # is_approaching = v_n_mag < 0.0
+    # should_collide = is_inside & is_approaching
+
+    def handle_collision():
+        penalty_scale = 0.0
+        # bias pushes out if we are penetrating
+        # v_bias = (how much we are inside) / dt * factor
+        v_push_out = jnp.maximum(0.0, (gap - dist) * 0.0)
+
+        v_push_out = jnp.minimum(v_push_out, 1.0)
+        dv_n_mag = jnp.maximum(0.0, -v_n_mag + v_push_out)
+
+        # resolve normal velocity (non-penetration)
+        v_corrected_n = v_in + dv_n_mag * normal
+
+        v_rel_corrected = v_corrected_n - v_wall
+        v_n_vec = jnp.dot(v_rel_corrected, normal) * normal
+
+        v_t_vec = v_rel_corrected - v_n_vec
+        vt_mag = safe_norm(v_t_vec)
+
+        # Coulomb Law: Friction Limit
+        friction_limit = friction_coeff * dv_n_mag
+        reduction = jnp.where(vt_mag > 1e-20, jnp.minimum(vt_mag, friction_limit), 0.0)
+
+        # Apply reduction safely
+        v_t_frictional = v_t_vec * (1.0 - reduction / (vt_mag + 1e-20))
+
+        return v_wall + v_n_vec + v_t_frictional
+
+    return jax.lax.cond(should_collide, handle_collision, lambda: v_in)
 
 
-    # 3. Resolve Normal Velocity (Non-penetration)
-    v_corrected_n = v_in + delta_v_kinematic * normal
+class SDFColliderState(BaseForceState):
+    pass
 
-    # 4. Resolve Tangential Velocity (Friction)
-    v_rel_corrected = v_corrected_n - v_wall
-    v_n_vec = jnp.dot(v_rel_corrected, normal) * normal
-    v_t_vec = v_rel_corrected - v_n_vec
-    vt_mag = safe_norm(v_t_vec, eps=1e-12)
-
-    # Coulomb Law: Friction Limit
-    friction_limit = friction_coeff * delta_v_kinematic
-    reduction = jnp.where(vt_mag > 1e-12, jnp.minimum(vt_mag, friction_limit), 0.0)
-
-    # Apply reduction safely
-    v_t_frictional = v_t_vec * (1.0 - reduction / (vt_mag + 1e-12))
-
-    # Final Velocity = Wall + Normal Component + Frictional Tangent
-    return v_wall + v_n_vec + v_t_frictional
 
 class SDFCollider(Force):
     """
@@ -99,41 +120,12 @@ class SDFCollider(Force):
         self.gap = gap
         self.base_friction = friction
 
-
-
-
-    def create_state(
-        self,
-        center_of_mass: Float[Array, "dim"],
-        velocity: Optional[Float[Array, "dim"]] = None,
-        angular_velocity: Optional[float | Float[Array, ""] | Float[Array, "3"]] = None,
-        rotation: Optional[float | Float[Array, ""] | Float[Array, "4"]] = None,
-    ) -> Self:
-        """Helper function to create default SDFObjectState"""
-        dim = center_of_mass.shape[0]
-        if velocity is None:
-            velocity = jnp.zeros(dim)
-
-        if dim == 2:
-            if angular_velocity is None:
-                angular_velocity = 0.0
-            if rotation is None:
-                rotation = 0.0
-        else:
-            if angular_velocity is None:
-                angular_velocity = jnp.zeros(3)
-            if rotation is None:
-                rotation = jnp.array([1.0, 0.0, 0.0, 0.0])
-        return SDFObjectState(
-            center_of_mass=center_of_mass,
-            velocity=velocity,
-            angular_velocity=angular_velocity,
-            rotation=rotation,
-        )
+    def create_state(self) -> Self:
+        return SDFColliderState()
 
     def apply_grid_moments(
-      self, world, mechanics, sim_cache, sdf_logics, couplings, grid_domains, dt, time
-            ):
+        self, world, mechanics, sim_cache, sdf_logics, couplings, grid_domains, dt, time
+    ):
         """
         Projects grid momentum to satisfy the boundary condition.
         """
@@ -147,26 +139,17 @@ class SDFCollider(Force):
 
         sdf_state = list(world.sdfs)[self.sdf_idx]
 
-
         for g_idx in self.g_idx_list:
 
             grid_domain = grid_domains[g_idx]
             grid_cache = grid_caches[g_idx]
 
-            node_geom =sim_cache.node_geoms[(g_idx, self.sdf_idx)]
+            node_geom = sim_cache.node_geoms[(g_idx, self.sdf_idx)]
 
-            # Generate node coordinates compatible with C-Contiguous (Row-Major) layout
-            # (Nx, Ny, Nz, 3)
-            # indices = jnp.indices(grid_domain.grid_size, dtype=jnp.float32)
-            # coords = jnp.moveaxis(indices, 0, -1) * grid_domain.cell_size + jnp.array(
-            #     grid_domain.origin
-            # )
-            # flat_coords = coords.reshape(-1, grid_domain.dim)
-
-            # Safe mass inversion: avoid 1/0 NaN gradient by replacing zero mass
-            # with 1.0 before dividing, then masking the result.
-            safe_mass = jnp.where(grid_cache.mass_stack > 1e-14, grid_cache.mass_stack, 1.0)
-            inv_mass = jnp.where(grid_cache.mass_stack > 1e-14, 1.0 / safe_mass, 0.0)
+            # Get current  grid velocity
+            inv_mass = jnp.where(
+                grid_cache.mass_stack > 1e-14, 1.0 / grid_cache.mass_stack, 0.0
+            )
             vel = grid_cache.moment_nt_stack * inv_mass[:, None]
 
             # Compute quantities from SDF object
@@ -202,7 +185,6 @@ class SDFCollider(Force):
             # update global grid state
             grid_caches[g_idx] = new_grid
 
-
         sim_cache = eqx.tree_at(
             lambda s: (s.grids,),
             sim_cache,
@@ -216,25 +198,6 @@ class SDFCollider(Force):
         Calculates collision for a single node.
         """
 
-        # v_n < 0 means moving INTO the wall
-        v_rel = v_node - v_object
-        v_n_mag = jnp.dot(v_rel, normal)
-        # Check Inside/Touching AND Moving Inward
-        # dist <= 0 implies we are behind the plane
-
-        is_inside = dist <= 0.0
-
-        is_approaching = (dist <= 0.0) & (v_n_mag < 0.0)
-        should_collide = is_inside | is_approaching
-
-        def handle_collision(v_in):
-            return apply_frictional_contact(
-            v_in, dist, normal, v_object, friction, dt, self.gap, bias_factor=0.0
-            )
-
-        return jax.lax.cond(
-            should_collide,
-            handle_collision,  # Updates velocity
-            lambda v: v,  # No collision, return original velocity
-            v_node,
+        return apply_frictional_contact(
+            v_node, dist, normal, v_object, friction, dt, self.gap, bias_factor=0.0
         )

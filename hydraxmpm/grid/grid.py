@@ -26,7 +26,7 @@ class GridDomain(eqx.Module):
         end: End coordinates of the grid
         cell_size: Size of each grid cell
         grid_size: Number of grid nodes along each dimension
-
+    
     """
     origin: tuple = eqx.field(static=True)
     end: tuple = eqx.field(static=True)

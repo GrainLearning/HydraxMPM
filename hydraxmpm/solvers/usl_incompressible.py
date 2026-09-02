@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
-from ..constitutive_laws.mu_i_rheology import (
+from ..constitutive_laws.mu_i_incompressible import (
     MuI_Incompressible,
     MuIIncompressibleState,
 )
