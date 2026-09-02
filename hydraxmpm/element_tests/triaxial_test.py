@@ -64,8 +64,17 @@ class TriaxialTest(eqx.Module):
                     L = L.at[0, 2, 2].set(curr_rate)  # L_33
 
                     mp_out, _ = self.solver.step(mp, law, L, curr_dt)
-                    sigma_xx = mp_out.stress_stack[0, 0, 0]
-                    mean_pressure = jnp.trace(mp_out.stress_stack[0]) / 3.0
+
+                    tau = mp_out.stress_stack[0]
+
+
+                    J = mp_out.volume_stack[0] / (mp_out.volume0_stack[0] + 1e-12)
+
+                    sigma = tau / J
+                    
+                    
+                    sigma_xx = sigma[0, 0]
+                    mean_pressure = jnp.trace(sigma) / 3.0
 
                     return jax.lax.cond(
                         self.is_p_constant,
@@ -132,11 +141,7 @@ class TriaxialTest(eqx.Module):
             return scan_outer(carry, idx)
 
         def run_inner(carry, indices_chunk):
-
-
             segment_final_state, _ = jax.lax.scan(static_run, carry, indices_chunk)
-
-
             return segment_final_state, segment_final_state
 
         num_steps = (

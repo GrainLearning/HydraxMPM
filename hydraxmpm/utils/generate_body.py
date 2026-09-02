@@ -66,6 +66,8 @@ def generate_particles_in_sdf(
             # e.g., 2 points -> [0.25, 0.75]
             lin = jnp.linspace(0, 1, pts_per_dim * 2 + 1)[1::2]
 
+            lin = lin * cell_size
+
             offset_meshes = jnp.meshgrid(*([lin] * dim), indexing="ij")
             offsets = jnp.stack(offset_meshes, axis=-1).reshape(-1, dim)
 

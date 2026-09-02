@@ -45,6 +45,46 @@ from ..sdf.sdfobject import SDFObjectBase, SDFObjectState
 
 from ..grid.grid import GridDomain, GridArrays
 
+from ..utils.math_helpers import get_pressure
+
+def apply_nodal_pressure_smoothing(
+    stress_stack: Float[Array, "num_points 3 3"],
+    mp_state: MaterialPointState,
+    intr_cache: InteractionCache,
+    grid_mass_stack: Float[Array, "num_grid_nodes"],
+    num_grid_nodes: int,
+    dim: int
+) -> Float[Array, "num_points 3 3"]:
+    """
+    Smooths the pressure field using nodal averaging .
+    sigma_new = sigma_old + (P_noisy - P_smoothed) * I
+    """
+    #  Compute the "Noisy" Pressure from current stress 
+    p_noisy = get_pressure(stress_stack)
+    
+    # Gather particle data to interaction level for scattering
+    intr_p = p_noisy.at[intr_cache.point_ids].get()
+    intr_mass = mp_state.mass_stack.at[intr_cache.point_ids].get()
+    
+    # P2G: Scatter weighted pressure to the grid
+    weighted_p = intr_cache.shape_vals * intr_mass * intr_p
+    node_p_num = jnp.zeros((num_grid_nodes,)).at[intr_cache.node_hashes].add(weighted_p)
+    
+    # Compute Nodal Average Pressure
+    grid_p_avg = node_p_num / (grid_mass_stack + 1e-12)
+    
+    # G2P: Gather smoothed pressure back to particles
+    p_smoothed = jnp.zeros((stress_stack.shape[0],)).at[intr_cache.point_ids].add(
+        intr_cache.shape_vals * grid_p_avg.at[intr_cache.node_hashes].get()
+    )
+    
+    # Correct the Stress Tensor
+    p_diff = p_noisy - p_smoothed
+    
+
+    correction = p_diff[:, None, None] * jnp.eye(3)
+    
+    return stress_stack + correction
 
 class USLSolverState(BaseSolverState):
     """State class for USL Solver. Currently empty for type consistency."""
@@ -57,7 +97,7 @@ class USLSolver(BaseSolver):
 
 
     Attributes:
-        alpha: Blending factor between FLIP and PIC updates (0.0 = FLIP, 1.0 = PIC).
+        alpha: Blending factor between FLIP and PIC updates (0.0 = PIC, 1.0 = FLIP).
         grid_domains: Spatial-computational spaces for grids.
         couplings: Defines how material connect to the spaces.
         constitutive_laws: Tuple of ConstitutiveLaw instances for material behavior.
@@ -79,7 +119,7 @@ class USLSolver(BaseSolver):
     active_p_ids: Tuple[int, ...] = eqx.field(static=True)
     active_g_ids: Tuple[int, ...] = eqx.field(static=True)
 
-    sdf_mp_sharpness: float = eqx.field(static=True, default=1000.0)
+    cpic_sharpness: float = eqx.field(static=True, default=10.0)
 
     def __init__(
         self,
@@ -90,7 +130,7 @@ class USLSolver(BaseSolver):
         forces: Optional[Tuple[Force, ...]] = (),
         sdf_logics: Optional[Tuple[SDFObjectBase, ...]] = (),
         alpha=0.99,
-        sdf_mp_sharpness: float = 1000.0,
+        cpic_sharpness: float = 10.0,
     ):
         self.constitutive_laws = constitutive_laws
         self.couplings = couplings
@@ -99,7 +139,7 @@ class USLSolver(BaseSolver):
         self.grid_domains = grid_domains
         self.alpha = alpha
 
-        self.sdf_mp_sharpness = sdf_mp_sharpness
+        self.cpic_sharpness = cpic_sharpness
         p_set = sorted(list(set(c.p_idx for c in couplings)))
         g_set = sorted(list(set(c.g_idx for c in couplings)))
 
@@ -216,9 +256,9 @@ class USLSolver(BaseSolver):
             mp = mp_states[p_id]
             if isinstance(mp, MaterialPointState):
                 mp_states[p_id] = eqx.tree_at(
-                    lambda s: (s.L_stack, s.force_stack),
+                    lambda s: (s.F_inc_stack, s.force_stack),
                     mp,
-                    (mp.L_stack.at[:].set(0.0), mp.force_stack.at[:].set(0.0)),
+                    (mp.F_inc_stack.at[:].set(0.0), mp.force_stack.at[:].set(0.0)),
                 )
 
         # Repack
@@ -268,7 +308,10 @@ class USLSolver(BaseSolver):
                 )
 
                 # C. Accumulate Union (For CPIC)
-                is_in = jax.nn.sigmoid(-dists * self.sdf_mp_sharpness).squeeze()
+                # is_in = jax.nn.sigmoid(-dists * self.sdf_mp_sharpness).squeeze()
+                # is_in = jax.nn.sigmoid(-dists * sharpness).squeeze()
+                # epsilon = domain.cell_size * 0.25
+                is_in = (dists <= 0.0).astype(jnp.float32)
                 union_mask = jnp.maximum(union_mask, is_in)
 
             grid_union_masks[g_idx] = union_mask
@@ -278,37 +321,45 @@ class USLSolver(BaseSolver):
     def _get_particle_sdfs(self, world, sim_cache, dt, time):
 
         mp_union_masks = {}
-
-        for p_idx, mp_state in enumerate(world.material_points):
+        for c in self.couplings:
+            p_idx, g_idx = c.p_idx, c.g_idx
+            mp_state = world.material_points[p_idx]
+            domain = self.grid_domains[g_idx]
 
             union_mask = jnp.zeros(mp_state.num_points)
+            sharpness = self.cpic_sharpness/ domain.cell_size
+            for p_idx, mp_state in enumerate(world.material_points):
 
-            for s_idx, sdf_logic in enumerate(self.sdf_logics):
-                sdf_state = world.sdfs[s_idx]
+                for s_idx, sdf_logic in enumerate(self.sdf_logics):
+                    sdf_state = world.sdfs[s_idx]
 
-                dists = sdf_logic.get_signed_distance_stack(
-                    sdf_state, mp_state.position_stack
-                )
-                normals = sdf_logic.get_normal_stack(sdf_state, mp_state.position_stack)
-                wall_vels = sdf_logic.get_velocity_stack(
-                    sdf_state, mp_state.position_stack, dt
-                )
-                frictions = sdf_logic.get_surface_friction_stack(
-                    sdf_state, mp_state.position_stack
-                )
+                    dists = sdf_logic.get_signed_distance_stack(
+                        sdf_state, mp_state.position_stack
+                    )
 
-                sim_cache.mp_geoms[(p_idx, s_idx)] = ParticleGeometry(
-                    dists=dists,
-                    normals=normals,
-                    wall_vels=wall_vels,
-                    friction=frictions,
-                )
+                    normals = sdf_logic.get_normal_stack(sdf_state, mp_state.position_stack)
+                    wall_vels = sdf_logic.get_velocity_stack(
+                        sdf_state, mp_state.position_stack, dt
+                    )
+                    frictions = sdf_logic.get_surface_friction_stack(
+                        sdf_state, mp_state.position_stack
+                    )
 
-                # C. Accumulate Union (For CPIC)
-                is_in = jax.nn.sigmoid(-dists * self.sdf_mp_sharpness)
-                union_mask = jnp.maximum(union_mask, is_in)
+                    sim_cache.mp_geoms[(p_idx, s_idx)] = ParticleGeometry(
+                        dists=dists,
+                        normals=normals,
+                        wall_vels=wall_vels,
+                        friction=frictions,
+                    )
 
-            mp_union_masks[p_idx] = union_mask
+                    # C. Accumulate Union (For CPIC)
+                    # is_in = jax.nn.sigmoid(-dists * self.sdf_mp_sharpness)
+                    # is_in = (dists <= 0.0).astype(jnp.float32)
+                    # is_in = jax.nn.sigmoid(-dists *sharpness).squeeze()
+                    is_in = (dists <= 0.0).astype(jnp.float32)
+                    union_mask = jnp.maximum(union_mask, is_in)
+
+                mp_union_masks[p_idx] = union_mask
 
         return sim_cache, mp_union_masks
 
@@ -350,74 +401,132 @@ class USLSolver(BaseSolver):
                 d_mid = sdf_logic.get_signed_distance_stack(
                     sdf_state, midpoint_pos_stack
                 )
-                is_in = jax.nn.sigmoid(-d_mid * self.sdf_mp_sharpness).squeeze()
-
+                # is_in = jax.nn.sigmoid(-d_mid * self.cpic_sharpness).squeeze()
+                is_in = (d_mid <= 0.0).astype(jnp.float32)
                 mid_in_mask_flat = jnp.maximum(mid_in_mask_flat, is_in)
 
             midpoint_masks[(c.p_idx, c.g_idx)] = mid_in_mask_flat
 
         return sim_cache, midpoint_masks
 
+    # def _sdf_correction_connectivity(
+    #     self,
+    #     world,
+    #     sim_cache,
+    #     grid_union_masks,
+    #     mp_union_masks,
+    #     midpoint_masks,
+    #     dt,
+    #     time,
+    # ):
+    #     """
+    #     CPIC-style correction of shape functions based on SDF objects.
+
+    #     """
+    #     if len(self.sdf_logics) == 0:
+    #         return sim_cache
+
+    #     for c in self.couplings:
+    #         intr_cache = sim_cache.interactions[(c.p_idx, c.g_idx)]
+    #         mp_state = world.material_points[c.p_idx]
+    #         grid_domain = self.grid_domains[c.g_idx]
+
+    #         # We act on the shape (N, stencil size e.g., 27 for quadratic 3D)
+    #         # num_interactions
+    #         stencil_size = intr_cache.shape_vals.size // mp_state.num_points
+    #         point_interaction_shape = (mp_state.num_points, stencil_size)
+
+    #         # is particle inside any SDF?
+    #         mp_is_in = mp_union_masks[c.p_idx]
+    #         mp_is_out = 1.0 - mp_is_in
+
+    #         # is node inside any SDF?
+    #         node_is_in_flat = grid_union_masks[c.g_idx]
+    #         intr_node_is_in = node_is_in_flat.at[intr_cache.node_hashes].get()
+    #         intr_node_is_in = intr_node_is_in.reshape(point_interaction_shape)
+
+    #         # is any mid point inside any SDF?
+    #         mid_in_mask_flat = midpoint_masks[(c.p_idx, c.g_idx)]
+    #         mid_in_mask = mid_in_mask_flat.reshape(point_interaction_shape)
+
+    #         # we block the interaction if node OR midpoint is inside
+    #         path_blocked = jnp.maximum(intr_node_is_in, mid_in_mask)
+
+    #         # interaction is incompatible if particle is outside and path is blocked
+    #         incompatible = mp_is_out[:, None] * path_blocked
+
+    #         compatible_mask = (1.0 - incompatible).reshape(-1)
+
+    #         new_interactions = sim_cache.interactions.copy()
+
+    #         new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
+    #             lambda i: i.cpic_mask, intr_cache, compatible_mask
+    #         )
+    #         # for debug
+    #         # new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
+    #         #     lambda i: i.cpic_mask, intr_cache, jnp.ones_like(compatible_mask)
+    #         # )
+    #         sim_cache = eqx.tree_at(
+    #             lambda s: s.interactions, sim_cache, new_interactions
+    #         )
+    #     return sim_cache
+
     def _sdf_correction_connectivity(
-        self,
-        world,
-        sim_cache,
-        grid_union_masks,
-        mp_union_masks,
-        midpoint_masks,
-        dt,
-        time,
-    ):
-        """
-        CPIC-style correction of shape functions based on SDF objects.
+            self,
+            world,
+            sim_cache,
+            grid_union_masks,
+            mp_union_masks,
+            midpoint_masks,
+            dt,
+            time,
+        ):
+            """
+            CPIC-style correction of shape functions based on SDF objects.
+            Midpoint check is temporarily disabled for debugging.
+            """
+            if len(self.sdf_logics) == 0:
+                return sim_cache
 
-        """
-        if len(self.sdf_logics) == 0:
+            for c in self.couplings:
+                intr_cache = sim_cache.interactions[(c.p_idx, c.g_idx)]
+                mp_state = world.material_points[c.p_idx]
+                grid_domain = self.grid_domains[c.g_idx]
+
+                stencil_size = intr_cache.shape_vals.size // mp_state.num_points
+                point_interaction_shape = (mp_state.num_points, stencil_size)
+
+                # 1. Particle state
+                mp_is_in = mp_union_masks[c.p_idx]
+                mp_is_out = 1.0 - mp_is_in
+
+                # 2. Node state
+                node_is_in_flat = grid_union_masks[c.g_idx]
+                intr_node_is_in = node_is_in_flat.at[intr_cache.node_hashes].get()
+                intr_node_is_in = intr_node_is_in.reshape(point_interaction_shape)
+
+                # 3. Path blockage (DISABLE MIDPOINT HERE)
+                # path_blocked = jnp.maximum(intr_node_is_in, mid_in_mask) # Original
+                path_blocked = intr_node_is_in # Temporary: only care if node is inside
+
+                # 4. Compute Compatibility
+                # interaction is incompatible if particle is outside and the node is inside
+                incompatible = mp_is_out[:, None] * path_blocked
+                compatible_mask = (1.0 - incompatible).reshape(-1)
+
+                # 5. Update Cache
+                new_interactions = sim_cache.interactions.copy()
+                new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
+                    lambda i: i.cpic_mask, intr_cache, compatible_mask
+                )
+                new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
+                    lambda i: i.cpic_mask, intr_cache, jnp.ones_like(compatible_mask)
+                )
+
+                sim_cache = eqx.tree_at(
+                    lambda s: s.interactions, sim_cache, new_interactions
+                )
             return sim_cache
-
-        for c in self.couplings:
-            intr_cache = sim_cache.interactions[(c.p_idx, c.g_idx)]
-            mp_state = world.material_points[c.p_idx]
-            grid_domain = self.grid_domains[c.g_idx]
-
-            # We act on the shape (N, stencil size e.g., 27 for quadratic 3D)
-            # num_interactions
-            stencil_size = intr_cache.shape_vals.size // mp_state.num_points
-            point_interaction_shape = (mp_state.num_points, stencil_size)
-
-            # is particle inside any SDF?
-            mp_is_in = mp_union_masks[c.p_idx]
-            mp_is_out = 1.0 - mp_is_in
-
-            # is node inside any SDF?
-            node_is_in_flat = grid_union_masks[c.g_idx]
-            intr_node_is_in = node_is_in_flat.at[intr_cache.node_hashes].get()
-            intr_node_is_in = intr_node_is_in.reshape(point_interaction_shape)
-
-            # is any mid point inside any SDF?
-            mid_in_mask_flat = midpoint_masks[(c.p_idx, c.g_idx)]
-            mid_in_mask = mid_in_mask_flat.reshape(point_interaction_shape)
-
-            # we block the interaction if node OR midpoint is inside
-            path_blocked = jnp.maximum(intr_node_is_in, mid_in_mask)
-
-            # interaction is incompatible if particle is outside and path is blocked
-            incompatible = mp_is_out[:, None] * path_blocked
-
-            compatible_mask = (1.0 - incompatible).reshape(-1)
-
-            new_interactions = sim_cache.interactions.copy()
-            # new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
-            #     lambda i: i.cpic_mask, intr_cache, compatible_mask
-            # )
-
-            new_interactions[(c.p_idx, c.g_idx)] = eqx.tree_at(
-                lambda i: i.cpic_mask, intr_cache, jnp.ones_like(compatible_mask)
-            )
-            sim_cache = eqx.tree_at(
-                lambda s: s.interactions, sim_cache, new_interactions
-            )
-        return sim_cache
 
     def _p2g(self, world, mechanics, sim_cache, dt, time):
 
@@ -452,7 +561,10 @@ class USLSolver(BaseSolver):
             intr_velocities_stack = mp_state.velocity_stack.at[
                 intr_cache.point_ids
             ].get()
-            intr_volume_stack = mp_state.volume_stack.at[intr_cache.point_ids].get()
+            # intr_volume_stack = mp_state.volume_stack.at[intr_cache.point_ids].get()
+            
+            intr_volume0_stack = mp_state.volume0_stack.at[intr_cache.point_ids].get() 
+
             intr_ext_forces_stack = mp_state.force_stack.at[intr_cache.point_ids].get()
             intr_stress_stack = mp_state.stress_stack.at[intr_cache.point_ids].get()
 
@@ -480,8 +592,11 @@ class USLSolver(BaseSolver):
             intern_force_term_stack = intern_force_term_stack[:, : grid_cache.dim]
 
             # compression positive for forces
+            # weighted_intern_force_stack = (
+            #     1.0 * intr_volume_stack[:, None] * intern_force_term_stack
+            # ) * intr_cache.cpic_mask[:, None]
             weighted_intern_force_stack = (
-                1.0 * intr_volume_stack[:, None] * intern_force_term_stack
+                1.0 * intr_volume0_stack[:, None] * intern_force_term_stack
             ) * intr_cache.cpic_mask[:, None]
 
             # --- Scatter to grid ---
@@ -708,23 +823,22 @@ class USLSolver(BaseSolver):
 
             # compression positive
             F_inc = I - p_L * dt
-            p_F_next = jnp.einsum("ijk,ikl->ijl", F_inc, mp_state.F_stack)
 
+            
             if grid_cache.dim == 2:
                 p_F_next = p_F_next.at[:, 2, 2].set(1.0)
 
-            J = jnp.linalg.det(p_F_next)
-            p_volume_next = (J[:, None] * mp_state.volume0_stack[:, None]).squeeze()
+            J_inc = jnp.linalg.det(F_inc)
+            p_volume_next = mp_state.volume_stack * J_inc
             mp_state = eqx.tree_at(
                 lambda s: (
                     s.velocity_stack,
                     s.position_stack,
                     s.volume_stack,
-                    s.F_stack,
-                    s.L_stack,
+                    s.F_inc_stack
                 ),
                 mp_state,
-                (p_velocity_next, p_position_next, p_volume_next, p_F_next, p_L),
+                (p_velocity_next, p_position_next, p_volume_next, F_inc),
             )
             mp_states[c.p_idx] = mp_state
 
@@ -746,7 +860,7 @@ class USLSolver(BaseSolver):
 
             mp_state = mp_states[c.p_idx]
             constitutive_law_state = constitutive_law_states[c.c_idx]
-
+        
             # Update material point, and internal variables via constitutive law
             mp_state, constitutive_law_state = self.constitutive_laws[c.c_idx].update(
                 mp_state,
@@ -754,11 +868,23 @@ class USLSolver(BaseSolver):
                 dt,
             )
 
-            # Remove shear strain from deformation gradient if required
-            # by certain constitutive laws
-            mp_state = self.constitutive_laws[c.c_idx].remove_accumulated_shear(
-                mp_state
-            )
+                
+            grid_cache = sim_cache.grids[c.g_idx]
+            intr_cache = sim_cache.interactions[(c.p_idx, c.g_idx)]
+                    
+            # smoothed_stress = apply_nodal_pressure_smoothing(
+            #     stress_stack=mp_state.stress_stack,
+            #     mp_state=mp_state,
+            #     intr_cache=intr_cache,
+            #     grid_mass_stack=grid_cache.mass_stack,
+            #     num_grid_nodes=grid_cache.mass_stack.shape[0],
+            #     dim=grid_cache.dim
+            # )
+            # mp_state = eqx.tree_at(
+            #     lambda s: s.stress_stack, mp_state, smoothed_stress
+            # )
+
+   
 
             mp_states[c.p_idx] = mp_state
             constitutive_law_states[c.c_idx] = constitutive_law_state

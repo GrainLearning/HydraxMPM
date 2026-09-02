@@ -131,7 +131,7 @@ class MaterialPointState(BaseMaterialPointState):
          mass_stack: material point masses, assumed to remain constant throughout the simulation.
          volume_stack: Current particle volumes.
          volume0_stack: Initial particle volumes.
-         L_stack: Velocity gradient tensors.
+         F_inc_stack: Deformation gradient increment.
          stress_stack: Cauchy stress tensors.
          F_stack: Deformation gradient tensors.
          density_per_particle: Particle density. Defaults to 1000.0 if not provided.
@@ -144,11 +144,9 @@ class MaterialPointState(BaseMaterialPointState):
     force_stack: Float[Array, "num_points dim"]
     volume_stack: Float[Array, "num_points"]
     volume0_stack: Float[Array, "num_points"]
-    L_stack: Float[Array, "num_points 3 3"]
     stress_stack: Float[Array, "num_points 3 3"]
-    F_stack: Float[Array, "num_points 3 3"]
-    
-    F_store_stack: Optional[Float[Array, "num_points 3 3"]] = None
+    F_inc_stack: Float[Array, "num_points 3 3"]
+    F_stack: Optional[Float[Array, "num_points 3 3"]] 
 
     @classmethod
     def create(
@@ -160,7 +158,8 @@ class MaterialPointState(BaseMaterialPointState):
         mass_stack: Optional[Float[Array, "num_points"]] = None,
         volume_stack: Optional[Float[Array, "num_points"]] = None,
         volume0_stack: Optional[Float[Array, "num_points"]] = None,
-        L_stack: Optional[Float[Array, "num_points 3 3"]] = None,
+        density0_stack: Optional[Float[Array, "num_points"]] = None,
+        F_inc_stack: Optional[Float[Array, "num_points 3 3"]] = None,
         stress_stack: Optional[Float[Array, "num_points 3 3"]] = None,
         F_stack: Optional[Float[Array, "num_points 3 3"]] = None,
         store_F: bool = False,
@@ -190,7 +189,9 @@ class MaterialPointState(BaseMaterialPointState):
             stress_stack if stress_stack is not None else jnp.zeros((num_points, 3, 3))
         )
 
-        L_stack = L_stack if L_stack is not None else jnp.zeros((num_points, 3, 3))
+        F_inc_stack = (
+            F_inc_stack if F_inc_stack is not None else jnp.zeros((num_points, 3, 3))
+        )
 
         F_stack = (
             F_stack if F_stack is not None else jnp.tile(jnp.eye(3), (num_points, 1, 1))
@@ -204,17 +205,20 @@ class MaterialPointState(BaseMaterialPointState):
             default_volume = (cell_size**2) / points_per_cell
             volume_stack = jnp.ones(num_points) * default_volume
 
-        volume0_stack = volume0_stack if volume0_stack is not None else volume_stack
-
         # Default mass calculation if not provided, using density
         if mass_stack is None:
             density_stack = kwargs.get("density_stack", jnp.full((num_points,), 1000.0))
             mass_stack = volume_stack * density_stack
 
-        if store_F:
-            F_store_stack = F_stack
+        if density0_stack is None:
+            volume0_stack = volume0_stack if volume0_stack is not None else volume_stack
         else:
-            F_store_stack = None
+            volume0_stack = mass_stack / density0_stack    
+        
+        if store_F:
+            F_stack = F_stack
+        else:
+            F_stack = None
 
         return cls(
             position_stack=position_stack,
@@ -223,10 +227,9 @@ class MaterialPointState(BaseMaterialPointState):
             mass_stack=mass_stack,
             volume_stack=volume_stack,
             volume0_stack=volume0_stack,
-            L_stack=L_stack,
+            F_inc_stack=F_inc_stack,
             stress_stack=stress_stack,
             F_stack=F_stack,
-            F_store_stack = F_store_stack
         )
 
     @property
@@ -235,8 +238,8 @@ class MaterialPointState(BaseMaterialPointState):
         return self.mass_stack / (self.volume_stack + 1e-16)
 
     @property
-    def density_ref_stack(self):
-        """Get initial density of material points."""
+    def density0_stack(self):
+        """Get density of material points at zero strain."""
         return self.mass_stack / (self.volume0_stack + 1e-16)
 
     @property
@@ -257,7 +260,7 @@ class MaterialPointState(BaseMaterialPointState):
     def KE_stack(self):
         """Kinetic energy of material points."""
         # NotImplementedError("KE_stack property not implemented yet.")
-        return 0.5 * self.mass_stack * jnp.sum(self.velocity_stack ** 2, axis=-1)
+        return 0.5 * self.mass_stack * jnp.sum(self.velocity_stack**2, axis=-1)
 
     @property
     def q_stack(self):
@@ -278,13 +281,12 @@ class MaterialPointState(BaseMaterialPointState):
         # NotImplementedError("eps_stack property not implemented yet.")
         return get_hencky_strain_stack(self.F_stack)
 
-
     @property
     def stored_eps_stack(self):
         """Stored Hencky strain tensor of material points."""
         # NotImplementedError("stored_eps_stack property not implemented yet.")
-        return get_hencky_strain_stack(self.F_store_stack)
-    
+        return get_hencky_strain_stack(self.F_stack)
+
     @property
     def eps_v_stack(self):
         """Volumetric strain of material points."""
@@ -292,13 +294,16 @@ class MaterialPointState(BaseMaterialPointState):
         return get_volumetric_strain_stack(self.eps_stack)
 
     @property
-    def deps_dt_stack(self):
+    def deps_dt_stack(self, dt):
         """Strain rate tensor of material points."""
-        return get_strain_rate_tensor_stack(self.L_stack)
+        I = jnp.eye(3)
+        p_L = (I - self.F_inc_stack) / dt
+        return get_strain_rate_tensor_stack(p_L)
 
     @property
     def shear_strain_rate_stack(self):
         return get_shear_strain_vm_stack(self.deps_dt_stack)
+
     @property
     def shear_strain_stack(self):
         return get_shear_strain_vm_stack(self.eps_stack)

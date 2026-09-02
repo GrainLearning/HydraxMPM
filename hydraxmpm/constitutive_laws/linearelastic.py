@@ -18,7 +18,11 @@ from jaxtyping import Float, Array
 
 from typing import Any, Tuple, Optional, Self
 
-
+from ..utils.math_helpers import (
+    get_sym_tensor,
+    get_spin_tensor,
+    get_jaumann_increment,
+)
 def get_bulk_modulus(E, nu):
     return E / (3.0 * (1.0 - 2.0 * nu))
 
@@ -61,64 +65,67 @@ class LinearElasticLaw(ConstitutiveLaw):
     K: float | Float[Array, ""]
     lam: float | Float[Array, ""]
 
+    debug_convergence: bool = eqx.field(static=True, default=False)
+
     def __init__(
         self: Self,
         E: float | Float[Array, ""],
-        nu: float | Float[Array, ""],
-        requires_F_reset: bool = True,
+        nu: float | Float[Array, ""]
     ) -> Self:
         """Initialize the isotropic linear elastic material."""
 
         self.E = E
-
         self.nu = nu
 
         self.K = get_bulk_modulus(E, nu)
         self.G = get_shear_modulus(E, nu)
         self.lam = get_lame_modulus(E, nu)
 
-        self.requires_F_reset = requires_F_reset
-
     def create_state(
-        self,
-        material_points: MaterialPointState = None,
-        stress_ref_stack: Optional[Float[Array, "num_points 3 3"]] = None,
-        density_stack: Optional[Float[Array, "num_points"]] = None,
-    ) -> LinearElasticState:
-        """Create the constitutive law state for the given material points."""
+            self,
+            stress_stack_or_mp: MaterialPointState | Float[Array, "num_points 3 3"],
+        ) -> LinearElasticState:
+            """Create the constitutive law state."""
+            if isinstance(stress_stack_or_mp, MaterialPointState):
+                stress_ref = stress_stack_or_mp.stress_stack
+            else:
+                stress_ref = stress_stack_or_mp
 
-        if material_points is not None:
-            stress_ref_stack = material_points.stress_stack
-        elif density_stack is not None:
-            num_points = density_stack.shape[0]
-            stress_ref_stack = jnp.zeros((num_points, 3, 3))
-
-        return LinearElasticState(
-            stress_ref_stack=stress_ref_stack,
-        )
+            return LinearElasticState(stress_ref_stack=stress_ref)
 
     def _update_stress(
         self,
-        L: Float[Array, "3 3"],  # Velocity Gradient
+        F_inc: Float[Array, "3 3"],
         stress_prev: Float[Array, "3 3"],
-        dt,
+        rho: float | Float[Array, ""],
+        rho_0: float | Float[Array, ""],
+        dt: float | Float[Array, ""],
     ) -> Float[Array, "3 3"]:
 
-        # Strain rate symmetric part of velocity gradient L
-        deps_dt = 0.5 * (L + L.T)
+        L = (jnp.eye(3) - F_inc) / dt
+        D = get_sym_tensor(L)
+        W = get_spin_tensor(L)
+        deps = D * dt
 
-        deps = deps_dt * dt
+        stress_prev_rot = get_jaumann_increment(stress_prev, W, dt)
 
-        return (
-            stress_prev + self.lam * jnp.trace(deps) * jnp.eye(3) + 2.0 * self.G * deps
+        stress_next = (
+            stress_prev_rot + self.lam * jnp.trace(deps) * jnp.eye(3) + 2.0 * self.G * deps
         )
+
+        J = rho_0 / jnp.maximum(rho, 1e-9)
+        return J * stress_next
 
     def update(
         self, material_points_state: MaterialPointState, law_state, dt
     ) -> Tuple[MaterialPointState, Any]:
 
-        new_stress_stack = jax.vmap(self._update_stress, in_axes=(0, 0, None))(
-            material_points_state.L_stack, material_points_state.stress_stack, dt
+        new_stress_stack = jax.vmap(self._update_stress, in_axes=(0, 0, 0, 0, None))(
+            material_points_state.F_inc_stack,
+            material_points_state.stress_stack,
+            material_points_state.density_stack,
+            material_points_state.density0_stack,
+            dt,
         )
 
         new_material_points_state = eqx.tree_at(

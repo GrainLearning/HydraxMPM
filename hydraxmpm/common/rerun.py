@@ -103,7 +103,7 @@ class RerunVisualizer:
         self,
         app_name="HydraxMPM",
         recording_id=None,
-        root_path="Sim_A",
+        root_path="sim",
         mode="spawn",
         is_3d=False,
     ):
@@ -187,7 +187,7 @@ class RerunVisualizer:
         if dim == 2:
             _point_radius = np.sqrt(volumes / np.pi)
         elif dim == 3:
-            _point_radius = (3 * volumes / (4 * np.pi)) ** (1 / 3)
+            _point_radius = (3.0 * volumes / (4.0 * np.pi)) ** (1.0 / 3.0)
 
         _point_radius = _point_radius * scale_radius
 
@@ -400,3 +400,88 @@ class RerunVisualizer:
             except (RuntimeError, ValueError):
                 # Happens if object is fully outside or fully inside (no surface found)
                 pass
+
+
+    def log_p2g_array(
+            self,
+            state, 
+            solver,
+            v_min=None,
+            v_max=None,
+            property_name="velocity_stack", 
+            label="grid_field",
+            cmap=None,
+            scale_radius=0.3,
+            threshold=1e-6,  # Added: ignore values below this
+            alpha=1.0        # Added: 0.0 (transparent) to 1.0 (opaque)
+        ):
+            if cmap is None:
+                cmap = plt.get_cmap("turbo")
+            
+            # 1. Generate the grid data
+            # Note: 'values' corresponds to every node in the GridDomain
+            values = np.array(p2g_helper(state, solver, property_name, normalize=True))
+            
+            g_idx = solver.couplings[0].g_idx
+            domain = solver.grid_domains[g_idx]
+            positions = np.array(domain.position_stack) 
+
+            # 2. Calculate Magnitude for Thresholding and Normalization
+            if values.ndim > 1:
+                reduce_axes = tuple(range(1, values.ndim))
+                scalar_field = np.linalg.norm(values, axis=reduce_axes)
+            else:
+                scalar_field = values
+
+            scalar_field = np.nan_to_num(scalar_field)
+
+            # 3. Apply Threshold Mask (Important for MPM grid performance)
+            # We only want to log nodes that actually contain data
+            mask = scalar_field > threshold
+            if not np.any(mask):
+                return # Skip logging if grid is empty
+
+            active_positions = positions[mask]
+            active_scalar = scalar_field[mask]
+
+            # 4. Normalize and Map Colors
+            if v_min is None:
+                v_min = np.min(active_scalar)
+            if v_max is None:
+                v_max = np.max(active_scalar)
+
+            if v_max - v_min < 1e-6:
+                normalized = np.zeros_like(active_scalar)
+            else:
+                normalized = np.clip((active_scalar - v_min) / (v_max - v_min), 0, 1)
+
+            # cmap returns (N, 4) -> Red, Green, Blue, Alpha
+            colors = cmap(normalized)
+            
+            # 5. Apply Opacity
+            colors[:, 3] = alpha 
+
+            # 6. Log to Rerun
+            radius = domain.cell_size * scale_radius
+            
+            if domain.dim == 2:
+                vis_pos = active_positions.copy()
+                # Rerun flips Y axis for 2D visualizations
+                vis_pos[:, 1] = -vis_pos[:, 1]
+                rr.log(
+                    f"{self.root_path}/{label}",
+                    rr.Points2D(
+                        vis_pos,
+                        colors=colors,
+                        radii=radius,
+                    ),
+                )
+            else:
+                rr.log(
+                    f"{self.root_path}/{label}",
+                    rr.Points3D(
+                        active_positions,
+                        colors=colors,
+                        radii=radius,
+                    ),
+                )

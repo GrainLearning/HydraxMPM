@@ -124,6 +124,12 @@ class ModifiedCamClayState(ConstitutiveLawState):
 
 
 class ModifiedCamClay(ConstitutiveLaw):
+
+    NUM_NEWTON_ITERS: int = 10
+    NUM_RESIDUALS: int = 2
+    NUM_UNKNOWNS: int = 2
+    debug_convergence: bool = eqx.field(static=True, default=False)
+
     nu: float | Float[Array, ""]
     M: float | Float[Array, ""]
     lam: float | Float[Array, ""]
@@ -348,17 +354,18 @@ class ModifiedCamClay(ConstitutiveLaw):
         law_state,
         dt
     ):
-        specific_volume_stack = self.rho_p/mp_state.density_stack
-
-        new_stress, new_eps_e, new_p_c = jax.vmap(self._update_stress,
-            in_axes=(0,0,0,0,0,0,None))(
-            mp_state.L_stack,
+        new_stress, new_eps_e, new_p_c = jax.vmap(
+            self._update_stress,
+            in_axes=(0, 0, 0, 0, 0, 0, 0, None)
+        )(
+            mp_state.F_inc_stack,
             law_state.eps_e_stack,
             mp_state.stress_stack,
             law_state.p_c_stack,
             law_state.stress_ref_stack,
-            specific_volume_stack,
-            dt
+            mp_state.density_stack,
+            mp_state.density0_stack,
+            dt,
         )
 
 
@@ -374,21 +381,21 @@ class ModifiedCamClay(ConstitutiveLaw):
 
     def _update_stress(
         self,
-        L: Float[Array, "3 3"],
+        F_inc: Float[Array, "3 3"],
         eps_e_prev,
         stress_prev,
         p_c_prev,
         stress_ref,
-        specific_volume,
+        rho: float | Float[Array, ""],
+        rho_0: float | Float[Array, ""],
         dt
     ):
-
-    
-        D = get_sym_tensor(L) # symmetric part
-        W = get_spin_tensor(L) # skew-symmetric part
-
-
+        # compressive positive update
+        L = (jnp.eye(3) - F_inc) / dt
+        D = get_sym_tensor(L)
+        W = get_spin_tensor(L)
         deps_next = D * dt
+
 
         ### Apply objective stress rate (Jaumann) ###
         
@@ -551,16 +558,35 @@ class ModifiedCamClay(ConstitutiveLaw):
             return stress_next, eps_e_next, p_c_next
 
 
+        specific_volume = self.rho_p / jnp.maximum(rho, 1e-6)
+
         # We treat it as disconnected at low pressures
         stress_next, eps_e_next, p_c_next = jax.lax.cond(
-            specific_volume <= self.N*0.999999,
+            specific_volume <= self.N * 0.999999,
             lambda: jax.lax.cond(is_ep, pull_to_ys, elastic_update),
-            lambda: (0.0 * jnp.eye(3), eps_e_prev, p_c_prev),
+            lambda: (jnp.zeros((3, 3)), eps_e_prev, p_c_prev),
         )
 
+        J = rho_0 / jnp.maximum(rho, 1e-9)
+        return J * stress_next, eps_e_next, p_c_next
 
-        return stress_next, eps_e_next, p_c_next
+    def get_dt_crit(
+        self,
+        mp_state: MaterialPointState,
+        cell_size: float,
+        alpha: float = 0.5
+    ) -> Float[Array, ""]:
+        density = mp_state.mass_stack / mp_state.volume_stack
+        p = jnp.maximum(mp_state.pressure_stack, self.p_min_calc)
+        K = get_K(self.kap, p, self.K_min, self.K_max)
+        G = get_G(self.nu, K)
 
+        c_p = jnp.sqrt((K + (4.0 / 3.0) * G) / density)
+        vel_mag = jnp.linalg.norm(mp_state.velocity_stack, axis=1)
+        max_speed = jnp.max(c_p + vel_mag)
+
+        return (alpha * cell_size) / (max_speed + 1e-9)
+    
 # This code makes available helper functions on the class for user-facing API
 _helpers = (
     "yield_function",

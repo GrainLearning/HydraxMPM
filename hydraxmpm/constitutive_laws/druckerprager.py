@@ -39,7 +39,7 @@ class DruckerPrager(ConstitutiveLaw):
 
     - [1] de Souza Neto, Eduardo A., Djordje Peric, and David RJ Owen. Computational methods for plasticity: theory and applications. John Wiley & Sons, 2008.
     """
-
+    debug_convergence: bool = eqx.field(static=True, default=False)
     K: float | Float[Array, ""]
     G: float | Float[Array, ""]
     mu_1: float | Float[Array, ""]
@@ -60,7 +60,7 @@ class DruckerPrager(ConstitutiveLaw):
         mu_1_hat: float | Float[Array, ""] = 0.0,
         H: float | Float[Array, ""] = 0.0,
         rho_0: float | Float[Array, ""] = 1000.0,
-        requires_F_reset: bool = False,
+        debug_convergence: bool = False,
     ):
         self.K = K
         E = 3.0 * K * (1.0 - 2.0 * nu)
@@ -71,8 +71,27 @@ class DruckerPrager(ConstitutiveLaw):
         self.mu_1_hat = mu_1_hat
         self.H = H
         self.rho_0 = rho_0
-        self.requires_F_reset = requires_F_reset
+        self.debug_convergence = debug_convergence
 
+
+    def give_v_0_stack(self, density0_stack):
+        """Calculate reference specific volume v_0 = rho_p / rho_0."""
+        return self.rho_p / density0_stack
+
+    def give_density_stack(
+        self,
+        p_stack,
+        density0_stack,
+    ):
+        """Get current density given current pressure and reference density."""
+        # Point-wise specific volume: v_0 = rho_p / rho_0
+        v_0 = self.rho_p / density0_stack
+
+        # Specific volume at current pressure: v = v_0 * exp(-p / K)
+        v = v_0 * jnp.exp(-p_stack / self.K)
+
+        return self.rho_p / v
+    
     def create_state(self, stress_stack: Float[Array, "num_points 3 3"]) -> DruckerPragerState:
         """Initializes the material state."""
         num_points = stress_stack.shape[0]
@@ -96,39 +115,44 @@ class DruckerPrager(ConstitutiveLaw):
     ) -> Tuple[MaterialPointState, DruckerPragerState]:
         """Vectorized update for the MPM solver."""
 
-        new_stress, new_eps_e, new_eps_p_acc = jax.vmap(
+        new_stress_stack, new_eps_e_stack, new_eps_p_acc_stack = jax.vmap(
             self._update_stress,
-            in_axes=(0, 0, 0, 0, 0, 0, None)
+            in_axes=(0, 0, 0, 0, 0, 0, 0, None)
         )(
-            mp_state.L_stack,
+            mp_state.F_inc_stack,
             mp_state.stress_stack,
             law_state.eps_e_stack,
             law_state.eps_p_acc_stack,
             law_state.p_0_stack,
             mp_state.density_stack,
+            mp_state.density0_stack,
             dt
         )
 
-        new_mp = eqx.tree_at(lambda m: m.stress_stack, mp_state, new_stress)
+
+        new_mp = eqx.tree_at(lambda m: m.stress_stack, mp_state, new_stress_stack)
         new_law = eqx.tree_at(
             lambda l: (l.eps_e_stack, l.eps_p_acc_stack),
             law_state,
-            (new_eps_e, new_eps_p_acc)
+            (new_eps_e_stack, new_eps_p_acc_stack)
         )
 
         return new_mp, new_law
 
     def _update_stress(
         self,
-        L: Float[Array, "3 3"],
+        F_inc: Float[Array, "3 3"],
         stress_prev: Float[Array, "3 3"],
         eps_e_prev: Float[Array, "3 3"],
         eps_p_acc_prev: float | Float[Array, ""],
         p_0: float | Float[Array, ""],
         rho: float | Float[Array, ""],
+        rho_0: float | Float[Array, ""],
         dt: float | Float[Array, ""]
     ):
         # kinematics
+        # compression positive
+        L = (jnp.eye(3) - F_inc) / dt
         D = get_sym_tensor(L)
         W = get_spin_tensor(L)
         deps = D * dt
@@ -208,15 +232,14 @@ class DruckerPrager(ConstitutiveLaw):
             lambda: (jnp.zeros((3, 3)), jnp.zeros((3, 3)), eps_p_acc_prev)
         )
 
-        return stress_next, eps_e_next, eps_p_acc_next
+        J = rho_0 / jnp.maximum(rho, 1e-9)
+        return J*stress_next, eps_e_next, eps_p_acc_next
 
-    def get_dt_crit(self, mp_state: MaterialPointState, cell_size: float, alpha: float = 0.5):
-        """Critical timestep for stability based on P-wave speed."""
-        rho_stack = mp_state.rho_stack
+    def get_dt_crit(self, mp_state: MaterialPointState, cell_size: float, alpha: float = 0.5) -> Float[Array, ""]:
+            """Critical timestep for stability based on P-wave speed."""
 
-        c_p = jnp.sqrt((self.K + (4.0 / 3.0) * self.G) / rho_stack)
+            c_p = jnp.sqrt((self.K + (4.0 / 3.0) * self.G) / mp_state.density_stack )
+            vel_mag = jnp.linalg.norm(mp_state.velocity_stack, axis=1)
+            max_speed = jnp.max(c_p + vel_mag)
 
-        vel_mag = safe_norm(mp_state.velocity_stack, eps=1e-12, axis=1)
-        max_speed = jnp.max(c_p + vel_mag)
-
-        return (alpha * cell_size) / (max_speed + 1e-9)
+            return (alpha * cell_size) / (max_speed + 1e-9)
