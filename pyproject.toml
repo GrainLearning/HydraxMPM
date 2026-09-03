@@ -13,6 +13,15 @@ dependencies = [
     "rerun-sdk>=0.28.1",
     "optax>=0.2.6",
     "readme-md>=2018.11.23",
+<<<<<<< Updated upstream
+=======
+    "matplotlib>=3.11.1",
+    "pyqt5>=5.15.11",
+    "xlrd>=2.0.2",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.5",
+
+>>>>>>> Stashed changes
 ]
 authors = [
   {name = "Retief Lubbe", email = "r.lubbe@utwente.nl"},
@@ -36,7 +45,29 @@ cuda = [
     "jax[cuda12]>=0.4.30", 
 ]
 cpu = [
+<<<<<<< Updated upstream
     "jax[cpu]>=0.4.30",
+=======
+    "jax[cpu]>=0.4.30"
+]
+storage = [
+    "numcodecs>=0.16.5",
+    "zarr>=3.1.6",
+    "h5py>=3.14.0",
+]
+plot = [
+    "matplotlib>=3.10.8",
+    "pyvista[all]>=0.44.2",
+    "vtk>=9.5.2",
+    "seaborn>=0.13.2",
+
+]
+full-cuda = [
+    "hydraxmpm[cuda,storage,plot]"
+]
+full-cpu = [
+    "hydraxmpm[cpu,storage,plot]"
+>>>>>>> Stashed changes
 ]
 
 [dependency-groups]
