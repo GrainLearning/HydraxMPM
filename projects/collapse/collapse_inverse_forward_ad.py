@@ -31,6 +31,11 @@ from projects.collapse.collapse import (
     TOTAL_TIME,
     simulate_collapse,
 )
+from projects.collapse.utilities import (
+    build_restart_payload,
+    load_restart_state,
+    save_iteration_state,
+)
 
 jax.config.update("jax_enable_x64", True)
 
@@ -67,6 +72,7 @@ DEFAULT_LEARNING_RATE = 0.5
 DEFAULT_COHESION_LEARNING_RATE = 5.0
 DEFAULT_EARLY_STOPPING_PATIENCE = 50
 DEFAULT_EARLY_STOPPING_MIN_DELTA = 1.0e-10
+DEFAULT_CHECKPOINT_FREQUENCY = 25
 HEIGHT_PROFILE_SIZE = int(round((END[0] - ORIGIN[0]) / CELL_SIZE)) + 1
 
 
@@ -409,48 +415,6 @@ def loss_and_gradient(
     return loss, gradient, measures, jacobian
 
 
-def save_iteration_state(
-    iteration: int,
-    *,
-    loss: float | jax.Array,
-    friction_angle: float | jax.Array,
-    cohesion: float | jax.Array = REF_C0,
-    forward_steps: int,
-    output_dir: str | Path = ITERATION_DATA_DIR,
-) -> Path:
-    """Save one consistent loss, parameters, and terminal field checkpoint.
-
-    The saved loss, friction angle, and cohesion are the values at which the
-    optimizer gradient was evaluated. Computing the volume-fraction field
-    requires one additional primal collapse simulation; it is not in the loss.
-    """
-    from projects.collapse.collapse_inverse_forward_ad_plots import (
-        simulate_volume_fraction,
-    )
-
-    phi = float(friction_angle)
-    x, y, volume_fraction, crop_extent = simulate_volume_fraction(
-        phi,
-        cohesion=float(cohesion),
-        num_steps=forward_steps,
-    )
-    destination = Path(output_dir)
-    destination.mkdir(parents=True, exist_ok=True)
-    path = destination / f"collapse_inverse_iteration_{iteration:04d}.npz"
-    np.savez_compressed(
-        path,
-        iteration=np.asarray(iteration, dtype=np.int64),
-        loss=np.asarray(float(loss), dtype=np.float64),
-        friction_angle=np.asarray(phi, dtype=np.float64),
-        cohesion=np.asarray(float(cohesion), dtype=np.float64),
-        x=x,
-        y=y,
-        volume_fraction=volume_fraction,
-        crop_extent=np.asarray(crop_extent, dtype=np.float64),
-    )
-    return path
-
-
 def run_inverse_analysis(
     num_steps: int = 25,
     *,
@@ -467,11 +431,17 @@ def run_inverse_analysis(
     save_plots: bool = True,
     figure_dir: str | Path | None = None,
     save_iterations: bool = True,
+    checkpoint_frequency: int = DEFAULT_CHECKPOINT_FREQUENCY,
     iteration_dir: str | Path = ITERATION_DATA_DIR,
+    resume_from: str | Path | None = None,
 ) -> tuple[float | dict[ParameterKey, float], list[float]]:
     """Recover selected material parameters and save plots and checkpoints."""
     keys = normalize_measure_keys(measure_keys)
     selected_parameters = normalize_parameter_keys(parameter_keys)
+    if num_steps <= 0:
+        raise ValueError("num_steps must be positive")
+    if checkpoint_frequency <= 0:
+        raise ValueError("checkpoint_frequency must be positive")
     if early_stopping_patience == 0:
         early_stopping_patience = None
     if early_stopping_min_delta < 0.0:
@@ -518,24 +488,51 @@ def run_inverse_analysis(
     upper_bounds = jnp.asarray(
         [bounds[key][1] for key in selected_parameters], dtype=jnp.float64
     )
-    theta = jnp.clip(
+    initial_theta = jnp.clip(
         jnp.asarray([initial_values[key] for key in selected_parameters]),
         lower_bounds,
         upper_bounds,
     )
-    optimizer = optax.adam(
-        learning_rate=jnp.asarray(
-            [rates[key] for key in selected_parameters], dtype=theta.dtype
-        )
+    learning_rates = jnp.asarray(
+        [rates[key] for key in selected_parameters], dtype=initial_theta.dtype
     )
-    opt_state = optimizer.init(theta)
-    history: list[float] = []
-    parameter_history: dict[ParameterKey, list[float]] = {
-        key: [] for key in selected_parameters
-    }
-    best_loss = float("inf")
-    best_theta = np.asarray(theta, dtype=float)
-    iterations_without_improvement = 0
+    optimizer = optax.adam(
+        learning_rate=learning_rates
+    )
+    iteration_destination = Path(iteration_dir).expanduser().resolve()
+    if resume_from is None:
+        start_iteration = 0
+        theta = initial_theta
+        opt_state = optimizer.init(theta)
+        history: list[float] = []
+        parameter_history: dict[ParameterKey, list[float]] = {
+            key: [] for key in selected_parameters
+        }
+        best_loss = float("inf")
+        best_theta = np.asarray(theta, dtype=float)
+        iterations_without_improvement = 0
+    else:
+        restart = load_restart_state(
+            resume_from,
+            optimizer=optimizer,
+            parameter_keys=selected_parameters,
+            measure_keys=keys,
+            measure_weights=weight_values,
+            learning_rates=learning_rates,
+            forward_steps=forward_steps,
+            target_iterations=num_steps,
+            early_stopping_patience=early_stopping_patience,
+            early_stopping_min_delta=early_stopping_min_delta,
+            output_dir=iteration_destination,
+        )
+        start_iteration = restart.next_iteration
+        theta = restart.theta
+        opt_state = restart.opt_state
+        history = restart.history
+        parameter_history = restart.parameter_history
+        best_loss = restart.best_loss
+        best_theta = restart.best_theta
+        iterations_without_improvement = restart.iterations_without_improvement
     stopped_early = False
 
     print(
@@ -573,13 +570,20 @@ def run_inverse_analysis(
             )
     for key in selected_parameters:
         print(f"  constant learning rate {key}={rates[key]:.6e}")
+    if resume_from is not None:
+        print(
+            f"resuming from {Path(resume_from).expanduser().resolve()} | "
+            f"next iteration={start_iteration} | best loss={best_loss:.12e}"
+        )
     if early_stopping_patience is not None:
         print(
             f"early stopping patience={early_stopping_patience} | "
             f"minimum improvement={early_stopping_min_delta:.3e}"
         )
+    if save_iterations:
+        print(f"checkpoint frequency={checkpoint_frequency} iterations")
 
-    for step in range(num_steps):
+    for step in range(start_iteration, num_steps):
         evaluated_theta = np.asarray(theta, dtype=float)
         parameter_map = dict(zip(selected_parameters, evaluated_theta, strict=True))
         friction_angle = parameter_map.get("friction_angle", REF_PHI)
@@ -592,16 +596,6 @@ def run_inverse_analysis(
             num_steps=forward_steps,
             measure_weights=weight_values,
         )
-        if save_iterations:
-            checkpoint_path = save_iteration_state(
-                step,
-                loss=loss,
-                friction_angle=friction_angle,
-                cohesion=cohesion,
-                forward_steps=forward_steps,
-                output_dir=iteration_dir,
-            )
-            print(f"  saved iteration state: {checkpoint_path}")
         loss_value = float(loss)
         history.append(loss_value)
         for key, value in parameter_map.items():
@@ -644,24 +638,62 @@ def run_inverse_analysis(
         else:
             iterations_without_improvement += 1
 
-        if (
+        should_stop_early = (
             early_stopping_patience is not None
             and iterations_without_improvement >= early_stopping_patience
-        ):
+        )
+        if should_stop_early:
             stopped_early = True
             print(
                 f"early stopping at step {step}: no loss improvement greater "
                 f"than {early_stopping_min_delta:.3e} for "
                 f"{early_stopping_patience} evaluations"
             )
-            break
+            checkpoint_stop_reason = "early_stopping"
+        else:
+            updates, opt_state = optimizer.update(gradient, opt_state, theta)
+            theta = jnp.clip(
+                optax.apply_updates(theta, updates),
+                lower_bounds,
+                upper_bounds,
+            )
+            checkpoint_stop_reason = "iteration_limit" if step + 1 == num_steps else ""
 
-        updates, opt_state = optimizer.update(gradient, opt_state, theta)
-        theta = jnp.clip(
-            optax.apply_updates(theta, updates),
-            lower_bounds,
-            upper_bounds,
+        should_checkpoint = save_iterations and (
+            (step + 1) % checkpoint_frequency == 0
+            or should_stop_early
+            or step + 1 == num_steps
         )
+        if should_checkpoint:
+            checkpoint_path = save_iteration_state(
+                step,
+                loss=loss,
+                friction_angle=friction_angle,
+                cohesion=cohesion,
+                output_dir=iteration_destination,
+                restart_payload=build_restart_payload(
+                    next_iteration=step + 1,
+                    next_theta=theta,
+                    opt_state=opt_state,
+                    history=history,
+                    parameter_history=parameter_history,
+                    best_loss=best_loss,
+                    best_theta=best_theta,
+                    iterations_without_improvement=iterations_without_improvement,
+                    parameter_keys=selected_parameters,
+                    measure_keys=keys,
+                    measure_weights=weight_values,
+                    learning_rates=learning_rates,
+                    forward_steps=forward_steps,
+                    target_iterations=num_steps,
+                    early_stopping_patience=early_stopping_patience,
+                    early_stopping_min_delta=early_stopping_min_delta,
+                    stop_reason=checkpoint_stop_reason,
+                ),
+            )
+            print(f"  saved iteration state: {checkpoint_path}")
+        if should_stop_early:
+            break
 
     theta = jnp.asarray(best_theta, dtype=jnp.float64)
     recovered = {
@@ -748,12 +780,31 @@ def main() -> None:
         "--iteration-dir",
         type=Path,
         default=ITERATION_DATA_DIR,
-        help="directory for per-iteration loss, parameter, and field checkpoints",
+        help="directory for loss, parameter, and optimizer-state checkpoints",
+    )
+    parser.add_argument(
+        "--checkpoint-frequency",
+        type=int,
+        default=DEFAULT_CHECKPOINT_FREQUENCY,
+        help=(
+            "save a restart checkpoint every N completed iterations "
+            "and always at termination "
+            f"(default: {DEFAULT_CHECKPOINT_FREQUENCY})"
+        ),
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        help=(
+            "exactly resume Adam from a versioned iteration checkpoint; "
+            "--iterations remains the total target"
+        ),
     )
     parser.add_argument(
         "--no-iteration-data",
         action="store_true",
-        help="skip per-iteration volume-fraction checkpoints",
+        help="skip all periodic optimization checkpoints",
     )
     parser.add_argument(
         "--measures",
@@ -789,7 +840,9 @@ def main() -> None:
         save_plots=not args.no_plots,
         figure_dir=args.figure_dir,
         save_iterations=not args.no_iteration_data,
+        checkpoint_frequency=args.checkpoint_frequency,
         iteration_dir=args.iteration_dir,
+        resume_from=args.resume_from,
     )
 
 
