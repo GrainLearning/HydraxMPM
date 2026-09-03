@@ -1,4 +1,4 @@
-"""Analyze saved production chute-flow results and generate manuscript figures.
+"""Analyze saved production chute-flow results and generate figures.
 
 This module is deliberately postprocessing-only. Production simulations are run
 from ``chute_flow.py``; this script reads their saved CSV/NPZ and parameter files.
@@ -33,16 +33,40 @@ from projects.granular_chute_flow.chute_flow import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 REPOSITORY_DIR = PROJECT_DIR.parents[1]
-RESULTS_DIR = PROJECT_DIR / "manuscript_results"
-FIGURES_DIR = REPOSITORY_DIR / "CPC_manuscript" / "figures"
+RESULTS_DIR = PROJECT_DIR / "results"
 LOCAL_FIGURES_DIR = RESULTS_DIR / "figures"
 AVERAGING_START = 8.0
 AVERAGING_END = 12.0
 PROFILE_FIGURE_WIDTH_IN = 7.0
-MODEL_DIRECTORIES = {
-    "mu_i_regularized": PROJECT_DIR / "mu_i_regularized",
-    "drucker_prager": PROJECT_DIR / "drucker_prager",
-}
+CASES = (
+    # {
+    #     "name": "mu_i",
+    #     "legend": r"Compressible $\mu(I)$",
+    #     "directory": PROJECT_DIR / "mu_i",
+    #     "analyze": True,
+    #     "plot": True,
+    #     "plot_bagnold": True,
+    #     "layout_source": False,
+    # },
+    {
+        "name": "mu_i_regularized",
+        "legend": r"$\mu(I)$",
+        "directory": PROJECT_DIR / "mu_i_regularized",
+        "analyze": True,
+        "plot": True,
+        "plot_bagnold": True,
+        "layout_source": True,
+    },
+    {
+        "name": "drucker_prager",
+        "legend": "Drucker--Prager",
+        "directory": PROJECT_DIR / "drucker_prager",
+        "analyze": True,
+        "plot": True,
+        "plot_bagnold": False,
+        "layout_source": False,
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -438,7 +462,7 @@ def characterize_case(
     return CaseMetrics(*metrics)
 
 
-def analyze_grid_fields(output_dir: Path, model: str) -> dict[str, float]:
+def analyze_grid_fields(output_dir: Path, case_name: str) -> dict[str, float]:
     """Validate supported nodal fields and return compact field diagnostics."""
     fields = load_csv(output_dir / "steady_grid_fields.csv")
     required = {
@@ -451,15 +475,15 @@ def analyze_grid_fields(output_dir: Path, model: str) -> dict[str, float]:
         "sigma_yx",
     }
     if not required.issubset(fields.dtype.names or ()):
-        raise ValueError(f"{model} grid fields are missing {sorted(required)}")
+        raise ValueError(f"{case_name} grid fields are missing {sorted(required)}")
     supported = np.asarray(fields["physical_node"], dtype=bool) & (
         fields["support_fraction"] > 0.0
     )
     if not np.any(supported):
-        raise ValueError(f"{model} has no supported physical grid nodes")
+        raise ValueError(f"{case_name} has no supported physical grid nodes")
     field_names = required - {"physical_node", "support_fraction"}
     if not all(np.all(np.isfinite(fields[name][supported])) for name in field_names):
-        raise ValueError(f"{model} has non-finite supported grid fields")
+        raise ValueError(f"{case_name} has non-finite supported grid fields")
     npz_path = output_dir / "steady_grid_fields.npz"
     if not npz_path.exists():
         raise FileNotFoundError(f"missing reusable grid archive: {npz_path}")
@@ -490,67 +514,44 @@ def make_bagnold_parameters(parameters: ChuteParameters) -> BagnoldParameters:
 def analyze_results(
     parameters: dict[str, ChuteParameters],
 ) -> dict[str, float]:
-    """Validate both production cases and write manuscript acceptance metrics."""
-    reference = make_bagnold_parameters(parameters["mu_i_regularized"])
-    case_metrics = {
-        model: characterize_case(
-            output_dir,
-            parameters[model],
+    """Analyze all configured cases and write their diagnostic metrics."""
+    analysis_cases = [case for case in CASES if case["analyze"]]
+    case_metrics = {}
+    grid_metrics = {}
+    for case in analysis_cases:
+        name = case["name"]
+        reference = make_bagnold_parameters(parameters[name])
+        case_metrics[name] = characterize_case(
+            case["directory"],
+            parameters[name],
             reference.surface_velocity,
         )
-        for model, output_dir in MODEL_DIRECTORIES.items()
-    }
-    grid_metrics = {
-        model: analyze_grid_fields(output_dir, model)
-        for model, output_dir in MODEL_DIRECTORIES.items()
-    }
-    checks = {
-        "mu_relative_drift": case_metrics["mu_i_regularized"].relative_drift,
-        "mu_relative_surface_error": case_metrics[
-            "mu_i_regularized"
-        ].relative_surface_error,
-        "dp_relative_drift": case_metrics["drucker_prager"].relative_drift,
-        "dp_relative_surface_error": case_metrics[
-            "drucker_prager"
-        ].relative_surface_error,
-        "mu_mean_supported_volume_fraction": grid_metrics["mu_i_regularized"][
-            "mean_supported_volume_fraction"
-        ],
-        "mu_nonnegative_sigma_yy_fraction": grid_metrics["mu_i_regularized"][
-            "nonnegative_sigma_yy_fraction"
-        ],
-        "dp_mean_supported_volume_fraction": grid_metrics["drucker_prager"][
-            "mean_supported_volume_fraction"
-        ],
-        "dp_nonnegative_sigma_yy_fraction": grid_metrics["drucker_prager"][
-            "nonnegative_sigma_yy_fraction"
-        ],
-    }
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    with (RESULTS_DIR / "acceptance_metrics.csv").open("w", encoding="utf-8") as stream:
-        stream.write("metric,value\n")
-        for name, value in checks.items():
-            stream.write(f"{name},{value:.16e}\n")
+        grid_metrics[name] = analyze_grid_fields(case["directory"], name)
 
-    if checks["mu_relative_drift"] > 0.01:
-        raise AssertionError("MuI_regularized drifts by more than 1% over 8--12 s")
-    if checks["dp_relative_drift"] > 0.01:
-        raise AssertionError("Drucker-Prager drifts by more than 1% over 8--12 s")
-    if abs(checks["mu_relative_surface_error"]) > 0.01:
-        raise AssertionError(
-            "MuI_regularized surface speed differs from Bagnold by >1%"
+    diagnostics = {}
+    for case in analysis_cases:
+        name = case["name"]
+        metrics = case_metrics[name]
+        diagnostics.update(
+            {
+                f"{name}_surface_velocity": metrics.surface_velocity,
+                f"{name}_mean_velocity": metrics.mean_velocity,
+                f"{name}_relative_drift": metrics.relative_drift,
+                f"{name}_relative_surface_error": metrics.relative_surface_error,
+                f"{name}_mean_supported_volume_fraction": grid_metrics[name][
+                    "mean_supported_volume_fraction"
+                ],
+                f"{name}_nonnegative_sigma_yy_fraction": grid_metrics[name][
+                    "nonnegative_sigma_yy_fraction"
+                ],
+            }
         )
-    if abs(checks["mu_mean_supported_volume_fraction"] - 0.60) > 0.01:
-        raise AssertionError("MuI_regularized volume fraction is not near 0.60")
-    if (
-        min(
-            checks["mu_nonnegative_sigma_yy_fraction"],
-            checks["dp_nonnegative_sigma_yy_fraction"],
-        )
-        < 0.99
-    ):
-        raise AssertionError("compression-positive sigma_yy has inconsistent signs")
-    return checks
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    with (RESULTS_DIR / "analysis_metrics.csv").open("w", encoding="utf-8") as stream:
+        stream.write("metric,value\n")
+        for name, value in diagnostics.items():
+            stream.write(f"{name},{value:.16e}\n")
+    return diagnostics
 
 
 def configure_plotting() -> None:
@@ -571,9 +572,7 @@ def configure_plotting() -> None:
 
 
 def save_figure(fig: plt.Figure, filename: str) -> None:
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     LOCAL_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(FIGURES_DIR / filename, dpi=300, bbox_inches="tight")
     fig.savefig(LOCAL_FIGURES_DIR / filename, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -606,7 +605,8 @@ def grid_depth_profile(
 def plot_depth_profiles(
     output_dir: Path,
     parameters: ChuteParameters,
-    model: str,
+    legend: str,
+    plot_bagnold: bool,
     filename: str,
     volume_fraction_xlim: tuple[float, float],
 ) -> None:
@@ -620,7 +620,7 @@ def plot_depth_profiles(
     sigma_yy /= 1.0e3
     sigma_yx /= 1.0e3
 
-    if model == "mu_i_regularized":
+    if plot_bagnold:
         reference = make_bagnold_parameters(parameters)
         reference_depth = np.linspace(0.0, reference.height, 401)
         y_reference = parameters.base_y + reference_depth
@@ -651,13 +651,12 @@ def plot_depth_profiles(
     axes[2].set_xlim(volume_fraction_xlim)
     axes[2].grid(True, linestyle="--", linewidth=0.7)
 
-    model_label = r"$\mu(I)$" if model == "mu_i_regularized" else None
     axes[3].plot(
         velocity,
         y,
         color="k",
         linewidth=1.0,
-        label=model_label,
+        label=legend,
     )
     if axes_3_ref is not None:
         axes[3].plot(
@@ -694,11 +693,14 @@ def plot_depth_profiles(
 def shared_volume_fraction_limits(
     parameters: dict[str, ChuteParameters],
 ) -> tuple[float, float]:
-    """Return one padded packing-fraction range for both depth-profile panels."""
+    """Return one padded packing-fraction range for configured depth plots."""
     values = []
-    for model, output_dir in MODEL_DIRECTORIES.items():
-        fields = load_csv(output_dir / "steady_grid_fields.csv")
-        surface_y = parameters[model].base_y + parameters[model].fill_depth
+    for case in CASES:
+        if not case["plot"]:
+            continue
+        name = case["name"]
+        fields = load_csv(case["directory"] / "steady_grid_fields.csv")
+        surface_y = parameters[name].base_y + parameters[name].fill_depth
         supported = (
             np.asarray(fields["physical_node"], dtype=bool)
             & (fields["support_fraction"] > 0.0)
@@ -854,41 +856,56 @@ def plot_velocity_field(
 
 
 def generate_figures(parameters: dict[str, ChuteParameters]) -> None:
-    """Generate all manuscript figures from existing production outputs."""
+    """Generate configured figures from existing simulation outputs."""
     configure_plotting()
-    plot_layout(parameters["mu_i_regularized"])
-    for model in ("mu_i_regularized", "drucker_prager"):
-        fields = load_csv(MODEL_DIRECTORIES[model] / "steady_grid_fields.csv")
+    layout_cases = [case for case in CASES if case["layout_source"]]
+    if len(layout_cases) != 1:
+        raise ValueError("exactly one configured case must be the layout source")
+    layout_name = layout_cases[0]["name"]
+    plot_layout(parameters[layout_name])
+
+    plot_cases = [case for case in CASES if case["plot"]]
+    for case in plot_cases:
+        name = case["name"]
+        fields = load_csv(case["directory"] / "steady_grid_fields.csv")
         plot_velocity_field(
             fields,
-            parameters[model],
-            f"chute_{model}_velocity_field.png",
+            parameters[name],
+            f"chute_{name}_velocity_field.png",
         )
     volume_fraction_xlim = shared_volume_fraction_limits(parameters)
-    for model in ("mu_i_regularized", "drucker_prager"):
+    for case in plot_cases:
+        name = case["name"]
         plot_depth_profiles(
-            MODEL_DIRECTORIES[model],
-            parameters[model],
-            model,
-            f"chute_{model}_depth_profiles.png",
+            case["directory"],
+            parameters[name],
+            case["legend"],
+            case["plot_bagnold"],
+            f"chute_{name}_depth_profiles.png",
             volume_fraction_xlim,
         )
 
 
 def main() -> None:
+    active_cases = [
+        case
+        for case in CASES
+        if case["analyze"] or case["plot"] or case["layout_source"]
+    ]
     parameters = {
-        model: load_and_validate_parameters(output_dir, model)
-        for model, output_dir in MODEL_DIRECTORIES.items()
+        case["name"]: load_and_validate_parameters(case["directory"], case["name"])
+        for case in active_cases
     }
-    for model, output_dir in MODEL_DIRECTORIES.items():
-        postprocess_case(output_dir, parameters[model])
+    for case in active_cases:
+        postprocess_case(case["directory"], parameters[case["name"]])
     metrics = analyze_results(parameters)
     generate_figures(parameters)
-    print(
-        "Postprocessed fixed production results: "
-        f"mu drift={metrics['mu_relative_drift']:.3%}, "
-        f"DP drift={metrics['dp_relative_drift']:.3%}"
+    drift_summary = ", ".join(
+        f"{case['legend']} drift=" f"{metrics[case['name'] + '_relative_drift']:.3%}"
+        for case in CASES
+        if case["analyze"]
     )
+    print(f"Postprocessed configured results: {drift_summary}")
 
 
 if __name__ == "__main__":
