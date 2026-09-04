@@ -19,6 +19,7 @@ import optax
 
 import hydraxmpm  # noqa: F401 - Avoid a lazy import during a JAX trace.
 from projects.collapse.collapse import (
+    BASE_FRICTION,
     BULK_DENSITY,
     BULK_HEIGHT_CUTOFF,
     CELL_SIZE,
@@ -46,7 +47,7 @@ GlobalMeasureKey = Literal[
     "terminal_runout",
     "terminal_height_profile",
 ]
-ParameterKey = Literal["friction_angle", "cohesion"]
+ParameterKey = Literal["friction_angle", "cohesion", "base_friction"]
 
 GLOBAL_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = (
     "terminal_height",
@@ -55,21 +56,26 @@ GLOBAL_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = (
     "terminal_runout",
     "terminal_height_profile",
 )
-DEFAULT_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = (
-    "terminal_height_profile",
+DEFAULT_MEASURE_KEYS: tuple[GlobalMeasureKey, ...] = ("terminal_height_profile",)
+PARAMETER_KEYS: tuple[ParameterKey, ...] = (
+    "friction_angle",
+    "cohesion",
+    "base_friction",
 )
-PARAMETER_KEYS: tuple[ParameterKey, ...] = ("friction_angle", "cohesion")
 DEFAULT_PARAMETER_KEYS: tuple[ParameterKey, ...] = ("friction_angle",)
 
 REF_PHI = 20.0
 REF_C0 = 150.0
+REF_BASE_FRICTION = BASE_FRICTION
 PHI_BOUNDS = (5.0, 45.0)
 COHESION_BOUNDS = (0.0, 500.0)
+BASE_FRICTION_BOUNDS = (0.0, 2.0)
 TOTAL_STEPS = int(round(TOTAL_TIME / DT))
 SCALE_FLOOR = 1.0e-12
 ITERATION_DATA_DIR = Path(__file__).resolve().parent / "output" / "inverse_iterations"
 DEFAULT_LEARNING_RATE = 0.5
 DEFAULT_COHESION_LEARNING_RATE = 5.0
+DEFAULT_BASE_FRICTION_LEARNING_RATE = 0.05
 DEFAULT_EARLY_STOPPING_PATIENCE = 50
 DEFAULT_EARLY_STOPPING_MIN_DELTA = 1.0e-10
 DEFAULT_CHECKPOINT_FREQUENCY = 25
@@ -100,9 +106,7 @@ def normalize_parameter_keys(
 ) -> tuple[ParameterKey, ...]:
     """Validate parameter names and return a nonempty, duplicate-free tuple."""
     keys = (
-        (parameter_keys,)
-        if isinstance(parameter_keys, str)
-        else tuple(parameter_keys)
+        (parameter_keys,) if isinstance(parameter_keys, str) else tuple(parameter_keys)
     )
     if not keys:
         raise ValueError("at least one material parameter must be selected")
@@ -132,13 +136,14 @@ def _parameter_vector(
 def _unpack_parameters(
     parameters: jax.Array,
     parameter_keys: tuple[ParameterKey, ...],
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Combine selected values with fixed reference values."""
     values = {key: parameters[index] for index, key in enumerate(parameter_keys)}
     dtype = parameters.dtype
     return (
         values.get("friction_angle", jnp.asarray(REF_PHI, dtype=dtype)),
         values.get("cohesion", jnp.asarray(REF_C0, dtype=dtype)),
+        values.get("base_friction", jnp.asarray(REF_BASE_FRICTION, dtype=dtype)),
     )
 
 
@@ -201,10 +206,11 @@ def terminal_measures(
     keys = normalize_measure_keys(measure_keys)
     selected_parameters = normalize_parameter_keys(parameter_keys)
     theta = _parameter_vector(parameters, selected_parameters)
-    phi, cohesion = _unpack_parameters(theta, selected_parameters)
+    phi, cohesion, base_friction = _unpack_parameters(theta, selected_parameters)
     result = simulate_collapse(
         fric_angle=phi,
         c0=cohesion,
+        base_friction=base_friction,
         num_steps=num_steps,
         compute_local=False,
         compute_height_profile="terminal_height_profile" in keys,
@@ -322,7 +328,7 @@ def loss_and_gradient(
 
     ``L = 0.5 * sum(w * ((y - y*) / s) ** 2) / sum(w)``
 
-    ``dL/dphi = sum(w * ((y-y*)/s) * (dy/dphi)/s) / sum(w)``.
+    ``dL/dtheta = sum(w * ((y-y*)/s) * (dy/dtheta)/s) / sum(w)``.
 
     Scalar measures use their reference magnitude as the default scale. Height-
     profile components use the initial column height. A measure's loss weight
@@ -360,9 +366,7 @@ def loss_and_gradient(
                 )
             else:
                 default_scale_parts.append(jnp.abs(reference[component_slice]))
-        scale_values = jnp.maximum(
-            jnp.concatenate(default_scale_parts), SCALE_FLOOR
-        )
+        scale_values = jnp.maximum(jnp.concatenate(default_scale_parts), SCALE_FLOOR)
     else:
         scale_values = jnp.atleast_1d(jnp.asarray(scales, dtype=reference.dtype))
         if scale_values.shape == (1,) and expected_shape != (1,):
@@ -381,9 +385,7 @@ def loss_and_gradient(
     )
     positive_components = sum(
         size
-        for size, weight in zip(
-            component_sizes, measure_weight_values, strict=True
-        )
+        for size, weight in zip(component_sizes, measure_weight_values, strict=True)
         if float(weight) > 0.0
     )
     if positive_components < len(selected_parameters):
@@ -403,13 +405,16 @@ def loss_and_gradient(
     )
     weight_sum = jnp.sum(component_weights)
     loss = 0.5 * jnp.sum(component_weights * residuals**2) / weight_sum
-    gradient = jnp.sum(
-        component_weights[:, None]
-        * residuals[:, None]
-        * jacobian
-        / scale_values[:, None],
-        axis=0,
-    ) / weight_sum
+    gradient = (
+        jnp.sum(
+            component_weights[:, None]
+            * residuals[:, None]
+            * jacobian
+            / scale_values[:, None],
+            axis=0,
+        )
+        / weight_sum
+    )
     if len(selected_parameters) == 1:
         return loss, gradient[0], measures, jacobian[:, 0]
     return loss, gradient, measures, jacobian
@@ -424,8 +429,10 @@ def run_inverse_analysis(
     forward_steps: int = TOTAL_STEPS,
     phi_init: float = 10.0,
     cohesion_init: float = 100.0,
+    base_friction_init: float = 0.5,
     learning_rate: float = DEFAULT_LEARNING_RATE,
     cohesion_learning_rate: float = DEFAULT_COHESION_LEARNING_RATE,
+    base_friction_learning_rate: float = DEFAULT_BASE_FRICTION_LEARNING_RATE,
     early_stopping_patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
     early_stopping_min_delta: float = DEFAULT_EARLY_STOPPING_MIN_DELTA,
     save_plots: bool = True,
@@ -450,13 +457,28 @@ def run_inverse_analysis(
         raise ValueError("learning_rate must be positive")
     if cohesion_learning_rate <= 0.0:
         raise ValueError("cohesion_learning_rate must be positive")
+    if base_friction_learning_rate <= 0.0:
+        raise ValueError("base_friction_learning_rate must be positive")
 
-    reference_values = {"friction_angle": REF_PHI, "cohesion": REF_C0}
-    initial_values = {"friction_angle": phi_init, "cohesion": cohesion_init}
-    bounds = {"friction_angle": PHI_BOUNDS, "cohesion": COHESION_BOUNDS}
+    reference_values = {
+        "friction_angle": REF_PHI,
+        "cohesion": REF_C0,
+        "base_friction": REF_BASE_FRICTION,
+    }
+    initial_values = {
+        "friction_angle": phi_init,
+        "cohesion": cohesion_init,
+        "base_friction": base_friction_init,
+    }
+    bounds = {
+        "friction_angle": PHI_BOUNDS,
+        "cohesion": COHESION_BOUNDS,
+        "base_friction": BASE_FRICTION_BOUNDS,
+    }
     rates = {
         "friction_angle": learning_rate,
         "cohesion": cohesion_learning_rate,
+        "base_friction": base_friction_learning_rate,
     }
     reference_theta = jnp.asarray(
         [reference_values[key] for key in selected_parameters], dtype=jnp.float64
@@ -478,9 +500,7 @@ def run_inverse_analysis(
             "the number of positively weighted measures must be at least the "
             "number of inferred parameters"
         )
-    measure_fn = compiled_terminal_measures(
-        forward_steps, keys, selected_parameters
-    )
+    measure_fn = compiled_terminal_measures(forward_steps, keys, selected_parameters)
     reference = measure_fn(reference_theta)
     lower_bounds = jnp.asarray(
         [bounds[key][0] for key in selected_parameters], dtype=jnp.float64
@@ -496,9 +516,7 @@ def run_inverse_analysis(
     learning_rates = jnp.asarray(
         [rates[key] for key in selected_parameters], dtype=initial_theta.dtype
     )
-    optimizer = optax.adam(
-        learning_rate=learning_rates
-    )
+    optimizer = optax.adam(learning_rate=learning_rates)
     iteration_destination = Path(iteration_dir).expanduser().resolve()
     if resume_from is None:
         start_iteration = 0
@@ -536,7 +554,8 @@ def run_inverse_analysis(
     stopped_early = False
 
     print(
-        f"reference phi={REF_PHI:.6f} deg, c0={REF_C0:.6f} Pa | "
+        f"reference phi={REF_PHI:.6f} deg, c0={REF_C0:.6f} Pa, "
+        f"base_friction={REF_BASE_FRICTION:.6f} | "
         f"steps={forward_steps} | "
         f"measures={','.join(keys)} | parameters={','.join(selected_parameters)}"
     )
@@ -554,9 +573,7 @@ def run_inverse_analysis(
         if key == "terminal_height_profile":
             active = np.flatnonzero(np.asarray(values) >= BULK_HEIGHT_CUTOFF)
             endpoint = (
-                ORIGIN[0] + CELL_SIZE * int(active[-1])
-                if active.size
-                else ORIGIN[0]
+                ORIGIN[0] + CELL_SIZE * int(active[-1]) if active.size else ORIGIN[0]
             )
             print(
                 f"  reference {key}: {values.size} samples | "
@@ -588,6 +605,7 @@ def run_inverse_analysis(
         parameter_map = dict(zip(selected_parameters, evaluated_theta, strict=True))
         friction_angle = parameter_map.get("friction_angle", REF_PHI)
         cohesion = parameter_map.get("cohesion", REF_C0)
+        base_friction = parameter_map.get("base_friction", REF_BASE_FRICTION)
         loss, gradient, measures, sensitivities = loss_and_gradient(
             theta,
             reference,
@@ -603,10 +621,7 @@ def run_inverse_analysis(
         parameter_text = " | ".join(
             f"{key}={value:.6f}" for key, value in parameter_map.items()
         )
-        print(
-            f"step={step:03d} | loss={loss_value:.6e} | "
-            f"{parameter_text}"
-        )
+        print(f"step={step:03d} | loss={loss_value:.6e} | " f"{parameter_text}")
         sensitivity_matrix = jnp.atleast_2d(sensitivities)
         if sensitivity_matrix.shape == (1, len(keys)):
             sensitivity_matrix = sensitivity_matrix.T
@@ -670,6 +685,7 @@ def run_inverse_analysis(
                 loss=loss,
                 friction_angle=friction_angle,
                 cohesion=cohesion,
+                base_friction=base_friction,
                 output_dir=iteration_destination,
                 restart_payload=build_restart_payload(
                     next_iteration=step + 1,
@@ -718,8 +734,10 @@ def run_inverse_analysis(
             reference_parameters=reference_values,
             identified_friction_angle=recovered.get("friction_angle", REF_PHI),
             identified_cohesion=recovered.get("cohesion", REF_C0),
+            identified_base_friction=recovered.get("base_friction", REF_BASE_FRICTION),
             reference_friction_angle=REF_PHI,
             reference_cohesion=REF_C0,
+            reference_base_friction=REF_BASE_FRICTION,
             measure_keys=keys,
             num_steps=forward_steps,
             output_dir=FIGURES_DIR if figure_dir is None else figure_dir,
@@ -734,6 +752,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phi-init", type=float, default=10.0)
     parser.add_argument("--cohesion-init", type=float, default=200.0)
+    parser.add_argument("--base-friction-init", type=float, default=0.5)
     parser.add_argument("--forward-steps", type=int, default=TOTAL_STEPS)
     parser.add_argument("--iterations", type=int, default=25)
     parser.add_argument(
@@ -745,6 +764,11 @@ def main() -> None:
         "--cohesion-learning-rate",
         type=float,
         default=DEFAULT_COHESION_LEARNING_RATE,
+    )
+    parser.add_argument(
+        "--base-friction-learning-rate",
+        type=float,
+        default=DEFAULT_BASE_FRICTION_LEARNING_RATE,
     )
     parser.add_argument(
         "--parameters",
@@ -833,8 +857,10 @@ def main() -> None:
         forward_steps=args.forward_steps,
         phi_init=args.phi_init,
         cohesion_init=args.cohesion_init,
+        base_friction_init=args.base_friction_init,
         learning_rate=args.learning_rate,
         cohesion_learning_rate=args.cohesion_learning_rate,
+        base_friction_learning_rate=args.base_friction_learning_rate,
         early_stopping_patience=args.early_stopping_patience,
         early_stopping_min_delta=args.early_stopping_min_delta,
         save_plots=not args.no_plots,

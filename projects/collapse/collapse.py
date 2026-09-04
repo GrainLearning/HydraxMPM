@@ -38,6 +38,7 @@ BULK_DENSITY = GRAIN_DENSITY * INITIAL_SOLID_VOLUME_FRACTION
 LATERAL_STRESS_RATIO = 0.5
 SEPARATION_DENSITY_RATIO = 0.90
 GRAVITY_MAGNITUDE = 9.81
+BASE_FRICTION = 0.9
 
 
 def initialize_lithostatic_stress(
@@ -132,9 +133,7 @@ def project_volume_fraction_field(
     solid_volume_stack = mp_state.mass_stack / GRAIN_DENSITY
     weights = solid_volume_stack / (cell_size**2)
 
-    return jnp.bincount(flat_idx, weights=weights, length=nx * ny).reshape(
-        ny, nx
-    ).T
+    return jnp.bincount(flat_idx, weights=weights, length=nx * ny).reshape(ny, nx).T
 
 
 def project_nodal_volume_fraction_field(
@@ -189,11 +188,7 @@ def compute_bulk_height_profile(
         raise ValueError("cell_size must be positive")
     if reference_solid_fraction <= 0.0:
         raise ValueError("reference_solid_fraction must be positive")
-    return (
-        cell_size
-        * jnp.sum(volume_fraction, axis=1)
-        / reference_solid_fraction
-    )
+    return cell_size * jnp.sum(volume_fraction, axis=1) / reference_solid_fraction
 
 
 def save_measure_bundle(
@@ -228,6 +223,7 @@ def save_measure_bundle(
 def simulate_collapse(
     fric_angle: float = 20.0,
     c0: float = 150.0,
+    base_friction: float = BASE_FRICTION,
     *,
     save_bundle: bool = False,
     prefix: str = "collapse_ref",
@@ -246,6 +242,9 @@ def simulate_collapse(
         friction and cohesion factors ``mu_1`` and ``mu_2``.
     c0:
         Mohr-Coulomb cohesion mapped into the DP law.
+    base_friction:
+        Coulomb friction coefficient on the horizontal bottom wall. The other
+        three domain walls remain frictionless.
     save_bundle:
         If True, save global/local outputs under the collapse output directory.
     prefix:
@@ -317,7 +316,8 @@ def simulate_collapse(
         sdf_logic=hdx.DomainSDF(
             origin=ORIGIN,
             end=END,
-            frictions=[0.0, 0.9, 0.0, 0.0],
+            # DomainSDF order: left, bottom, right, top.
+            frictions=[0.0, base_friction, 0.0, 0.0],
             wall_offset=0.75 * CELL_SIZE,
         )
     )
@@ -385,6 +385,7 @@ def simulate_collapse(
         "height_profile": height_profile,
         "fric_angle": fric_angle,
         "c0": c0,
+        "base_friction": base_friction,
     }
     if return_final_state:
         result["final_state"] = final_state

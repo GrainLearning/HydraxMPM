@@ -57,6 +57,7 @@ def save_iteration_state(
     loss: float | jax.Array,
     friction_angle: float | jax.Array,
     cohesion: float | jax.Array,
+    base_friction: float | jax.Array,
     output_dir: str | Path,
     restart_payload: dict[str, np.ndarray] | None = None,
 ) -> Path:
@@ -68,6 +69,7 @@ def save_iteration_state(
         "loss": np.asarray(float(loss), dtype=np.float64),
         "friction_angle": np.asarray(float(friction_angle), dtype=np.float64),
         "cohesion": np.asarray(float(cohesion), dtype=np.float64),
+        "base_friction": np.asarray(float(base_friction), dtype=np.float64),
     }
     if restart_payload is not None:
         overlap = payload.keys() & restart_payload.keys()

@@ -93,6 +93,7 @@ def plot_parameter_history(
     labels = {
         "friction_angle": r"Friction angle $\phi$ [$^\circ$]",
         "cohesion": r"Cohesion $c_0$ [Pa]",
+        "base_friction": r"Base friction $\mu_b$ [-]",
     }
     count = len(parameter_history)
     fig, axes = plt.subplots(
@@ -105,15 +106,25 @@ def plot_parameter_history(
             raise ValueError(f"history for {key} must contain at least two values")
         iterations = np.arange(history.size)
         axis.plot(
-            iterations, history, color="#0072B2", linewidth=1.2,
-            marker="o", markersize=3.5, markerfacecolor="white", label="Inferred",
+            iterations,
+            history,
+            color="#0072B2",
+            linewidth=1.2,
+            marker="o",
+            markersize=3.5,
+            markerfacecolor="white",
+            label="Inferred",
         )
         axis.axhline(
-            reference_parameters[key], color="darkred", linestyle="--",
-            linewidth=1.0, label="Reference",
+            reference_parameters[key],
+            color="darkred",
+            linestyle="--",
+            linewidth=1.0,
+            label="Reference",
         )
         axis.set(
-            xlabel="Iteration [-]", ylabel=labels[key],
+            xlabel="Iteration [-]",
+            ylabel=labels[key],
             xlim=(0, history.size - 1),
         )
         axis.legend(frameon=False)
@@ -138,12 +149,14 @@ def simulate_volume_fraction(
     friction_angle: float,
     *,
     cohesion: float,
+    base_friction: float,
     num_steps: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """Run one collapse and return its field and runout extent."""
     result = simulate_collapse(
         fric_angle=friction_angle,
         c0=cohesion,
+        base_friction=base_friction,
         num_steps=num_steps,
         compute_local=False,
         return_final_state=True,
@@ -158,12 +171,14 @@ def simulate_height_profile(
     friction_angle: float,
     *,
     cohesion: float,
+    base_friction: float,
     num_steps: int,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Run one collapse and return its bulk height profile and endpoint."""
     result = simulate_collapse(
         fric_angle=friction_angle,
         c0=cohesion,
+        base_friction=base_friction,
         num_steps=num_steps,
         compute_local=False,
         compute_height_profile=True,
@@ -179,8 +194,10 @@ def plot_height_profile_comparison(
     identified_friction_angle: float,
     *,
     identified_cohesion: float,
+    identified_base_friction: float,
     reference_friction_angle: float,
     reference_cohesion: float,
+    reference_base_friction: float,
     num_steps: int,
     output_dir: Path = FIGURES_DIR,
 ) -> Path:
@@ -188,11 +205,13 @@ def plot_height_profile_comparison(
     x_ref, reference, reference_endpoint = simulate_height_profile(
         reference_friction_angle,
         cohesion=reference_cohesion,
+        base_friction=reference_base_friction,
         num_steps=num_steps,
     )
     x_identified, identified, identified_endpoint = simulate_height_profile(
         identified_friction_angle,
         cohesion=identified_cohesion,
+        base_friction=identified_base_friction,
         num_steps=num_steps,
     )
     if not np.array_equal(x_ref, x_identified):
@@ -226,8 +245,10 @@ def plot_volume_fraction_error(
     identified_friction_angle: float,
     *,
     identified_cohesion: float,
+    identified_base_friction: float,
     reference_friction_angle: float,
     reference_cohesion: float,
+    reference_base_friction: float,
     num_steps: int,
     output_dir: Path = FIGURES_DIR,
 ) -> Path:
@@ -235,19 +256,20 @@ def plot_volume_fraction_error(
     x_ref, y_ref, reference, reference_extent = simulate_volume_fraction(
         reference_friction_angle,
         cohesion=reference_cohesion,
+        base_friction=reference_base_friction,
         num_steps=num_steps,
     )
     identified_result = simulate_volume_fraction(
         identified_friction_angle,
         cohesion=identified_cohesion,
+        base_friction=identified_base_friction,
         num_steps=num_steps,
     )
     x_identified, y_identified, identified, identified_extent = identified_result
     if reference.shape != identified.shape:
         raise ValueError("reference and identified volume-fraction grids differ")
     if not (
-        np.array_equal(x_ref, x_identified)
-        and np.array_equal(y_ref, y_identified)
+        np.array_equal(x_ref, x_identified) and np.array_equal(y_ref, y_identified)
     ):
         raise ValueError("reference and identified grid coordinates differ")
 
@@ -353,8 +375,10 @@ def create_inverse_plots(
     reference_parameters: dict[str, float],
     identified_friction_angle: float,
     identified_cohesion: float,
+    identified_base_friction: float,
     reference_friction_angle: float,
     reference_cohesion: float,
+    reference_base_friction: float,
     measure_keys: Sequence[str] = (),
     num_steps: int,
     output_dir: str | Path = FIGURES_DIR,
@@ -372,8 +396,10 @@ def create_inverse_plots(
         "volume_fraction_error": plot_volume_fraction_error(
             identified_friction_angle,
             identified_cohesion=identified_cohesion,
+            identified_base_friction=identified_base_friction,
             reference_friction_angle=reference_friction_angle,
             reference_cohesion=reference_cohesion,
+            reference_base_friction=reference_base_friction,
             num_steps=num_steps,
             output_dir=destination,
         ),
@@ -382,8 +408,10 @@ def create_inverse_plots(
         paths["height_profile"] = plot_height_profile_comparison(
             identified_friction_angle,
             identified_cohesion=identified_cohesion,
+            identified_base_friction=identified_base_friction,
             reference_friction_angle=reference_friction_angle,
             reference_cohesion=reference_cohesion,
+            reference_base_friction=reference_base_friction,
             num_steps=num_steps,
             output_dir=destination,
         )
