@@ -1,6 +1,7 @@
 """Pressure-projected USL-AFLIP solver for incompressible MPM materials."""
 
 import itertools
+from math import prod
 from typing import Optional, Tuple
 
 import equinox as eqx
@@ -20,13 +21,6 @@ from ..grid.grid import GridDomain
 from ..sdf.sdfobject import SDFObjectBase
 from .coupling import BodyCoupling
 from .usl_asflip import USLAFLIP
-
-
-def _product(values):
-    result = 1
-    for value in values:
-        result *= value
-    return result
 
 
 class USLIncompressibleAFLIP(USLAFLIP):
@@ -216,7 +210,7 @@ class USLIncompressibleAFLIP(USLAFLIP):
         coordinates = jnp.clip(coordinates, 0, cell_sizes - 1)
         strides = jnp.asarray(
             [
-                _product(self.cell_grid_size[axis + 1 :])
+                prod(self.cell_grid_size[axis + 1 :])
                 for axis in range(len(self.cell_grid_size))
             ],
             dtype=jnp.int32,
@@ -362,8 +356,7 @@ class USLIncompressibleAFLIP(USLAFLIP):
         velocity_projected = velocity_projected - dt * jnp.einsum(
             "nde,ne->nd", inverse_density_blocks, cleanup_gradient
         )
-        divergence_projected = self._divergence(velocity_projected)
-        return velocity_projected, pressure, divergence_projected
+        return velocity_projected, pressure
 
     def _solve_pressure(self, apply_system, diagonal, rhs):
         """Solve the SPD pressure system with fixed-iteration Jacobi-PCG."""
@@ -480,7 +473,7 @@ class USLIncompressibleAFLIP(USLAFLIP):
         )
         density = jnp.sum(mp.mass_stack) / jnp.sum(mp.volume0_stack)
         inverse_density_blocks = self._inverse_density_blocks(grid, sim_cache, density)
-        velocity, cell_pressure, _ = self._project_velocity(
+        velocity, cell_pressure = self._project_velocity(
             grid, active_cells, inverse_density_blocks, dt
         )
         velocity = self._apply_projected_pressure_friction(
