@@ -36,17 +36,16 @@ class MuIIncompressibleState(ConstitutiveLawState):
     pressure_stack: Float[Array, "num_points"]
 
 
-class MuI_Incompressible(ConstitutiveLaw):
+class MuI_IC(ConstitutiveLaw):
     """Isochoric local µ(I) rheology for use with a pressure-projection solver.
 
     The constitutive part supplies only the pressure-dependent deviatoric
     response.  ``USLIncompressibleAFLIP`` supplies pressure as a Lagrange
     multiplier and enforces the discrete constraint ``div(v) = 0``.
 
-    ``max_shear_viscosity`` and the explicit viscous CFL limit are numerical
-    regularizations, not material parameters.  If either limit is active in a
-    steady flow, the response is a capped Newtonian branch rather than the
-    requested local mu(I) rheology, and the selected flow rate is cap-dependent.
+    The explicit viscous CFL limit is a numerical regularization, not a material
+    parameter. If it is active in a steady flow, the response is a capped
+    Newtonian branch rather than the requested local mu(I) rheology.
     """
 
     mu_s: float | Float[Array, ""]
@@ -57,7 +56,6 @@ class MuI_Incompressible(ConstitutiveLaw):
     p_min_calc: float | Float[Array, ""]
     cell_size: float | Float[Array, ""]
     viscosity_cfl: float | Float[Array, ""]
-    max_shear_viscosity: Optional[float | Float[Array, ""]] = None
 
     def __init__(
         self,
@@ -70,7 +68,6 @@ class MuI_Incompressible(ConstitutiveLaw):
         rho_p: float | Float[Array, ""] = 2650.0,
         p_min_calc: float | Float[Array, ""] = 0.0,
         viscosity_cfl: float | Float[Array, ""] = 0.125,
-        max_shear_viscosity: Optional[float | Float[Array, ""]] = None,
         requires_F_reset: bool = True,
     ):
         self.mu_s = mu_s
@@ -81,7 +78,6 @@ class MuI_Incompressible(ConstitutiveLaw):
         self.p_min_calc = p_min_calc
         self.cell_size = cell_size
         self.viscosity_cfl = viscosity_cfl
-        self.max_shear_viscosity = max_shear_viscosity
         self.requires_F_reset = requires_F_reset
 
     def create_state_from_pressure(
@@ -117,13 +113,11 @@ class MuI_Incompressible(ConstitutiveLaw):
         return eta_static, eta_dynamic
 
     def _limit_viscosity(self, viscosity, density, dt):
-        """Apply fixed and explicit-CFL viscosity safeguards."""
+        """Apply the explicit-CFL viscosity safeguard."""
         dt_safe = jnp.maximum(dt, jnp.finfo(jnp.asarray(dt).dtype).tiny)
         viscosity_limit = (
             self.viscosity_cfl * density * self.cell_size**2 / dt_safe
         )
-        if self.max_shear_viscosity is not None:
-            viscosity = jnp.minimum(viscosity, self.max_shear_viscosity)
         return jnp.minimum(viscosity, viscosity_limit)
 
     def _update_stress(self, L, pressure, density, dt):
@@ -157,20 +151,14 @@ class MuI_Incompressible(ConstitutiveLaw):
         return material_points_state, law_state
 
     def get_dt_crit(self, mp_state, cell_size: float, alpha: float = 0.5):
-        """Limit the step by advection and the explicit viscosity update."""
+        """Return the advective limit; viscosity is capped."""
         del alpha
         speed = jnp.max(jnp.linalg.norm(mp_state.velocity_stack, axis=1))
         advective_dt = cell_size / (speed + 1.0e-9)
-        if self.max_shear_viscosity is None:
-            return advective_dt
-        density = jnp.min(mp_state.mass_stack / mp_state.volume0_stack)
-        viscous_dt = (
-            self.viscosity_cfl * density * cell_size**2 / self.max_shear_viscosity
-        )
-        return jnp.minimum(advective_dt, viscous_dt)
+        return advective_dt
 
 
-class MuI_regularized(MuI_Incompressible):
+class MuI_IC_regularized(MuI_IC):
     """Exponentially regularized incompressible local mu(I).
 
     Only the divergent static contribution ``mu_s p / shear_rate`` is
@@ -178,9 +166,6 @@ class MuI_regularized(MuI_Incompressible):
     The Papanastasiou form has the finite zero-shear limit
     ``mu_s p / regularization_rate``.
 
-    ``regularization_rate`` is the paper's lambda in inverse seconds.  The
-    inherited viscosity limits are separate safeguards required by this
-    explicit MPM momentum update; they are not part of the cited model.
     """
 
     regularization_rate: float | Float[Array, ""]
@@ -219,6 +204,8 @@ class MuI_regularized(MuI_Incompressible):
             jnp.maximum(pressure, 0.0), self.p_min_calc
         )
         rate = self.regularization_rate
+        # shear_rate is nonnegative; this branch supplies the analytical
+        # zero-shear limit 1 / regularization_rate and avoids zero in the denominator.
         ratio = jnp.where(
             shear_rate > 0.0,
             -jnp.expm1(-shear_rate / rate)

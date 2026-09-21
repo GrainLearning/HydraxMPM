@@ -30,7 +30,7 @@ from ..constitutive_laws.constitutive_law import (
 )
 from ..constitutive_laws.linearelastic import LinearElasticLaw
 from ..constitutive_laws.newtonfluid import NewtonFluid
-from ..constitutive_laws.mu_i_rheology import MuI_Incompressible, MuI_LC
+from ..constitutive_laws.mu_i_rheology import MuI_IC, MuI_LC
 
 from typing import List, Tuple, Optional, Any, Dict, Callable
 
@@ -145,7 +145,7 @@ class SimBuilder:
             law_state = law.create_state_from_density(
                 density_stack=law_kwargs.get("density_stack", None)
             )
-        elif isinstance(law, MuI_Incompressible) and law_state is None:
+        elif isinstance(law, MuI_IC) and law_state is None:
             law_state = law.create_state_from_pressure(
                 pressure_stack=law_kwargs.get("pressure_stack", None)
             )

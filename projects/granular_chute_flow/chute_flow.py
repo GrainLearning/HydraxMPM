@@ -19,6 +19,14 @@ import numpy as np
 
 import hydraxmpm as hdx
 
+MODEL_NAMES = {
+    "mu_ic": "mu_IC",
+    "mu_lc": "mu_LC",
+    "mu_ic_regularized": "mu_IC_regularized",
+    "mu_i_incompressible": "mu_IC",
+    "drucker_prager": "drucker_prager",
+}
+
 
 @dataclass(frozen=True)
 class ChuteParameters:
@@ -39,15 +47,35 @@ class ChuteParameters:
     bulk_modulus: float = 1.0e6
     friction_angle_deg: float = 20.0
     dynamic_friction_angle_deg: float = 30.0
-    mu_i_max_shear_viscosity: float = 6.4
-    mu_i_regularization_rate: float = 41.3
+    # calibrated to match the Bagnold reference solution
+    mu_i_lc_alpha: float = 74.0
+    mu_i_ic_viscosity_cfl: float = 0.002
+    mu_i_regularization_rate: float = 0.1
     chute_angle_deg: float = 24.0
     lateral_stress_ratio: float = 0.5
     base_friction: float = 0.7
     separation_density_ratio: float = 0.90
-
     constitutive_model: str = "drucker_prager"
     solver_alpha: float = 0.1
+
+    def __post_init__(self):
+        try:
+            canonical_name = MODEL_NAMES[self.constitutive_model.lower()]
+        except KeyError as error:
+            raise ValueError(
+                f"Unknown constitutive model {self.constitutive_model!r}"
+            ) from error
+        object.__setattr__(self, "constitutive_model", canonical_name)
+        for name in (
+            "dt",
+            "total_time",
+            "output_time",
+            "mu_i_lc_alpha",
+            "mu_i_regularization_rate",
+            "mu_i_ic_viscosity_cfl",
+        ):
+            if not np.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be finite and positive")
 
     @property
     def origin(self) -> tuple[float, float]:
@@ -104,18 +132,18 @@ class ChuteProcedure:
             raise ValueError("fill depth must be an integer number of cells")
 
         spacing = params.particle_spacing
-        stream = params.periodic_x_min + (
-            jnp.arange(n_cells_x * params.particles_per_axis) + 0.5
-        ) * spacing
-        normal = params.base_y + (
-            jnp.arange(n_cells_y * params.particles_per_axis) + 0.5
-        ) * spacing
+        stream = (
+            params.periodic_x_min
+            + (jnp.arange(n_cells_x * params.particles_per_axis) + 0.5) * spacing
+        )
+        normal = (
+            params.base_y
+            + (jnp.arange(n_cells_y * params.particles_per_axis) + 0.5) * spacing
+        )
         xx, yy = jnp.meshgrid(stream, normal, indexing="xy")
         position = jnp.stack([xx.ravel(), yy.ravel()], axis=-1).astype(jnp.float32)
         velocity = jnp.zeros_like(position)
-        density = jnp.full(
-            position.shape[0], params.bulk_density, dtype=jnp.float32
-        )
+        density = jnp.full(position.shape[0], params.bulk_density, dtype=jnp.float32)
         return position, velocity, density
 
     def initialize_lithostatic_stress(self, position, density):
@@ -144,8 +172,8 @@ class ChuteProcedure:
         stress = self.initialize_lithostatic_stress(position, density)
         pressure = jnp.trace(stress, axis1=1, axis2=2) / 3.0
 
-        model_name = params.constitutive_model.lower()
-        if model_name == "mu_i":
+        model_name = MODEL_NAMES[params.constitutive_model.lower()]
+        if model_name == "mu_LC":
             law = hdx.MuI_LC(
                 mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
                 mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
@@ -153,27 +181,27 @@ class ChuteProcedure:
                 d_p=0.002,
                 K=params.bulk_modulus,
                 rho_p=params.grain_density,
-                alpha=0.1,
+                alpha=params.mu_i_lc_alpha,
             )
             law_state = law.create_state_from_density(
                 density_stack=density,
                 pressure_stack=pressure,
             )
-        elif model_name == "mu_i_incompressible":
-            law = hdx.MuI_Incompressible(
+        elif model_name == "mu_IC":
+            law = hdx.MuI_IC(
                 mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
                 mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
                 I_0=0.35,
                 d_p=0.002,
                 rho_p=params.grain_density,
-                max_shear_viscosity=params.mu_i_max_shear_viscosity,
                 cell_size=params.cell_size,
+                viscosity_cfl=params.mu_i_ic_viscosity_cfl,
             )
             law_state = law.create_state_from_pressure(
                 pressure_stack=pressure,
             )
-        elif model_name == "mu_i_regularized":
-            law = hdx.MuI_regularized(
+        elif model_name == "mu_IC_regularized":
+            law = hdx.MuI_IC_regularized(
                 mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
                 mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
                 I_0=0.35,
@@ -181,6 +209,7 @@ class ChuteProcedure:
                 rho_p=params.grain_density,
                 regularization_rate=params.mu_i_regularization_rate,
                 cell_size=params.cell_size,
+                viscosity_cfl=params.mu_i_ic_viscosity_cfl,
             )
             law_state = law.create_state_from_pressure(
                 pressure_stack=pressure,
@@ -196,8 +225,8 @@ class ChuteProcedure:
         else:
             raise ValueError(
                 f"Unknown constitutive model {params.constitutive_model!r}; "
-                "choose 'drucker_prager', 'mu_i', 'mu_i_incompressible', "
-                "or 'mu_i_regularized'."
+                "choose 'drucker_prager', 'mu_LC', 'mu_IC', "
+                "or 'mu_IC_regularized'."
             )
 
         builder = hdx.SimBuilder()
@@ -228,7 +257,7 @@ class ChuteProcedure:
             gap=params.particle_spacing,
             friction=params.base_friction,
         )
-        if model_name in ("mu_i_incompressible", "mu_i_regularized"):
+        if model_name in ("mu_IC", "mu_IC_regularized"):
             builder.set_solver(
                 scheme="usl_incompressible_aflip",
                 alpha=params.solver_alpha,
@@ -244,9 +273,11 @@ class ChuteProcedure:
         params = self.params
         mp = state.world.material_points[0]
         expected_volume = params.cell_size**2 / params.ppc
-        expected_mass = params.bulk_density * (
-            params.periodic_x_max - params.periodic_x_min
-        ) * params.fill_depth
+        expected_mass = (
+            params.bulk_density
+            * (params.periodic_x_max - params.periodic_x_min)
+            * params.fill_depth
+        )
         actual_mass = float(jnp.sum(mp.mass_stack))
 
         if not np.isclose(float(mp.volume_stack[0]), expected_volume):
@@ -344,9 +375,7 @@ def run_sim(
         f"steps={procedure.total_steps}"
     )
 
-    full_chunks, remainder = divmod(
-        procedure.total_steps, procedure.output_steps
-    )
+    full_chunks, remainder = divmod(procedure.total_steps, procedure.output_steps)
     chunk_lengths = [procedure.output_steps] * full_chunks
     if remainder:
         chunk_lengths.append(remainder)
@@ -407,15 +436,25 @@ def _parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model",
-        choices=(
-            "drucker_prager",
-            "mu_i",
-            "mu_i_incompressible",
-            "mu_i_regularized",
-        ),
+        type=lambda name: MODEL_NAMES.get(name.lower(), name),
+        choices=tuple(dict.fromkeys(MODEL_NAMES.values())),
         default=ChuteParameters.constitutive_model,
     )
     parser.add_argument("--total-time", type=float, default=ChuteParameters.total_time)
+    parser.add_argument(
+        "--mu-i-lc-alpha", type=float, default=ChuteParameters.mu_i_lc_alpha
+    )
+    parser.add_argument(
+        "--mu-i-regularization-rate",
+        type=float,
+        default=ChuteParameters.mu_i_regularization_rate,
+    )
+    parser.add_argument(
+        "--mu-i-ic-viscosity-cfl",
+        type=float,
+        default=ChuteParameters.mu_i_ic_viscosity_cfl,
+        help="Shared viscosity CFL coefficient for both incompressible models.",
+    )
     parser.add_argument(
         "--output-time", type=float, default=ChuteParameters.output_time
     )
@@ -429,6 +468,9 @@ if __name__ == "__main__":
     cli_params = replace(
         ChuteParameters(),
         constitutive_model=args.model,
+        mu_i_lc_alpha=args.mu_i_lc_alpha,
+        mu_i_regularization_rate=args.mu_i_regularization_rate,
+        mu_i_ic_viscosity_cfl=args.mu_i_ic_viscosity_cfl,
         total_time=args.total_time,
         output_time=args.output_time,
     )

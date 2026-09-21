@@ -34,12 +34,12 @@ CASES = {
         "steady_window": (3.0, 5.0),
     },
     "mu_i_regularized": {
-        "label": "MuI_regularized",
+        "label": "MuI_IC_regularized",
         "directory": ROOT / "mu_i_regularized",
         "steady_window": (8.0, 12.0),
     },
     "mu_i_incompressible": {
-        "label": "MuI_Incompressible",
+        "label": "MuI_IC",
         "directory": ROOT / "mu_i_incompressible",
         "steady_window": (8.0, 12.0),
     },
