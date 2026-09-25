@@ -57,7 +57,7 @@ class USLSolver(BaseSolver):
 
 
     Attributes:
-        alpha: Blending factor between FLIP and PIC updates (0.0 = FLIP, 1.0 = PIC).
+        alpha: Blending factor between PIC and FLIP updates (0.0 = PIC, 1.0 = FLIP).
         grid_domains: Spatial-computational spaces for grids.
         couplings: Defines how material connect to the spaces.
         constitutive_laws: Tuple of ConstitutiveLaw instances for material behavior.
@@ -668,12 +668,12 @@ class USLSolver(BaseSolver):
 
             # Outer product to find velocity gradients (n_intr, 3, 3)
             # As L_ij = v_i * grad_j
-            # compression positive convention for L, 
+            # compression positive convention for L,
             weighted_L = jnp.einsum(
                 "ij,ik->ijk", intr_cache.shape_grads, -intr_vels_nt_3d
             )
 
-  
+
             # Particle velocity differences on grid
             p_delta_vel = (
                 jnp.zeros((mp_state.num_points, grid_cache.dim))

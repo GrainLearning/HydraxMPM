@@ -1,15 +1,18 @@
 """Pressure-projected USL-AFLIP solver for incompressible MPM materials."""
 
+import itertools
+from math import prod
 from typing import Optional, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+import numpy as np
+from jaxtyping import Array, Float, Int
 
 from ..constitutive_laws.constitutive_law import ConstitutiveLaw
 from ..constitutive_laws.mu_i_rheology import (
-    MuI_Incompressible,
+    MuI_IC,
     MuIIncompressibleState,
 )
 from ..forces.force import Force
@@ -18,13 +21,6 @@ from ..grid.grid import GridDomain
 from ..sdf.sdfobject import SDFObjectBase
 from .coupling import BodyCoupling
 from .usl_asflip import USLAFLIP
-
-
-def _product(values):
-    result = 1
-    for value in values:
-        result *= value
-    return result
 
 
 class USLIncompressibleAFLIP(USLAFLIP):
@@ -40,16 +36,16 @@ class USLIncompressibleAFLIP(USLAFLIP):
     projection across unrelated materials or grids.
     """
 
-    divergence_matrix: Float[Array, "num_pressure_cells velocity_dofs"]
-    pressure_adjacency: Float[Array, "num_pressure_cells num_pressure_cells"]
-    cell_node_incidence: Float[Array, "num_pressure_cells num_nodes"]
+    cell_node_hashes: Int[Array, "num_pressure_cells num_cell_nodes"]
+    cell_node_gradients: Float[Array, "num_cell_nodes dim"]
+    edge_left: Int[Array, "num_pressure_edges"]
+    edge_right: Int[Array, "num_pressure_edges"]
     cell_grid_size: Tuple[int, ...] = eqx.field(static=True)
     projection_mass_cutoff: float = eqx.field(static=True)
     projection_regularization: float = eqx.field(static=True)
     pressure_stabilization: float = eqx.field(static=True)
     projection_iterations: int = eqx.field(static=True)
     nonnegative_pressure: bool = eqx.field(static=True)
-    wall_ghost_no_slip: bool = eqx.field(static=True)
 
     def __init__(
         self,
@@ -64,7 +60,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
         pressure_stabilization: float = 1.0e-3,
         projection_iterations: int = 32,
         nonnegative_pressure: bool = True,
-        wall_ghost_no_slip: bool = False,
         **aflip_parameters,
     ):
         if len(couplings) != 1 or couplings[0].skip_mpm_logic:
@@ -73,10 +68,8 @@ class USLIncompressibleAFLIP(USLAFLIP):
             )
         if len(grid_domains) != 1:
             raise ValueError("USLIncompressibleAFLIP requires exactly one grid domain")
-        if not isinstance(constitutive_laws[0], MuI_Incompressible):
-            raise TypeError(
-                "USLIncompressibleAFLIP currently requires MuI_Incompressible"
-            )
+        if not isinstance(constitutive_laws[0], MuI_IC):
+            raise TypeError("USLIncompressibleAFLIP currently requires MuI_IC")
 
         super().__init__(
             grid_domains=grid_domains,
@@ -93,69 +86,58 @@ class USLIncompressibleAFLIP(USLAFLIP):
             size if periodic else size - 1
             for size, periodic in zip(domain.grid_size, domain.periodic_axes)
         )
-        self.divergence_matrix = self._build_divergence_matrix(domain)
-        divergence_by_node = self.divergence_matrix.reshape(
-            (self.divergence_matrix.shape[0], domain.num_cells, domain.dim)
+        self.cell_node_hashes, self.cell_node_gradients = self._build_cell_stencil(
+            domain
         )
-        self.cell_node_incidence = jnp.any(
-            jnp.abs(divergence_by_node) > 0.0, axis=2
-        ).astype(self.divergence_matrix.dtype)
-        self.pressure_adjacency = self._build_pressure_adjacency(domain)
+        self.edge_left, self.edge_right = self._build_pressure_edges(domain)
         self.projection_mass_cutoff = projection_mass_cutoff
         self.projection_regularization = projection_regularization
         self.pressure_stabilization = pressure_stabilization
         self.projection_iterations = projection_iterations
         self.nonnegative_pressure = nonnegative_pressure
-        self.wall_ghost_no_slip = wall_ghost_no_slip
 
     @staticmethod
-    def _build_divergence_matrix(domain):
-        """Build cell-centered divergence of multilinear nodal velocity."""
+    def _build_cell_stencil(domain):
+        """Build compact cell-to-node connectivity for divergence and gradient."""
         dim = domain.dim
         node_grid_size = domain.grid_size
         cell_grid_size = tuple(
             size if periodic else size - 1
             for size, periodic in zip(node_grid_size, domain.periodic_axes)
         )
-        num_cells = 1
-        for size in cell_grid_size:
-            num_cells *= size
-        num_nodes = domain.num_cells
-        matrix = jnp.zeros((num_cells, num_nodes * dim))
         transverse_weight = 1.0 / (domain.cell_size * (2 ** (dim - 1)))
-
-        # Grid sizes are static Python values, so construction happens once.
-        import itertools
-        import numpy as np
-
+        corners = tuple(itertools.product((0, 1), repeat=dim))
+        gradients = np.asarray(
+            [
+                [
+                    (-1.0 if corner[axis] == 0 else 1.0) * transverse_weight
+                    for axis in range(dim)
+                ]
+                for corner in corners
+            ]
+        )
+        node_hashes = []
         for cell_idx in itertools.product(*(range(size) for size in cell_grid_size)):
-            cell_hash = int(np.ravel_multi_index(cell_idx, cell_grid_size))
-            for corner in itertools.product((0, 1), repeat=dim):
+            cell_nodes = []
+            for corner in corners:
                 node_idx = tuple(
                     (cell_idx[axis] + corner[axis]) % node_grid_size[axis]
                     if domain.periodic_axes[axis]
                     else cell_idx[axis] + corner[axis]
                     for axis in range(dim)
                 )
-                node_hash = int(np.ravel_multi_index(node_idx, node_grid_size))
-                for axis in range(dim):
-                    sign = -1.0 if corner[axis] == 0 else 1.0
-                    dof = node_hash * dim + axis
-                    matrix = matrix.at[cell_hash, dof].set(sign * transverse_weight)
-        return matrix
+                cell_nodes.append(np.ravel_multi_index(node_idx, node_grid_size))
+            node_hashes.append(cell_nodes)
+        return jnp.asarray(node_hashes, dtype=jnp.int32), jnp.asarray(gradients)
 
     @staticmethod
-    def _build_pressure_adjacency(domain):
-        """Return face-neighbour adjacency for pressure-mode stabilization."""
-        import itertools
-        import numpy as np
-
+    def _build_pressure_edges(domain):
+        """Return unique face-neighbour cell pairs for matrix-free stabilization."""
         cell_grid_size = tuple(
             size if periodic else size - 1
             for size, periodic in zip(domain.grid_size, domain.periodic_axes)
         )
-        num_cells = _product(cell_grid_size)
-        adjacency = jnp.zeros((num_cells, num_cells))
+        edges = set()
         for cell_idx in itertools.product(*(range(size) for size in cell_grid_size)):
             cell_hash = int(np.ravel_multi_index(cell_idx, cell_grid_size))
             for axis in range(domain.dim):
@@ -168,12 +150,16 @@ class USLIncompressibleAFLIP(USLAFLIP):
                 neighbour_hash = int(
                     np.ravel_multi_index(tuple(neighbour), cell_grid_size)
                 )
-                adjacency = adjacency.at[cell_hash, neighbour_hash].set(1.0)
-                adjacency = adjacency.at[neighbour_hash, cell_hash].set(1.0)
-        return adjacency
+                if cell_hash != neighbour_hash:
+                    edges.add(tuple(sorted((cell_hash, neighbour_hash))))
+        sorted_edges = sorted(edges)
+        return (
+            jnp.asarray([edge[0] for edge in sorted_edges], dtype=jnp.int32),
+            jnp.asarray([edge[1] for edge in sorted_edges], dtype=jnp.int32),
+        )
 
     def _get_p2g_stress(self, law, stress_stack):
-        if not isinstance(law, MuI_Incompressible):
+        if not isinstance(law, MuI_IC):
             return stress_stack
         pressure = jnp.trace(stress_stack, axis1=1, axis2=2) / 3.0
         return stress_stack - pressure[:, None, None] * jnp.eye(3)
@@ -224,7 +210,7 @@ class USLIncompressibleAFLIP(USLAFLIP):
         coordinates = jnp.clip(coordinates, 0, cell_sizes - 1)
         strides = jnp.asarray(
             [
-                _product(self.cell_grid_size[axis + 1 :])
+                prod(self.cell_grid_size[axis + 1 :])
                 for axis in range(len(self.cell_grid_size))
             ],
             dtype=jnp.int32,
@@ -255,41 +241,104 @@ class USLIncompressibleAFLIP(USLAFLIP):
             )
         return blocks
 
+    def _divergence(self, node_vectors):
+        """Apply the cell-centered divergence without forming a dense matrix."""
+        local_vectors = node_vectors[self.cell_node_hashes]
+        return jnp.einsum("acd,cd->a", local_vectors, self.cell_node_gradients)
+
+    def _gradient(self, cell_values, num_nodes):
+        """Apply the transpose divergence (weak gradient) by scatter-add."""
+        contributions = (
+            cell_values[:, None, None] * self.cell_node_gradients[None, :, :]
+        )
+        return (
+            jnp.zeros((num_nodes, self.cell_node_gradients.shape[1]))
+            .at[self.cell_node_hashes.reshape(-1)]
+            .add(contributions.reshape(-1, self.cell_node_gradients.shape[1]))
+        )
+
+    def _projection_operator(self, cell_values, inverse_density_blocks):
+        """Apply D R D.T matrix-free, where R contains inverse-density blocks."""
+        gradient = self._gradient(cell_values, inverse_density_blocks.shape[0])
+        weighted_gradient = jnp.einsum("nde,ne->nd", inverse_density_blocks, gradient)
+        return self._divergence(weighted_gradient)
+
+    def _projection_diagonal(self, inverse_density_blocks):
+        """Return diag(D R D.T) from the compact cell stencil."""
+        local_blocks = inverse_density_blocks[self.cell_node_hashes]
+        return jnp.einsum(
+            "cd,acde,ce->a",
+            self.cell_node_gradients,
+            local_blocks,
+            self.cell_node_gradients,
+        )
+
+    def _graph_laplacian(self, cell_values, active_cells):
+        """Apply the active-cell pressure graph Laplacian matrix-free."""
+        edge_active = active_cells[self.edge_left] * active_cells[self.edge_right]
+        difference = cell_values[self.edge_left] - cell_values[self.edge_right]
+        contribution = edge_active * difference
+        result = jnp.zeros_like(cell_values)
+        result = result.at[self.edge_left].add(contribution)
+        return result.at[self.edge_right].add(-contribution)
+
+    def _graph_laplacian_diagonal(self, active_cells):
+        """Return the number of active face neighbours for each pressure cell."""
+        edge_active = active_cells[self.edge_left] * active_cells[self.edge_right]
+        diagonal = jnp.zeros_like(active_cells)
+        diagonal = diagonal.at[self.edge_left].add(edge_active)
+        return diagonal.at[self.edge_right].add(edge_active)
+
     def _project_velocity(self, grid, active_cells, inverse_density_blocks, dt):
-        dim = grid.dim
         velocity = jnp.where(
             (grid.mass_stack > self.projection_mass_cutoff)[:, None],
             grid.moment_nt_stack
             / jnp.where(grid.mass_stack > 0.0, grid.mass_stack, 1.0)[:, None],
             0.0,
         )
-        D = self.divergence_matrix.reshape(
-            (self.divergence_matrix.shape[0], grid.mass_stack.shape[0], dim)
-        )
-        system = jnp.einsum("and,nde,bne->ab", D, inverse_density_blocks, D)
-        rhs = jnp.einsum("and,nd->a", D, velocity) / dt
+        rhs = self._divergence(velocity) / dt
 
-        mask = active_cells.astype(system.dtype)
-        system = system * mask[:, None] * mask[None, :]
-        diagonal_scale = jnp.maximum(jnp.max(jnp.diag(system)), 1.0)
-        inactive_and_gauge_diagonal = jnp.diag(
-            (1.0 - mask) + mask * self.projection_regularization * diagonal_scale
+        mask = active_cells.astype(velocity.dtype)
+        projection_diagonal = self._projection_diagonal(inverse_density_blocks)
+        diagonal_scale = jnp.maximum(jnp.max(mask * projection_diagonal), 1.0)
+        gauge_diagonal = (1.0 - mask) + (
+            mask * self.projection_regularization * diagonal_scale
         )
-        projection_system = system + inactive_and_gauge_diagonal
-        active_adjacency = self.pressure_adjacency * mask[:, None] * mask[None, :]
-        graph_laplacian = jnp.diag(jnp.sum(active_adjacency, axis=1)) - active_adjacency
-        pressure_system = projection_system + (
-            self.pressure_stabilization * diagonal_scale * graph_laplacian
+
+        def apply_projection(cell_values):
+            masked_values = mask * cell_values
+            return (
+                mask * self._projection_operator(masked_values, inverse_density_blocks)
+                + gauge_diagonal * cell_values
+            )
+
+        active_degree = self._graph_laplacian_diagonal(mask)
+        stabilization_scale = self.pressure_stabilization * diagonal_scale
+
+        def apply_pressure_system(cell_values):
+            return apply_projection(cell_values) + (
+                stabilization_scale * self._graph_laplacian(cell_values, mask)
+            )
+
+        pressure_diagonal = (
+            mask * projection_diagonal
+            + gauge_diagonal
+            + stabilization_scale * active_degree
         )
+        cleanup_diagonal = mask * projection_diagonal + gauge_diagonal
         # ``D.T`` is the weak gradient in the mathematical tension-positive
         # convention, whereas HydraxMPM stores compression-positive pressure.
         # The solved multiplier is therefore minus the physical pressure.
-        pressure_multiplier = self._solve_pressure(pressure_system, rhs * mask)
+        pressure_multiplier = self._solve_pressure(
+            apply_pressure_system, pressure_diagonal, rhs * mask
+        )
         if self.nonnegative_pressure:
             pressure_multiplier = jnp.minimum(pressure_multiplier, 0.0)
         pressure = -pressure_multiplier
 
-        pressure_gradient_force = jnp.einsum("and,a->nd", D, pressure_multiplier)
+        pressure_gradient_force = self._gradient(
+            pressure_multiplier, grid.mass_stack.shape[0]
+        )
         correction = -dt * jnp.einsum(
             "nde,ne->nd", inverse_density_blocks, pressure_gradient_force
         )
@@ -299,27 +348,28 @@ class USLIncompressibleAFLIP(USLAFLIP):
         # residual for a smooth physical pressure.  Remove that residual with
         # the unstabilized projection operator; this cleanup multiplier is not
         # added to the constitutive pressure.
-        cleanup_rhs = jnp.einsum("and,nd->a", D, velocity_projected) / dt * mask
-        cleanup_multiplier = self._solve_pressure(projection_system, cleanup_rhs)
-        cleanup_gradient = jnp.einsum("and,a->nd", D, cleanup_multiplier)
+        cleanup_rhs = self._divergence(velocity_projected) / dt * mask
+        cleanup_multiplier = self._solve_pressure(
+            apply_projection, cleanup_diagonal, cleanup_rhs
+        )
+        cleanup_gradient = self._gradient(cleanup_multiplier, grid.mass_stack.shape[0])
         velocity_projected = velocity_projected - dt * jnp.einsum(
             "nde,ne->nd", inverse_density_blocks, cleanup_gradient
         )
-        divergence_projected = jnp.einsum("and,nd->a", D, velocity_projected)
-        return velocity_projected, pressure, divergence_projected
+        return velocity_projected, pressure
 
-    def _solve_pressure(self, system, rhs):
+    def _solve_pressure(self, apply_system, diagonal, rhs):
         """Solve the SPD pressure system with fixed-iteration Jacobi-PCG."""
-        diagonal = jnp.maximum(jnp.diag(system), 1.0e-20)
+        diagonal = jnp.maximum(diagonal, 1.0e-20)
         x = jnp.zeros_like(rhs)
-        residual = rhs - system @ x
+        residual = rhs
         z = residual / diagonal
         direction = z
         rz = jnp.dot(residual, z)
 
         def cg_step(_, values):
             x, residual, direction, rz = values
-            system_direction = system @ direction
+            system_direction = apply_system(direction)
             denominator = jnp.dot(direction, system_direction)
             active = rz > 1.0e-20
             step = jnp.where(
@@ -353,11 +403,20 @@ class USLIncompressibleAFLIP(USLAFLIP):
         its contribution must also enter the Coulomb friction limit.
         """
         active_pressure = cell_pressure * active_cells
-        weights = self.cell_node_incidence * active_cells[:, None]
-        pressure_at_nodes = jnp.einsum("an,a->n", weights, active_pressure)
-        pressure_at_nodes = pressure_at_nodes / jnp.maximum(
-            jnp.sum(weights, axis=0), 1.0
+        node_hashes = self.cell_node_hashes.reshape(-1)
+        repeated_pressure = jnp.broadcast_to(
+            active_pressure[:, None], self.cell_node_hashes.shape
+        ).reshape(-1)
+        repeated_support = jnp.broadcast_to(
+            active_cells[:, None], self.cell_node_hashes.shape
+        ).reshape(-1)
+        pressure_at_nodes = (
+            jnp.zeros_like(grid.mass_stack).at[node_hashes].add(repeated_pressure)
         )
+        support_at_nodes = (
+            jnp.zeros_like(grid.mass_stack).at[node_hashes].add(repeated_support)
+        )
+        pressure_at_nodes /= jnp.maximum(support_at_nodes, 1.0)
         boundary_measure = self.grid_domains[0].cell_size ** (grid.dim - 1)
         safe_mass = jnp.where(
             grid.mass_stack > self.projection_mass_cutoff,
@@ -397,64 +456,6 @@ class USLIncompressibleAFLIP(USLAFLIP):
             velocity = jnp.where(contact_mask[:, None], corrected, velocity)
         return velocity
 
-    def _apply_wall_ghost_no_slip(self, velocity, grid, sim_cache):
-        """Apply an odd velocity extension across a stationary no-slip wall.
-
-        Quadratic particle-grid interpolation reaches one node through a
-        grid-aligned wall. Merely fixing the surface node leaves that ghost
-        degree of freedom dynamically inconsistent with the no-slip velocity
-        field. Reflecting the nearest fluid-node velocity about the wall value
-        preserves the wall location without clamping a finite fluid layer.
-        """
-        if not self.wall_ghost_no_slip:
-            return velocity
-
-        domain = self.grid_domains[0]
-        node_position = domain.position_stack
-        grid_size = jnp.asarray(domain.grid_size, dtype=jnp.int32)
-        periodic_axes = jnp.asarray(domain.periodic_axes)
-        strides = jnp.asarray(
-            [
-                _product(domain.grid_size[axis + 1 :])
-                for axis in range(domain.dim)
-            ],
-            dtype=jnp.int32,
-        )
-
-        for force in self.forces:
-            if not isinstance(force, SDFCollider) or 0 not in force.g_idx_list:
-                continue
-            geometry = sim_cache.node_geoms[(0, force.sdf_idx)]
-            normal = geometry.normals[:, : domain.dim]
-            wall_velocity = geometry.wall_vels[:, : domain.dim]
-            reflected_position = (
-                node_position - 2.0 * geometry.dists[:, None] * normal
-            )
-            reflected_index = jnp.rint(
-                (reflected_position - jnp.asarray(domain.origin))
-                / domain.cell_size
-            ).astype(jnp.int32)
-            reflected_index = jnp.where(
-                periodic_axes,
-                jnp.mod(reflected_index, grid_size),
-                reflected_index,
-            )
-            reflected_index = jnp.clip(reflected_index, 0, grid_size - 1)
-            reflected_hash = jnp.sum(reflected_index * strides, axis=1)
-            ghost_velocity = 2.0 * wall_velocity - velocity[reflected_hash]
-
-            tolerance = 1.0e-6 * domain.cell_size
-            surface = jnp.abs(geometry.dists) <= tolerance
-            inside = geometry.dists < -tolerance
-            has_mass = grid.mass_stack > self.projection_mass_cutoff
-            velocity = jnp.where(
-                (surface & has_mass)[:, None], wall_velocity, velocity
-            )
-            velocity = jnp.where(
-                (inside & has_mass)[:, None], ghost_velocity, velocity
-            )
-        return velocity
-
     def _integrate_grid(self, world, mechanics, sim_cache, dt, time):
         world, mechanics, sim_cache = super()._integrate_grid(
             world, mechanics, sim_cache, dt, time
@@ -465,20 +466,19 @@ class USLIncompressibleAFLIP(USLAFLIP):
         mp = world.material_points[coupling.p_idx]
         cell_hashes = self._particle_cell_hashes(mp.position_stack, domain)
         active_cells = (
-            jnp.zeros((self.divergence_matrix.shape[0],), dtype=jnp.int32)
+            jnp.zeros((self.cell_node_hashes.shape[0],), dtype=jnp.int32)
             .at[cell_hashes]
             .add(1)
             > 0
         )
         density = jnp.sum(mp.mass_stack) / jnp.sum(mp.volume0_stack)
         inverse_density_blocks = self._inverse_density_blocks(grid, sim_cache, density)
-        velocity, cell_pressure, _ = self._project_velocity(
+        velocity, cell_pressure = self._project_velocity(
             grid, active_cells, inverse_density_blocks, dt
         )
         velocity = self._apply_projected_pressure_friction(
             velocity, grid, cell_pressure, active_cells, sim_cache, dt
         )
-        velocity = self._apply_wall_ghost_no_slip(velocity, grid, sim_cache)
         grid = eqx.tree_at(
             lambda value: value.moment_nt_stack,
             grid,

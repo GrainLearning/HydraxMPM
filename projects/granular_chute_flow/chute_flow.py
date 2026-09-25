@@ -2,25 +2,36 @@
 
 Coordinates are aligned with the chute: ``x`` is streamwise and ``y`` is normal
 to the base. The background grid is periodic in ``x``; the base is represented by
-a frictional plane SDF and the top is open.
+a frictional plane SDF and the top is open. The µ(I) models select either the
+exponential (``exp``) or square-root (``sr``) static-friction regularization.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, replace
+import json
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 import hydraxmpm as hdx
+
+MODEL_NAMES = ("mu_IC", "mu_LC", "drucker_prager")
+_MODEL_NAME_LOOKUP = {name.lower(): name for name in MODEL_NAMES}
+
+
+def _canonical_model_name(name: str) -> str:
+    try:
+        return _MODEL_NAME_LOOKUP[name.lower()]
+    except KeyError as error:
+        choices = ", ".join(MODEL_NAMES)
+        raise ValueError(
+            f"Unknown constitutive model {name!r}; choose {choices}"
+        ) from error
 
 
 @dataclass(frozen=True)
@@ -34,7 +45,7 @@ class ChuteParameters:
     ppc: int = 4
 
     dt: float = 2.0e-4
-    total_time: float = 5.0
+    total_time: float = 15.0
     output_time: float = 0.05
 
     grain_density: float = 2650.0
@@ -42,17 +53,37 @@ class ChuteParameters:
     bulk_modulus: float = 1.0e6
     friction_angle_deg: float = 20.0
     dynamic_friction_angle_deg: float = 30.0
-    # Calibrated for the 24 degree Bagnold benchmark with 0.005 m cells.
-    mu_i_max_shear_viscosity: float = 6.65
-    mu_i_regularization_rate: float = 31.5
+    # Calibrated regularization parameters for the Bagnold reference solution.
+    # ``alpha`` controls ``sr``; ``regularization_rate`` controls ``exp``.
+    mu_i_alpha: float = 32.5
+    mu_i_viscosity_cfl: float = 0.002
+    mu_i_regularization_rate: float = 28.0
+    mu_i_static_regularization: str = "exp"
     chute_angle_deg: float = 24.0
     lateral_stress_ratio: float = 0.5
     base_friction: float = 0.7
     separation_density_ratio: float = 0.90
-
     constitutive_model: str = "drucker_prager"
-    incompressible_wall_ghost_no_slip: bool = True
-    steady_start_fraction: float = 0.8
+    solver_alpha: float = 0.1
+
+    def __post_init__(self):
+        object.__setattr__(
+            self,
+            "constitutive_model",
+            _canonical_model_name(self.constitutive_model),
+        )
+        if self.mu_i_static_regularization not in ("exp", "sr"):
+            raise ValueError("mu_i_static_regularization must be one of {'exp', 'sr'}")
+        for name in (
+            "dt",
+            "total_time",
+            "output_time",
+            "mu_i_alpha",
+            "mu_i_regularization_rate",
+            "mu_i_viscosity_cfl",
+        ):
+            if not np.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be finite and positive")
 
     @property
     def origin(self) -> tuple[float, float]:
@@ -109,18 +140,18 @@ class ChuteProcedure:
             raise ValueError("fill depth must be an integer number of cells")
 
         spacing = params.particle_spacing
-        stream = params.periodic_x_min + (
-            jnp.arange(n_cells_x * params.particles_per_axis) + 0.5
-        ) * spacing
-        normal = params.base_y + (
-            jnp.arange(n_cells_y * params.particles_per_axis) + 0.5
-        ) * spacing
+        stream = (
+            params.periodic_x_min
+            + (jnp.arange(n_cells_x * params.particles_per_axis) + 0.5) * spacing
+        )
+        normal = (
+            params.base_y
+            + (jnp.arange(n_cells_y * params.particles_per_axis) + 0.5) * spacing
+        )
         xx, yy = jnp.meshgrid(stream, normal, indexing="xy")
         position = jnp.stack([xx.ravel(), yy.ravel()], axis=-1).astype(jnp.float32)
         velocity = jnp.zeros_like(position)
-        density = jnp.full(
-            position.shape[0], params.bulk_density, dtype=jnp.float32
-        )
+        density = jnp.full(position.shape[0], params.bulk_density, dtype=jnp.float32)
         return position, velocity, density
 
     def initialize_lithostatic_stress(self, position, density):
@@ -149,43 +180,34 @@ class ChuteProcedure:
         stress = self.initialize_lithostatic_stress(position, density)
         pressure = jnp.trace(stress, axis1=1, axis2=2) / 3.0
 
-        model_name = params.constitutive_model.lower()
-        if model_name == "mu_i":
+        model_name = params.constitutive_model
+        mu_i_parameters = {
+            "mu_s": jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
+            "mu_d": jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
+            "I_0": 0.35,
+            "d_p": 0.002,
+            "rho_p": params.grain_density,
+            "cell_size": params.cell_size,
+            "viscosity_cfl": params.mu_i_viscosity_cfl,
+        }
+        if model_name == "mu_LC":
             law = hdx.MuI_LC(
-                mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
-                mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
-                I_0=0.35,
-                d_p=0.002,
+                **mu_i_parameters,
                 K=params.bulk_modulus,
-                rho_p=params.grain_density,
-                alpha=1.0e-6,
+                alpha=params.mu_i_alpha,
+                regularization_rate=params.mu_i_regularization_rate,
+                static_regularization=params.mu_i_static_regularization,
             )
             law_state = law.create_state_from_density(
                 density_stack=density,
                 pressure_stack=pressure,
             )
-        elif model_name == "mu_i_incompressible":
-            law = hdx.MuI_Incompressible(
-                mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
-                mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
-                I_0=0.35,
-                d_p=0.002,
-                rho_p=params.grain_density,
-                max_shear_viscosity=params.mu_i_max_shear_viscosity,
-                cell_size=params.cell_size,
-            )
-            law_state = law.create_state_from_pressure(
-                pressure_stack=pressure,
-            )
-        elif model_name == "mu_i_regularized":
-            law = hdx.MuI_regularized(
-                mu_s=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
-                mu_d=jnp.tan(jnp.deg2rad(params.dynamic_friction_angle_deg)),
-                I_0=0.35,
-                d_p=0.002,
-                rho_p=params.grain_density,
+        elif model_name == "mu_IC":
+            law = hdx.MuI_IC(
+                **mu_i_parameters,
+                alpha=params.mu_i_alpha,
                 regularization_rate=params.mu_i_regularization_rate,
-                cell_size=params.cell_size,
+                static_regularization=params.mu_i_static_regularization,
             )
             law_state = law.create_state_from_pressure(
                 pressure_stack=pressure,
@@ -194,16 +216,12 @@ class ChuteProcedure:
             law = hdx.DruckerPrager(
                 nu=0.3,
                 K=params.bulk_modulus,
-                mu_1=params.drucker_prager_mu,
+                mu_1=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
                 rho_0=params.separation_density_ratio * params.bulk_density,
             )
             law_state = law.create_state(stress_stack=stress)
         else:
-            raise ValueError(
-                f"Unknown constitutive model {params.constitutive_model!r}; "
-                "choose 'drucker_prager', 'mu_i', 'mu_i_incompressible', "
-                "or 'mu_i_regularized'."
-            )
+            raise ValueError(f"Unsupported canonical model {model_name!r}")
 
         builder = hdx.SimBuilder()
         builder.add_material_points(
@@ -233,14 +251,13 @@ class ChuteProcedure:
             gap=params.particle_spacing,
             friction=params.base_friction,
         )
-        if model_name in ("mu_i_incompressible", "mu_i_regularized"):
+        if model_name == "mu_IC":
             builder.set_solver(
                 scheme="usl_incompressible_aflip",
-                alpha=0.1,
-                wall_ghost_no_slip=params.incompressible_wall_ghost_no_slip,
+                alpha=params.solver_alpha,
             )
         else:
-            builder.set_solver(scheme="usl_aflip", alpha=0.1)
+            builder.set_solver(scheme="usl_aflip", alpha=params.solver_alpha)
 
         solver, state = builder.build(dt=params.dt)
         self.validate_initial_state(solver, state)
@@ -250,9 +267,11 @@ class ChuteProcedure:
         params = self.params
         mp = state.world.material_points[0]
         expected_volume = params.cell_size**2 / params.ppc
-        expected_mass = params.bulk_density * (
-            params.periodic_x_max - params.periodic_x_min
-        ) * params.fill_depth
+        expected_mass = (
+            params.bulk_density
+            * (params.periodic_x_max - params.periodic_x_min)
+            * params.fill_depth
+        )
         actual_mass = float(jnp.sum(mp.mass_stack))
 
         if not np.isclose(float(mp.volume_stack[0]), expected_volume):
@@ -286,50 +305,20 @@ class ChuteProcedure:
         )
         return eqx.tree_at(lambda item: item.world, state, world)
 
-    def compute_velocity_profile(self, state):
-        mp = state.world.material_points[0]
-        position = np.asarray(mp.position_stack)
-        velocity = np.asarray(mp.velocity_stack)
-        n_bins = int(round(self.params.domain_height / self.params.particle_spacing))
-        edges = np.linspace(
-            self.params.base_y,
-            self.params.base_y + self.params.domain_height,
-            n_bins + 1,
-        )
-        centers = 0.5 * (edges[:-1] + edges[1:])
-        counts, _ = np.histogram(position[:, 1], bins=edges)
-        weighted, _ = np.histogram(position[:, 1], bins=edges, weights=velocity[:, 0])
-        mean_vx = np.full(centers.shape, np.nan)
-        np.divide(weighted, counts, out=mean_vx, where=counts > 0)
-        return centers, mean_vx, counts
 
-    @staticmethod
-    def compute_time_averaged_profile(profiles):
-        if not profiles:
-            return np.array([]), np.array([])
-        y = np.asarray(profiles[0][:, 0], dtype=float)
-        stacked_vx = np.stack(
-            [np.asarray(profile[:, 1], dtype=float) for profile in profiles], axis=0
-        )
-        valid_counts = np.sum(np.isfinite(stacked_vx), axis=0)
-        summed = np.nansum(stacked_vx, axis=0)
-        mean_vx = np.full(y.shape, np.nan)
-        np.divide(summed, valid_counts, out=mean_vx, where=valid_counts > 0)
-        return y, mean_vx
-
-
-def _save_profile(path: Path, y, velocity, counts=None):
-    columns = [y, velocity]
-    header = "y,mean_vx"
-    if counts is not None:
-        columns.append(counts)
-        header += ",particle_count"
-    np.savetxt(
-        path,
-        np.column_stack(columns),
-        delimiter=",",
-        header=header,
-        comments="",
+def _save_particle_state(output_dir: Path, step: int, time: float, mp) -> None:
+    """Write one raw particle snapshot for independent postprocessing."""
+    snapshot_dir = output_dir / "particle_states"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        snapshot_dir / f"step_{step:08d}.npz",
+        step=np.asarray(step),
+        time=np.asarray(time),
+        position=np.asarray(mp.position_stack),
+        velocity=np.asarray(mp.velocity_stack),
+        mass=np.asarray(mp.mass_stack),
+        density=np.asarray(mp.density_stack),
+        stress=np.asarray(mp.stress_stack),
     )
 
 
@@ -363,12 +352,15 @@ def run_sim(
     else:
         output_dir = Path(__file__).resolve().parent / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "parameters.json").write_text(
+        json.dumps(asdict(params), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     visualizer = (
         hdx.VTKVisualizer(output_dir=str(output_dir)) if write_visuals else None
     )
 
     history = {"time": [], "mean_speed": [], "mean_vx": []}
-    steady_profiles = []
 
     print("Starting granular chute-flow benchmark")
     print(
@@ -377,9 +369,7 @@ def run_sim(
         f"steps={procedure.total_steps}"
     )
 
-    full_chunks, remainder = divmod(
-        procedure.total_steps, procedure.output_steps
-    )
+    full_chunks, remainder = divmod(procedure.total_steps, procedure.output_steps)
     chunk_lengths = [procedure.output_steps] * full_chunks
     if remainder:
         chunk_lengths.append(remainder)
@@ -403,24 +393,14 @@ def run_sim(
                 f"non-finite particle state at step {completed_steps}"
             )
 
-        time = float(state.time)
+        time = completed_steps * params.dt
         speed = float(jnp.mean(jnp.linalg.norm(mp.velocity_stack, axis=1)))
         mean_vx = float(jnp.mean(mp.velocity_stack[:, 0]))
         history["time"].append(time)
         history["mean_speed"].append(speed)
         history["mean_vx"].append(mean_vx)
 
-        profile_y, profile_vx, counts = procedure.compute_velocity_profile(state)
-        profile = np.column_stack([profile_y, profile_vx])
-        if time >= params.steady_start_fraction * params.total_time:
-            steady_profiles.append(profile)
-
-        _save_profile(
-            output_dir / f"velocity_profile_{completed_steps:05d}.csv",
-            profile_y,
-            profile_vx,
-            counts,
-        )
+        _save_particle_state(output_dir, completed_steps, time, mp)
 
         if write_visuals:
             visualizer.log_particles(
@@ -430,27 +410,6 @@ def run_sim(
                 time=time,
                 step=completed_steps,
             )
-            position = np.asarray(mp.position_stack)
-            velocity = np.asarray(mp.velocity_stack)
-            plt.figure(figsize=(7, 3.5))
-            plt.quiver(
-                position[:, 0],
-                position[:, 1],
-                velocity[:, 0],
-                velocity[:, 1],
-                np.linalg.norm(velocity, axis=1),
-                cmap="viridis",
-                scale=30,
-                width=0.0035,
-            )
-            plt.xlim(params.periodic_x_min, params.periodic_x_max)
-            plt.ylim(params.base_y, params.base_y + params.domain_height)
-            plt.xlabel("streamwise coordinate x [m]")
-            plt.ylabel("height above base y [m]")
-            plt.colorbar(label="speed [m/s]")
-            plt.tight_layout()
-            plt.savefig(output_dir / f"snapshot_{completed_steps:05d}.png", dpi=180)
-            plt.close()
 
         min_y = float(jnp.min(mp.position_stack[:, 1]))
         max_y = float(jnp.max(mp.position_stack[:, 1]))
@@ -462,49 +421,6 @@ def run_sim(
         )
 
     mp = state.world.material_points[0]
-    final_y, final_vx, final_counts = procedure.compute_velocity_profile(state)
-    _save_profile(
-        output_dir / "final_velocity_profile.csv",
-        final_y,
-        final_vx,
-        final_counts,
-    )
-
-    avg_y, avg_vx = procedure.compute_time_averaged_profile(steady_profiles)
-    if avg_y.size:
-        _save_profile(output_dir / "steady_velocity_profile.csv", avg_y, avg_vx)
-
-    np.savetxt(
-        output_dir / "mean_velocity.csv",
-        np.column_stack(
-            [history["time"], history["mean_speed"], history["mean_vx"]]
-        ),
-        delimiter=",",
-        header="time,mean_speed,mean_vx",
-        comments="",
-    )
-
-    if write_visuals and avg_y.size:
-        plt.figure(figsize=(6, 4))
-        plt.plot(avg_vx, avg_y, linewidth=2)
-        plt.xlabel("mean streamwise velocity [m/s]")
-        plt.ylabel("height above base [m]")
-        plt.tight_layout()
-        plt.savefig(output_dir / "steady_velocity_profile.png", dpi=180)
-        plt.close()
-
-    tail_start = max(0, int(0.8 * len(history["mean_vx"])))
-    tail_velocity = history["mean_vx"][tail_start:]
-    if len(tail_velocity) >= 2:
-        relative_tail_change = abs(tail_velocity[-1] - tail_velocity[0]) / max(
-            abs(tail_velocity[-1]), 1.0e-12
-        )
-        history["relative_tail_change"] = relative_tail_change
-        print(
-            f"Relative mean-vx change over final 20%: "
-            f"{relative_tail_change:.3%}"
-        )
-
     print(f"Final particle count: {mp.num_points}")
     print(f"Saved outputs to {output_dir}")
     return state, history
@@ -514,15 +430,29 @@ def _parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model",
-        choices=(
-            "drucker_prager",
-            "mu_i",
-            "mu_i_incompressible",
-            "mu_i_regularized",
-        ),
+        type=_canonical_model_name,
+        choices=MODEL_NAMES,
         default=ChuteParameters.constitutive_model,
     )
     parser.add_argument("--total-time", type=float, default=ChuteParameters.total_time)
+    parser.add_argument("--mu-i-alpha", type=float, default=ChuteParameters.mu_i_alpha)
+    parser.add_argument(
+        "--mu-i-regularization-rate",
+        type=float,
+        default=ChuteParameters.mu_i_regularization_rate,
+    )
+    parser.add_argument(
+        "--mu-i-static-regularization",
+        choices=("exp", "sr"),
+        default=ChuteParameters.mu_i_static_regularization,
+        help="Static-friction regularization: exponential or square-root form.",
+    )
+    parser.add_argument(
+        "--mu-i-viscosity-cfl",
+        type=float,
+        default=ChuteParameters.mu_i_viscosity_cfl,
+        help="Shared viscosity CFL coefficient for both mu(I) pressure models.",
+    )
     parser.add_argument(
         "--output-time", type=float, default=ChuteParameters.output_time
     )
@@ -536,6 +466,10 @@ if __name__ == "__main__":
     cli_params = replace(
         ChuteParameters(),
         constitutive_model=args.model,
+        mu_i_alpha=args.mu_i_alpha,
+        mu_i_regularization_rate=args.mu_i_regularization_rate,
+        mu_i_static_regularization=args.mu_i_static_regularization,
+        mu_i_viscosity_cfl=args.mu_i_viscosity_cfl,
         total_time=args.total_time,
         output_time=args.output_time,
     )

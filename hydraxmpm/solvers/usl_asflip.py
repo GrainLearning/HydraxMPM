@@ -82,7 +82,8 @@ class USLAFLIP(USLSolver):
     CFL Limiting clamps particle velocities to a fraction of cell_size/dt to ensure stability.
 
     Attributes:
-        alpha: Blending factor between FLIP and PIC updates (0.0 = pure FLIP, 1.0 = pure PIC) (default 0.99).
+        alpha: Blending factor between PIC and FLIP updates
+            (0.0 = pure PIC, 1.0 = pure FLIP; default 0.99).
         use_dynamic_alpha: Enables dynamic alpha scaling based on particle support (default True).
         alpha_support_min: Minimum particle support ratio for dynamic alpha scaling (default 1.1).
         alpha_support_max: Maximum particle support ratio for dynamic alpha scaling (default 1.5).
