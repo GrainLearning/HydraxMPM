@@ -32,37 +32,34 @@ from projects.granular_chute_flow.chute_flow import (
 )
 
 PROJECT_DIR = Path(__file__).resolve().parent
-REPOSITORY_DIR = PROJECT_DIR.parents[1]
 RESULTS_DIR = PROJECT_DIR / "results"
 LOCAL_FIGURES_DIR = RESULTS_DIR / "figures"
 AVERAGING_START = 8.0
 AVERAGING_END = 12.0
-PROFILE_FIGURE_WIDTH_IN = 7.0
+PROFILE_FIGURE_WIDTH_IN = 7.5
+HISTORY_END = 12.0
 CASES = (
-    # {
-    #     "name": "mu_i",
-    #     "legend": r"Compressible $\mu(I)$",
-    #     "directory": PROJECT_DIR / "mu_i",
-    #     "analyze": True,
-    #     "plot": True,
-    #     "plot_bagnold": True,
-    #     "layout_source": False,
-    # },
     {
-        "name": "mu_i_regularized",
-        "legend": r"$\mu(I)$",
-        "directory": PROJECT_DIR / "mu_i_regularized",
-        "analyze": True,
-        "plot": True,
+        "name": "mu_I_LC_sr",
+        "model": "mu_LC",
+        "legend": "Weakly comp.\n" + r"$\mu(I)$",
+        "directory": PROJECT_DIR / "mu_I_LC_sr",
         "plot_bagnold": True,
         "layout_source": True,
     },
     {
+        "name": "mu_I_IC_sr",
+        "model": "mu_IC",
+        "legend": "Incomp.\n" + r"$\mu(I)$",
+        "directory": PROJECT_DIR / "mu_I_IC_sr",
+        "plot_bagnold": True,
+        "layout_source": False,
+    },
+    {
         "name": "drucker_prager",
-        "legend": "Drucker--Prager",
+        "model": "drucker_prager",
+        "legend": "Drucker-Prager",
         "directory": PROJECT_DIR / "drucker_prager",
-        "analyze": True,
-        "plot": True,
         "plot_bagnold": False,
         "layout_source": False,
     },
@@ -302,21 +299,9 @@ def postprocess_case(
     averaging_start: float = AVERAGING_START,
     averaging_end: float = AVERAGING_END,
 ) -> bool:
-    """Generate histories and steady-window averages from raw particle snapshots.
-
-    Returns ``False`` for legacy result folders that contain only the already
-    derived products, and ``True`` when raw snapshots were processed.
-    """
+    """Generate histories and steady-window averages from raw particle snapshots."""
     snapshot_paths = sorted((output_dir / "particle_states").glob("step_*.npz"))
     if not snapshot_paths:
-        legacy_products = (
-            output_dir / "mean_velocity.csv",
-            output_dir / "steady_velocity_profile.csv",
-            output_dir / "steady_grid_fields.csv",
-            output_dir / "steady_grid_fields.npz",
-        )
-        if all(path.exists() for path in legacy_products):
-            return False
         raise FileNotFoundError(f"no raw particle snapshots found in {output_dir}")
 
     history = []
@@ -381,20 +366,35 @@ def load_and_validate_parameters(
     if not path.exists():
         raise FileNotFoundError(f"missing production parameters: {path}")
     saved = json.loads(path.read_text(encoding="utf-8"))
-    legacy_steady_fraction = saved.pop("steady_start_fraction", None)
-    if legacy_steady_fraction is not None and not np.isclose(
-        legacy_steady_fraction * saved["total_time"], AVERAGING_START
-    ):
-        raise ValueError(
-            f"{model} results do not use the {AVERAGING_START:g} s averaging start"
-        )
     if saved.get("total_time", 0.0) < AVERAGING_END:
         raise ValueError(
             f"{model} ends before the {AVERAGING_END:g} s averaging-window limit"
         )
     parameters = ChuteParameters(**saved)
-    expected_payload = asdict(ChuteParameters(constitutive_model=model))
+    if parameters.constitutive_model != model:
+        raise ValueError(
+            f"expected {model} results in {output_dir}, "
+            f"found {parameters.constitutive_model}"
+        )
+    expected_options = {"constitutive_model": model}
+    if model != "drucker_prager":
+        expected_options["mu_i_static_regularization"] = (
+            parameters.mu_i_static_regularization
+        )
+    expected_payload = asdict(ChuteParameters(**expected_options))
     compared_names = set(expected_payload) - {"total_time"}
+    mu_i_parameters = {
+        "mu_i_viscosity_cfl",
+        "mu_i_alpha",
+        "mu_i_regularization_rate",
+        "mu_i_static_regularization",
+    }
+    if parameters.constitutive_model == "drucker_prager":
+        compared_names -= mu_i_parameters
+    elif parameters.mu_i_static_regularization == "exp":
+        compared_names.discard("mu_i_alpha")
+    else:
+        compared_names.discard("mu_i_regularization_rate")
     if any(saved.get(name) != expected_payload[name] for name in compared_names):
         differences = {
             name: (saved.get(name, "<missing>"), expected_value)
@@ -415,23 +415,13 @@ def characterize_case(
     target_surface_velocity: float,
 ) -> CaseMetrics:
     """Measure surface speed and linear drift over the saved steady window."""
-    profile = load_csv(output_dir / "steady_velocity_profile.csv")
+    fields = load_csv(output_dir / "steady_grid_fields.csv")
     history = load_csv(output_dir / "mean_velocity.csv")
-    profile_names = set(profile.dtype.names or ())
     history_names = set(history.dtype.names or ())
-    if not {"y", "mean_vx"}.issubset(profile_names):
-        raise ValueError(f"invalid steady profile in {output_dir}")
     if not {"time", "mean_vx"}.issubset(history_names):
         raise ValueError(f"invalid velocity history in {output_dir}")
 
-    y = np.asarray(profile["y"], dtype=float)
-    velocity = np.asarray(profile["mean_vx"], dtype=float)
-    profile_mask = (
-        np.isfinite(y)
-        & np.isfinite(velocity)
-        & (y >= parameters.base_y)
-        & (y <= parameters.base_y + parameters.fill_depth)
-    )
+    _, velocity = grid_depth_profile(fields, "velocity_x", parameters)
     time = np.asarray(history["time"], dtype=float)
     mean_vx = np.asarray(history["mean_vx"], dtype=float)
     history_mask = (
@@ -440,10 +430,10 @@ def characterize_case(
         & (time >= AVERAGING_START - 1.0e-6)
         & (time <= AVERAGING_END + 1.0e-6)
     )
-    if not np.any(profile_mask) or np.count_nonzero(history_mask) < 2:
+    if not velocity.size or np.count_nonzero(history_mask) < 2:
         raise ValueError(f"insufficient finite steady-state data in {output_dir}")
 
-    surface_velocity = float(np.max(velocity[profile_mask]))
+    surface_velocity = float(velocity[-1])
     window_time = time[history_mask]
     window_velocity = mean_vx[history_mask]
     mean_velocity = float(np.mean(window_velocity))
@@ -515,10 +505,9 @@ def analyze_results(
     parameters: dict[str, ChuteParameters],
 ) -> dict[str, float]:
     """Analyze all configured cases and write their diagnostic metrics."""
-    analysis_cases = [case for case in CASES if case["analyze"]]
     case_metrics = {}
     grid_metrics = {}
-    for case in analysis_cases:
+    for case in CASES:
         name = case["name"]
         reference = make_bagnold_parameters(parameters[name])
         case_metrics[name] = characterize_case(
@@ -529,7 +518,7 @@ def analyze_results(
         grid_metrics[name] = analyze_grid_fields(case["directory"], name)
 
     diagnostics = {}
-    for case in analysis_cases:
+    for case in CASES:
         name = case["name"]
         metrics = case_metrics[name]
         diagnostics.update(
@@ -632,7 +621,7 @@ def plot_depth_profiles(
     fig, axes = plt.subplots(
         1,
         4,
-        figsize=(PROFILE_FIGURE_WIDTH_IN, 2.6),
+        figsize=(PROFILE_FIGURE_WIDTH_IN, 3.0),
         sharey=True,
     )
     axes[0].plot(sigma_yy, y, color="k", linewidth=1.0)
@@ -678,16 +667,134 @@ def plot_depth_profiles(
             handlelength=1.5,
         )
 
-    for ax in axes:
+    for panel, ax in zip("abcd", axes, strict=True):
         ax.set_ylim(parameters.base_y, surface_y)
         ax.set_frame_on(True)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
         ax.tick_params(axis="x", labelsize=9)
+        ax.text(
+            0.5,
+            1.1,
+            f"({panel})",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            fontweight="bold",
+            clip_on=False,
+        )
     axes[2].xaxis.set_major_locator(LinearLocator(2))
     axes[2].xaxis.set_major_formatter(FormatStrFormatter("%.4f"))
 
-    fig.tight_layout()
+    fig.subplots_adjust(
+        left=0.075,
+        right=0.99,
+        bottom=0.31,
+        top=0.98,
+        wspace=0.2,
+    )
     save_figure(fig, filename)
+
+
+def plot_combined_mu_i_depth_profiles(
+    parameters: dict[str, ChuteParameters],
+    volume_fraction_xlim: tuple[float, float],
+) -> None:
+    """Compare incompressible and weakly compressible mu(I) depth profiles."""
+    mu_i_cases = {
+        case["model"]: case for case in CASES if case["model"] in {"mu_LC", "mu_IC"}
+    }
+    if set(mu_i_cases) != {"mu_LC", "mu_IC"}:
+        raise ValueError("combined mu(I) profiles require one mu_LC and one mu_IC case")
+
+    profiles = {}
+    for model, case in mu_i_cases.items():
+        fields = load_csv(case["directory"] / "steady_grid_fields.csv")
+        case_parameters = parameters[case["name"]]
+        y, sigma_yy = grid_depth_profile(fields, "sigma_yy", case_parameters)
+        _, sigma_yx = grid_depth_profile(fields, "sigma_yx", case_parameters)
+        _, volume_fraction = grid_depth_profile(
+            fields, "volume_fraction", case_parameters
+        )
+        _, velocity = grid_depth_profile(fields, "velocity_x", case_parameters)
+        profiles[model] = (
+            y,
+            sigma_yy / 1.0e3,
+            sigma_yx / 1.0e3,
+            volume_fraction,
+            velocity,
+        )
+
+    reference_parameters = parameters[mu_i_cases["mu_IC"]["name"]]
+    reference = make_bagnold_parameters(reference_parameters)
+    reference_depth = np.linspace(0.0, reference.height, 401)
+    reference_velocity = evaluate_bagnold(reference_depth, reference)["velocity"]
+    reference_y = reference_parameters.base_y + reference_depth
+
+    fig, axes = plt.subplots(
+        1,
+        4,
+        figsize=(PROFILE_FIGURE_WIDTH_IN, 3.0),
+        sharey=True,
+    )
+    line_definitions = (
+        ("mu_IC", "Incomp.\n"+r"$\mu(I)$"),
+        ("mu_LC", "Weakly\ncomp.\n"+ r"$\mu(I)$"),
+    )
+    for model, label in line_definitions:
+        y, sigma_yy, sigma_yx, volume_fraction, velocity = profiles[model]
+        axes[0].plot(sigma_yy, y, linewidth=1.0)
+        axes[1].plot(sigma_yx, y, linewidth=1.0)
+        axes[2].plot(volume_fraction, y, linewidth=1.0)
+        axes[3].plot(velocity, y, linewidth=1.0, label=label)
+
+    axes[3].plot(
+        reference_velocity,
+        reference_y,
+        color="k",
+        linestyle="--",
+        linewidth=1.2,
+        label="Bagnold",
+    )
+    axes[0].set(xlabel=r"$\sigma_{yy}$ [kPa]", ylabel=r"$y$ [m]")
+    axes[1].set_xlabel(r"$\tau_{yx}$ [kPa]")
+    axes[2].set_xlabel(r"$\phi$ [-]")
+    axes[2].set_xlim(volume_fraction_xlim)
+    axes[3].set_xlabel(r"$v_x$ [m s$^{-1}$]")
+    axes[3].legend(
+        frameon=False,
+        loc="upper left",
+        fontsize=8,
+        handlelength=1.5,
+    )
+
+    surface_y = reference_parameters.base_y + reference_parameters.fill_depth
+    for panel, ax in zip("abcd", axes, strict=True):
+        ax.set_ylim(reference_parameters.base_y, surface_y)
+        ax.set_frame_on(True)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=3))
+        ax.tick_params(axis="x", labelsize=8)
+        ax.text(
+            0.5,
+            1.1,
+            f"({panel})",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            fontweight="bold",
+            clip_on=False,
+        )
+    axes[2].xaxis.set_major_locator(LinearLocator(2))
+    axes[2].xaxis.set_major_formatter(FormatStrFormatter("%.4f"))
+    fig.subplots_adjust(
+        left=0.075,
+        right=0.99,
+        bottom=0.31,
+        top=0.98,
+        wspace=0.2,
+    )
+    save_figure(fig, "chute_mu_i_depth_profiles.png")
 
 
 def shared_volume_fraction_limits(
@@ -696,8 +803,6 @@ def shared_volume_fraction_limits(
     """Return one padded packing-fraction range for configured depth plots."""
     values = []
     for case in CASES:
-        if not case["plot"]:
-            continue
         name = case["name"]
         fields = load_csv(case["directory"] / "steady_grid_fields.csv")
         surface_y = parameters[name].base_y + parameters[name].fill_depth
@@ -791,6 +896,61 @@ def plot_layout(parameters: ChuteParameters) -> None:
     save_figure(fig, "chute_layout.png")
 
 
+def plot_mean_horizontal_velocity_history(
+    parameters: dict[str, ChuteParameters],
+) -> None:
+    """Plot configured mean streamwise-velocity histories through 12 seconds."""
+    fig, ax = plt.subplots(figsize=(4.0, 3.0))
+    legend_labels = {
+        "mu_LC": r"Weakly compressible $\mu(I)$",
+        "mu_IC": r"Incompressible $\mu(I)$",
+        "drucker_prager": r"Drucker-Prager",
+    }
+    for case in CASES:
+        history = load_csv(case["directory"] / "mean_velocity.csv")
+        if not {"time", "mean_vx"}.issubset(history.dtype.names or ()):
+            raise ValueError(f"invalid velocity history in {case['directory']}")
+        time = np.asarray(history["time"], dtype=float)
+        mean_vx = np.asarray(history["mean_vx"], dtype=float)
+        valid = (
+            np.isfinite(time)
+            & np.isfinite(mean_vx)
+            & (time >= 0.0)
+            & (time <= HISTORY_END + 1.0e-6)
+        )
+        if not np.any(valid):
+            raise ValueError(
+                f"no finite velocity history through {HISTORY_END:g} s "
+                f"in {case['directory']}"
+            )
+        order = np.argsort(time[valid])
+        ax.plot(
+            time[valid][order],
+            mean_vx[valid][order],
+            linewidth=1.2,
+            label=legend_labels.get(case["name"], case["name"]),
+        )
+
+    reference_case = next(case for case in CASES if case["layout_source"])
+    reference = make_bagnold_parameters(parameters[reference_case["name"]])
+    ax.axhline(
+        reference.mean_velocity,
+        color="black",
+        linestyle="--",
+        linewidth=1.2,
+        label="Bagnold",
+    )
+    ax.axvspan(AVERAGING_START, AVERAGING_END, color="0.92", zorder=-1)
+    ax.set(
+        xlabel="Time [s]",
+        ylabel=r"Mean $v_x$ [m s$^{-1}$]",
+        xlim=(0.0, HISTORY_END),
+    )
+    ax.grid(True, linestyle="--", linewidth=0.7)
+    ax.legend(frameon=False, loc="lower right")
+    save_figure(fig, "chute_mean_horizontal_velocity.png")
+
+
 def structured_field(
     data: np.ndarray,
     name: str,
@@ -863,9 +1023,9 @@ def generate_figures(parameters: dict[str, ChuteParameters]) -> None:
         raise ValueError("exactly one configured case must be the layout source")
     layout_name = layout_cases[0]["name"]
     plot_layout(parameters[layout_name])
+    plot_mean_horizontal_velocity_history(parameters)
 
-    plot_cases = [case for case in CASES if case["plot"]]
-    for case in plot_cases:
+    for case in CASES:
         name = case["name"]
         fields = load_csv(case["directory"] / "steady_grid_fields.csv")
         plot_velocity_field(
@@ -874,7 +1034,7 @@ def generate_figures(parameters: dict[str, ChuteParameters]) -> None:
             f"chute_{name}_velocity_field.png",
         )
     volume_fraction_xlim = shared_volume_fraction_limits(parameters)
-    for case in plot_cases:
+    for case in CASES:
         name = case["name"]
         plot_depth_profiles(
             case["directory"],
@@ -884,26 +1044,21 @@ def generate_figures(parameters: dict[str, ChuteParameters]) -> None:
             f"chute_{name}_depth_profiles.png",
             volume_fraction_xlim,
         )
+    plot_combined_mu_i_depth_profiles(parameters, volume_fraction_xlim)
 
 
 def main() -> None:
-    active_cases = [
-        case
-        for case in CASES
-        if case["analyze"] or case["plot"] or case["layout_source"]
-    ]
     parameters = {
-        case["name"]: load_and_validate_parameters(case["directory"], case["name"])
-        for case in active_cases
+        case["name"]: load_and_validate_parameters(case["directory"], case["model"])
+        for case in CASES
     }
-    for case in active_cases:
+    for case in CASES:
         postprocess_case(case["directory"], parameters[case["name"]])
     metrics = analyze_results(parameters)
     generate_figures(parameters)
     drift_summary = ", ".join(
         f"{case['legend']} drift=" f"{metrics[case['name'] + '_relative_drift']:.3%}"
         for case in CASES
-        if case["analyze"]
     )
     print(f"Postprocessed configured results: {drift_summary}")
 
