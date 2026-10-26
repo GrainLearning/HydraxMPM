@@ -57,7 +57,7 @@ class USLSolver(BaseSolver):
 
 
     Attributes:
-        alpha: Blending factor between FLIP and PIC updates (0.0 = FLIP, 1.0 = PIC).
+        alpha: Blending factor between PIC and FLIP updates (0.0 = PIC, 1.0 = FLIP).
         grid_domains: Spatial-computational spaces for grids.
         couplings: Defines how material connect to the spaces.
         constitutive_laws: Tuple of ConstitutiveLaw instances for material behavior.
@@ -492,6 +492,7 @@ class USLSolver(BaseSolver):
                 weighted_moment_stack
             )
 
+            #FIXME: @Retief: initializing zero moment_stack overwrites the grid force stack, which is not correct. We should add to the existing force stack instead of overwriting it.
             grid_force_stack = (
                 jnp.zeros_like(grid_cache.moment_stack)
                 .at[intr_cache.node_hashes]
@@ -668,12 +669,12 @@ class USLSolver(BaseSolver):
 
             # Outer product to find velocity gradients (n_intr, 3, 3)
             # As L_ij = v_i * grad_j
-            # compression positive convention for L, 
+            # compression positive convention for L,
             weighted_L = jnp.einsum(
                 "ij,ik->ijk", intr_cache.shape_grads, -intr_vels_nt_3d
             )
 
-  
+
             # Particle velocity differences on grid
             p_delta_vel = (
                 jnp.zeros((mp_state.num_points, grid_cache.dim))

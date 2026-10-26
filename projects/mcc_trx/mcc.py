@@ -5,8 +5,12 @@ import jax
 
 # Use CPU for this example
 jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_enable_x64", True)
 
 import os
+import sys
+
+import numpy as np
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,9 +27,9 @@ confine = 10_000.0  # kPa
 axial_rate = 0.02  # 2/s
 num_steps = 10000
 dt = 0.01  # s
-is_undrained = False 
+is_undrained = "--undrained" in sys.argv
 ocr = 1.0  # overconsolidation ratio (OCR) for initial state
-kPa = 1_000 
+kPa = 1_000
 
 ###########################################################################
 # Setup MCC logic and state
@@ -51,11 +55,11 @@ driver = hdx.ElementTestDriver(mcc)
 
 triaxial_test = hdx.TriaxialTest(
     solver=driver,
-    confine=confine, 
+    confine=confine,
     is_undrained=is_undrained,
-    axial_rate=axial_rate, 
+    axial_rate=axial_rate,
     num_steps=num_steps,
-    dt=dt,  
+    dt=dt,
 )
 
 
@@ -65,13 +69,42 @@ mp_state = hdx.MaterialPointState.create(
 
 
 ###########################################################################
-# Run the triaxial test 
+# Run the triaxial test
 ###########################################################################
 
 
 jitted_triax = jax.jit(triaxial_test.run)
 
 mp_traj, law_traj = jitted_triax(mp_init=mp_state, law_init=law_state)
+
+# Export the histories consumed by compare_mcc.py.
+mode = "undrained" if is_undrained else "drained"
+output_path = os.path.join(base_path, "benchmark_data")
+os.makedirs(output_path, exist_ok=True)
+stack = lambda initial, history: np.concatenate((np.asarray(initial), np.asarray(history)))
+stress_history = stack(stress_ref_stack, mp_traj.stress_stack)
+elastic_strain_history = stack(law_state.eps_e_stack, law_traj.eps_e_stack)
+radial_increment = np.asarray(mp_traj.L_stack[:, 0, 0]) * dt
+radial_strain = np.concatenate(([0.0], np.cumsum(radial_increment)))
+axial_strain = np.arange(num_steps + 1) * axial_rate * dt
+np.savetxt(
+    os.path.join(output_path, f"mcc_numerical_{mode}.csv"),
+    np.column_stack((
+        axial_strain, radial_strain,
+        np.r_[0.0, np.full(num_steps, axial_rate * dt)],
+        np.r_[0.0, radial_increment],
+        np.trace(stress_history, axis1=1, axis2=2) / 3,
+        stack(mp_state.q_stack, mp_traj.q_stack),
+        stack(mp_state.eps_v_stack, mp_traj.eps_v_stack),
+        mcc.rho_p / stack(mp_state.density_stack, mp_traj.density_stack),
+        stack(law_state.p_c_stack, law_traj.p_c_stack),
+        *np.moveaxis(stress_history[:, :3, :3].diagonal(axis1=1, axis2=2), 1, 0),
+        *np.moveaxis(elastic_strain_history[:, :3, :3].diagonal(axis1=1, axis2=2), 1, 0),
+    )),
+    delimiter=",",
+    header="axial_strain,radial_strain,axial_increment,radial_increment,pressure_Pa,q_Pa,volumetric_strain,specific_volume,pc_Pa,stress_xx_Pa,stress_yy_Pa,stress_zz_Pa,eps_e_xx,eps_e_yy,eps_e_zz",
+    comments="",
+)
 
 # DEBUG
 # verify Δq/Δp=0
@@ -166,4 +199,3 @@ else:
 
 
 plt.savefig(os.path.join(base_path, "mcc_triax.png"), dpi=300)
-

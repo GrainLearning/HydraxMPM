@@ -164,7 +164,7 @@ class Gravity(Force):
                 (mp_state.force_stack + gravity_impulse),
             )
 
-            mp_states[self.p_idx] = mp_state
+            mp_states[p_idx] = mp_state
 
         f_states[self.f_idx] = f_state
 

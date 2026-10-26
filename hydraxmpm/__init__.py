@@ -49,10 +49,10 @@ from .constitutive_laws.constitutive_law import (
 
 from .constitutive_laws.newtonfluid import NewtonFluid, NewtonFluidState
 from .constitutive_laws.mu_i_rheology import (
-    MuI_Incompressible,
+    MuI_IC,
     MuIIncompressibleState,
     MuI_LC,
-    MuI_regularized,
+    MuI_IC_regularized,
     MuIState,
 )
 from .constitutive_laws.modifiedcamclay import ModifiedCamClay, ModifiedCamClayState
