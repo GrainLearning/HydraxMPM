@@ -30,10 +30,15 @@ TOTAL_TIME = 0.5
 OUTPUT_TIME = 0.05
 
 
-def compute_dp_mu(fric_angle_deg: float | jnp.ndarray) -> jnp.ndarray:
-    """Compute Drucker–Prager friction coefficient from friction angle (deg)."""
+def compute_dp_coefficients(
+    fric_angle_deg: float | jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Map Mohr–Coulomb friction/cohesion to the triaxial-extension DP cone."""
     fric_angle_rad = jnp.deg2rad(fric_angle_deg)
-    return 6.0 * jnp.sin(fric_angle_rad) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(fric_angle_rad)))
+    denominator = jnp.sqrt(3.0) * (3.0 + jnp.sin(fric_angle_rad))
+    mu_1 = 6.0 * jnp.sin(fric_angle_rad) / denominator
+    mu_2 = 6.0 * jnp.cos(fric_angle_rad) / denominator
+    return mu_1, mu_2
 
 
 def compute_global_measures(sim_state: Any) -> dict[str, jnp.ndarray]:
@@ -133,12 +138,12 @@ def simulate_collapse(
     num_particles = position_stack.shape[0]
 
     density_stack = jnp.full((num_particles,), 2650.0)
-    mu = compute_dp_mu(fric_angle)
+    mu_1, mu_2 = compute_dp_coefficients(fric_angle)
     law = hdx.DruckerPrager(
         nu=0.3,
         K=7e5,
-        mu_1=mu,
-        mu_2=mu,
+        mu_1=mu_1,
+        mu_2=mu_2,
         c0=c0,
         rho_0=2650.0,
     )

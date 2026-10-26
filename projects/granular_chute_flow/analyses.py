@@ -928,7 +928,7 @@ def plot_mean_horizontal_velocity_history(
             time[valid][order],
             mean_vx[valid][order],
             linewidth=1.2,
-            label=legend_labels.get(case["name"], case["name"]),
+            label=legend_labels[case["model"]],
         )
 
     reference_case = next(case for case in CASES if case["layout_source"])

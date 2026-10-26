@@ -121,6 +121,11 @@ class ChuteParameters:
         phi = jnp.deg2rad(self.friction_angle_deg)
         return 6.0 * jnp.sin(phi) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(phi)))
 
+    @property
+    def drucker_prager_mu_2(self) -> jax.Array:
+        phi = jnp.deg2rad(self.friction_angle_deg)
+        return 6.0 * jnp.cos(phi) / (jnp.sqrt(3.0) * (3.0 + jnp.sin(phi)))
+
 
 class ChuteProcedure:
     def __init__(self, params: ChuteParameters | None = None):
@@ -216,7 +221,8 @@ class ChuteProcedure:
             law = hdx.DruckerPrager(
                 nu=0.3,
                 K=params.bulk_modulus,
-                mu_1=jnp.tan(jnp.deg2rad(params.friction_angle_deg)),
+                mu_1=params.drucker_prager_mu,
+                mu_2=params.drucker_prager_mu_2,
                 rho_0=params.separation_density_ratio * params.bulk_density,
             )
             law_state = law.create_state(stress_stack=stress)

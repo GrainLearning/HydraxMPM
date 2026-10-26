@@ -492,6 +492,7 @@ class USLSolver(BaseSolver):
                 weighted_moment_stack
             )
 
+            #FIXME: @Retief: initializing zero moment_stack overwrites the grid force stack, which is not correct. We should add to the existing force stack instead of overwriting it.
             grid_force_stack = (
                 jnp.zeros_like(grid_cache.moment_stack)
                 .at[intr_cache.node_hashes]
